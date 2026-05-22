@@ -68,4 +68,37 @@ components/
 - `POPULARITY_FILTERS` in `constants/Filters.ts` is defined but not shown in the filter UI
 - `useColorScheme.web.ts` always returns `'light'` — dark mode browsers won't get the dark theme on web
 - Search results have no pagination (TMDB supports it, just not exposed)
-- OAuth debug logs (`console.log` in `lib/auth/oauth.ts`) should be removed before production
+
+## Security
+
+### Required: Row Level Security on `saved_items`
+
+The Supabase queries in `lib/storage/saved.ts` do not include explicit `user_id` filters — they rely on RLS to enforce per-user isolation at the database level. **Without RLS turned on, every signed-in user can read and delete every other user's saved items.**
+
+The policies are defined in `supabase/rls.sql`. Apply them once via Supabase Dashboard → SQL Editor. The file has step-by-step instructions and verification queries.
+
+### Client-exposed env vars
+
+All 4 env vars are `EXPO_PUBLIC_*`, which means Expo bakes their values into the JavaScript bundle that ships to the browser. Anyone viewing the deployed site's source can read them. Implications:
+
+| Var | Risk if exposed | Mitigation |
+|-----|-----------------|------------|
+| `EXPO_PUBLIC_SUPABASE_URL` | None — meant to be public | None needed |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Only as dangerous as the RLS policies | Keep RLS strict (above) |
+| `EXPO_PUBLIC_TMDB_API_KEY` | Attacker can burn your rate limit | Restrict key by domain in TMDB settings; long-term, proxy via backend |
+| `EXPO_PUBLIC_DISCOGS_TOKEN` | Personal access token — full account access | Move to backend proxy before sharing widely |
+
+### Deferred security work
+
+Tracked here so future sessions remember (see plan file `ah-i-see-okay-linear-creek.md` for full context):
+
+**Before sharing the app widely:**
+- Restrict TMDB API key to the netlify.app domain
+- Switch mobile session storage from AsyncStorage to `expo-secure-store` (Keychain / Android Keystore)
+- Add input length/character validation in `lib/api/*.ts` search functions
+- Drop the implicit-flow fallback in `lib/auth/oauth.ts` (lines ~38-51) — PKCE alone is sufficient
+
+**Once the app has real users:**
+- Build a backend proxy (Cloudflare Worker / Supabase Edge Function) to hold TMDB + Discogs keys server-side
+- Add Sentry (`@sentry/react-native`) for crash reporting; replace raw error messages in `Alert.alert` with generic copy
+- Client-side rate limiting / debounce on search
