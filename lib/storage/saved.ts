@@ -62,6 +62,9 @@ function key(category: ContentCategory, id: string): string {
 export async function listSaved(): Promise<SavedItem[]> {
   const userId = await getUserId();
   if (!userId) return sortNewestFirst(await readLocal());
+  // No `.eq('user_id', userId)` filter here on purpose — Supabase RLS
+  // enforces per-user isolation at the DB level. See supabase/rls.sql.
+  // If you turn off RLS, this query will leak every user's saved items.
   const { data, error } = await supabase
     .from('saved_items')
     .select('category,item_id,title,subtitle,meta,image_url,saved_at')
@@ -101,7 +104,7 @@ export async function addSaved(
       },
       { onConflict: 'user_id,category,item_id' }
     );
-    if (error) console.warn('saved_items upsert failed', error.message);
+    if (__DEV__ && error) console.warn('saved_items upsert failed', error.message);
     return listSaved();
   }
   return sortNewestFirst(await readLocal());
@@ -121,7 +124,7 @@ export async function removeSaved(
       .delete()
       .eq('category', category)
       .eq('item_id', id);
-    if (error) console.warn('saved_items delete failed', error.message);
+    if (__DEV__ && error) console.warn('saved_items delete failed', error.message);
     return listSaved();
   }
   return sortNewestFirst(next);
@@ -148,5 +151,5 @@ export async function syncLocalToCloud(): Promise<void> {
   const { error } = await supabase
     .from('saved_items')
     .upsert(rows, { onConflict: 'user_id,category,item_id', ignoreDuplicates: true });
-  if (error) console.warn('saved_items bulk sync failed', error.message);
+  if (__DEV__ && error) console.warn('saved_items bulk sync failed', error.message);
 }

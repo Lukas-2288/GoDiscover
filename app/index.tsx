@@ -23,7 +23,6 @@ import {
   GENRE_FILTERS,
   ERA_FILTERS,
   RATING_FILTERS,
-  POPULARITY_FILTERS,
 } from "../constants/Filters";
 import {
   searchMovies,
@@ -91,69 +90,13 @@ const useTheme = () => {
   return ctx;
 };
 
-// Placeholder results until APIs are connected
-const MOCK_RESULTS: Record<string, { title: string; subtitle: string; meta: string }[]> = {
-  artists: [
-    { title: "Arctic Monkeys", subtitle: "Indie Rock", meta: "21M listeners" },
-    { title: "Tame Impala", subtitle: "Psychedelic Rock", meta: "18M listeners" },
-    { title: "Khruangbin", subtitle: "Funk / Psychedelic", meta: "5M listeners" },
-    { title: "Mac DeMarco", subtitle: "Indie / Lo-fi", meta: "8M listeners" },
-    { title: "Hiatus Kaiyote", subtitle: "Neo-Soul / Jazz", meta: "2M listeners" },
-  ],
-  albums: [
-    { title: "In Rainbows", subtitle: "Radiohead", meta: "2007" },
-    { title: "Blonde", subtitle: "Frank Ocean", meta: "2016" },
-    { title: "Currents", subtitle: "Tame Impala", meta: "2015" },
-    { title: "IGOR", subtitle: "Tyler, The Creator", meta: "2019" },
-    { title: "Vespertine", subtitle: "Bjork", meta: "2001" },
-  ],
-  books: [
-    { title: "Dune", subtitle: "Frank Herbert", meta: "⭐ 4.2" },
-    { title: "Project Hail Mary", subtitle: "Andy Weir", meta: "⭐ 4.5" },
-    { title: "Piranesi", subtitle: "Susanna Clarke", meta: "⭐ 4.3" },
-    { title: "Circe", subtitle: "Madeline Miller", meta: "⭐ 4.4" },
-    { title: "The Midnight Library", subtitle: "Matt Haig", meta: "⭐ 3.9" },
-  ],
-  movies: [
-    { title: "Everything Everywhere All at Once", subtitle: "Sci-Fi / Comedy", meta: "⭐ 8.0" },
-    { title: "Parasite", subtitle: "Thriller / Drama", meta: "⭐ 8.5" },
-    { title: "Interstellar", subtitle: "Sci-Fi / Adventure", meta: "⭐ 8.7" },
-    { title: "The Grand Budapest Hotel", subtitle: "Comedy / Drama", meta: "⭐ 8.1" },
-    { title: "Whiplash", subtitle: "Drama / Music", meta: "⭐ 8.5" },
-  ],
-};
+// TODO (future refactoring):
+// - This file is ~2,500 lines. Extract ResultCard, FilterSection, DetailModal,
+//   AuthModal, RecentsList into separate files under components/
+// - Wire up POPULARITY_FILTERS from constants/Filters.ts into the filter UI
+// - Add pagination to search results (tmdb.ts already supports it)
+// - Fix useColorScheme.web.ts — currently always returns 'light' even in dark-mode browsers
 
-// Detailed info for modal (placeholder until APIs)
-const MOCK_DETAILS: Record<string, Record<string, any>> = {
-  artists: {
-    "Arctic Monkeys": { genre: "Indie Rock", listeners: "21M monthly listeners", origin: "Sheffield, UK", active: "2002 – present", topTracks: ["Do I Wanna Know?", "R U Mine?", "505", "Why'd You Only Call Me When You're High?", "I Bet You Look Good on the Dancefloor"] },
-    "Tame Impala": { genre: "Psychedelic Rock", listeners: "18M monthly listeners", origin: "Perth, Australia", active: "2007 – present", topTracks: ["The Less I Know the Better", "Let It Happen", "Borderline", "New Person, Same Old Mistakes", "Feels Like We Only Go Backwards"] },
-    "Khruangbin": { genre: "Funk / Psychedelic", listeners: "5M monthly listeners", origin: "Houston, TX", active: "2010 – present", topTracks: ["Time (You and I)", "Evan Finds the Third Room", "Friday Morning", "People Everywhere", "Two Fish and an Elephant"] },
-    "Mac DeMarco": { genre: "Indie / Lo-fi", listeners: "8M monthly listeners", origin: "Edmonton, Canada", active: "2006 – present", topTracks: ["Chamber of Reflection", "My Old Man", "Freaking Out the Neighborhood", "Still Beating", "Let Her Go"] },
-    "Hiatus Kaiyote": { genre: "Neo-Soul / Jazz", listeners: "2M monthly listeners", origin: "Melbourne, Australia", active: "2011 – present", topTracks: ["Get Sun", "Red Room", "Breathing Underwater", "Nakamarra", "Molasses"] },
-  },
-  albums: {
-    "In Rainbows": { artist: "Radiohead", year: "2007", genre: "Alternative Rock", rating: "9.3", tracks: 10, description: "Radiohead's seventh album, celebrated for its emotional depth, innovative sound design, and the band's pioneering pay-what-you-want release model." },
-    "Blonde": { artist: "Frank Ocean", year: "2016", genre: "R&B / Art Pop", rating: "9.0", tracks: 17, description: "Frank Ocean's acclaimed sophomore album, a deeply personal and experimental exploration of love, identity, and memory." },
-    "Currents": { artist: "Tame Impala", year: "2015", genre: "Psychedelic Pop", rating: "8.8", tracks: 13, description: "A bold shift from guitar-driven psych-rock to lush, synth-heavy pop. Kevin Parker's most accessible and emotionally resonant work." },
-    "IGOR": { artist: "Tyler, The Creator", year: "2019", genre: "Neo-Soul / Synth Pop", rating: "8.5", tracks: 12, description: "A concept album about unrequited love, blending soul, funk, and hip-hop into a cohesive narrative with striking visual identity." },
-    "Vespertine": { artist: "Bjork", year: "2001", genre: "Electronic / Art Pop", rating: "8.7", tracks: 12, description: "An intimate, wintry album built on microbeats, music boxes, and choral arrangements. One of Bjork's most delicate works." },
-  },
-  books: {
-    "Dune": { author: "Frank Herbert", year: "1965", pages: 412, genre: "Sci-Fi", rating: "4.2", description: "Set in a distant future where noble houses control planetary fiefs, Dune tells the story of Paul Atreides as he navigates politics, religion, and ecology on the desert planet Arrakis." },
-    "Project Hail Mary": { author: "Andy Weir", year: "2021", pages: 476, genre: "Sci-Fi", rating: "4.5", description: "A lone astronaut must save Earth from an extinction-level threat. A gripping tale of science, friendship, and survival across the stars." },
-    "Piranesi": { author: "Susanna Clarke", year: "2020", pages: 272, genre: "Fantasy", rating: "4.3", description: "A mysterious, labyrinthine world of endless halls, ocean tides, and living statues. A haunting exploration of memory, identity, and wonder." },
-    "Circe": { author: "Madeline Miller", year: "2018", pages: 393, genre: "Fantasy / Mythology", rating: "4.4", description: "The story of Circe, the witch of Greek mythology, reimagined as a feminist tale of power, transformation, and self-discovery." },
-    "The Midnight Library": { author: "Matt Haig", year: "2020", pages: 304, genre: "Fiction", rating: "3.9", description: "Between life and death lies a library where every book offers a chance to live a different life. A moving exploration of regret, hope, and second chances." },
-  },
-  movies: {
-    "Everything Everywhere All at Once": { director: "Daniel Kwan, Daniel Scheinert", year: "2022", genre: "Sci-Fi / Comedy", rating: "8.0", runtime: "139 min", description: "A Chinese-American woman is swept up in an insane adventure where she alone can save existence by exploring other universes and connecting with the lives she could have led." },
-    "Parasite": { director: "Bong Joon-ho", year: "2019", genre: "Thriller / Drama", rating: "8.5", runtime: "132 min", description: "A poor family schemes to become employed by a wealthy family, infiltrating their household one by one. A masterful blend of dark comedy and social commentary." },
-    "Interstellar": { director: "Christopher Nolan", year: "2014", genre: "Sci-Fi / Adventure", rating: "8.7", runtime: "169 min", description: "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival as Earth becomes uninhabitable." },
-    "The Grand Budapest Hotel": { director: "Wes Anderson", year: "2014", genre: "Comedy / Drama", rating: "8.1", runtime: "99 min", description: "A writer encounters the owner of an aging luxury hotel, who tells of his early years serving as lobby boy and his friendship with a legendary concierge." },
-    "Whiplash": { director: "Damien Chazelle", year: "2014", genre: "Drama / Music", rating: "8.5", runtime: "107 min", description: "A young jazz drummer enrolled at a prestigious music conservatory finds himself under the wing of a terrifying, abusive instructor who will stop at nothing to realize a student's potential." },
-  },
-};
 
 const CATEGORY_ICONS: Record<string, { name: string; family: string }> = {
   artists: { name: "microphone", family: "FontAwesome" },
@@ -595,11 +538,6 @@ export default function HomeScreen() {
     } catch {}
   };
 
-  const toResultItems = (
-    arr: { title: string; subtitle: string; meta: string }[]
-  ): ResultItem[] =>
-    arr.map((r, i) => ({ id: `${r.title}-${i}`, ...r }));
-
   const runAction = async (action: "search" | "filter" | "randomize") => {
     if (!selected || loading) return;
     if (action === "search" && !searchQuery.trim()) return;
@@ -672,8 +610,6 @@ export default function HomeScreen() {
               : await filterAlbums(params)
           );
         }
-      } else {
-        setResults(toResultItems(MOCK_RESULTS[selected]));
       }
     } catch (e: any) {
       Alert.alert("Error", e.message ?? "Something went wrong");
