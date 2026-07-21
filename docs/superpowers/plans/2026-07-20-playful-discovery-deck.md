@@ -1680,7 +1680,7 @@ git commit -m "feat: coordinate discovery deck actions"
 
 **Interfaces:**
 - Consumes: `useDiscoveryController`, `CategoryPicker`, `DiscoveryControls`, `SwipeDeck`, `DiscoveryStatusCard`, `UndoNotice`, `DiscoveryAnnouncer`, and `useReducedMotion`.
-- Produces: a working deck-first home route while temporarily retaining the existing detail modal until Task 10.
+- Produces: a working deck-first home route while temporarily retaining the existing detail modal layout until Task 10; automatic Similar loading is removed in this task so the global explicit-Similar constraint is never violated.
 
 - [ ] **Step 1: Write a failing home-flow integration test**
 
@@ -1880,7 +1880,7 @@ Render the deck and feedback:
 <DiscoveryAnnouncer message={announcement} />
 ```
 
-Keep the existing header, Saved, How to Use, Account, auth, theme, and detail modal behavior at this checkpoint. Recents remain backed by `lib/storage/recents.ts`, but render them only while the expanded category chooser is visible and no active category deck/request is present; they must not appear between discovery controls and an active deck.
+Keep the existing header, Saved, How to Use, Account, auth, theme, and detail modal layout at this checkpoint. Remove the detail effect's `getSimilar*` branch and the Similar carousel so opening a detail cannot perform a related-content request; the explicit detail-sheet Similar action arrives in Task 10. Recents remain backed by `lib/storage/recents.ts`, but render them only while the expanded category chooser is visible and no active category deck/request is present; they must not appear between discovery controls and an active deck.
 
 - [ ] **Step 5: Retire the old reducer through a compatibility export**
 
@@ -1932,7 +1932,7 @@ git commit -m "feat: make discovery deck the primary experience"
 
 Extend `app/__tests__/index.test.tsx`. Mock `loadDetail` to return a tagged movie detail and keep `loadDiscovery` as a Jest mock. Run the initial category/Surprise flow, press the accessible card labeled with Arrival, and assert `loadDiscovery` has still been called only for Randomize. Then press `Find similar` inside the sheet and assert the next request has mode `similar` with Arrival as its seed. Also assert the raw provider's `getSimilarMovies` function is never imported or called by detail loading.
 
-- [ ] **Step 2: Run the integration test and verify automatic Similar currently fails it**
+- [ ] **Step 2: Run the integration test and verify the old modal lacks explicit Similar**
 
 Run:
 
@@ -1940,7 +1940,7 @@ Run:
 npm test -- --runTestsByPath app/__tests__/index.test.tsx
 ```
 
-Expected: FAIL because the current detail effect automatically starts the category's Similar fetch and the old modal renders a Similar carousel.
+Expected: FAIL because Task 9 removed automatic Similar loading, but the retained old modal does not yet expose the explicit `Find similar` action or category-tagged detail state required by this task.
 
 - [ ] **Step 3: Give the deck an imperative active-card focus handle**
 
@@ -1979,7 +1979,7 @@ On ordinary close, clear selection/detail/error and call `deckRef.current?.focus
 
 - [ ] **Step 6: Delete automatic Similar and obsolete detail code**
 
-Remove all `getSimilar*` imports from `app/index.tsx`, `similarItems` state, automatic Similar promises, Similar carousel JSX/styles, four separate detail states, and the old detail modal styles no longer shared by other overlays. Do not remove `modalOverlay`, `modalContent`, or `modalClose` until `rg` confirms Saved, Account, and How to Use no longer use them.
+Confirm `app/index.tsx` has no `getSimilar*` imports, `similarItems` state, automatic Similar promises, or Similar carousel JSX/styles after Task 9. Remove the four separate detail states and the old detail modal styles no longer shared by other overlays. Do not remove `modalOverlay`, `modalContent`, or `modalClose` until `rg` confirms Saved, Account, and How to Use no longer use them.
 
 - [ ] **Step 7: Run detail, route, full, and type verification**
 
