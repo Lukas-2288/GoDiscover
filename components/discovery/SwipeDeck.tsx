@@ -73,15 +73,15 @@ export function SwipeDeck({
       setCommitting(true);
       const item = activeItem;
 
-      const finish = () => {
+      const finish = ({ finished }: { finished: boolean }) => {
         pan.setValue({ x: 0, y: 0 });
         commitLocked.current = false;
         setCommitting(false);
-        onCommit(item, decision, source);
+        if (finished) onCommit(item, decision, source);
       };
 
       if (reducedMotion) {
-        finish();
+        finish({ finished: true });
         return;
       }
 

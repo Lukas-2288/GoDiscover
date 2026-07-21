@@ -26,3 +26,30 @@ it("tracks changes and removes its subscription", async () => {
   unmount();
   expect(remove).toHaveBeenCalledTimes(1);
 });
+
+it("keeps a newer live event when the startup snapshot resolves later", async () => {
+  let resolveSnapshot: ((enabled: boolean) => void) | undefined;
+  let onChange: ((enabled: boolean) => void) | undefined;
+  const snapshot = new Promise<boolean>((resolve) => {
+    resolveSnapshot = resolve;
+  });
+  jest.spyOn(AccessibilityInfo, "isReduceMotionEnabled").mockReturnValue(snapshot);
+  jest.spyOn(AccessibilityInfo, "addEventListener").mockImplementation(
+    ((_event: string, handler: (enabled: boolean) => void) => {
+      onChange = handler;
+      return { remove: jest.fn() };
+    }) as unknown as typeof AccessibilityInfo.addEventListener
+  );
+
+  const { result } = renderHook(() => useReducedMotion());
+
+  act(() => onChange?.(true));
+  expect(result.current).toBe(true);
+
+  await act(async () => {
+    resolveSnapshot?.(false);
+    await snapshot;
+  });
+
+  expect(result.current).toBe(true);
+});

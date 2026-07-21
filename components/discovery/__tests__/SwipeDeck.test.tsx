@@ -86,6 +86,32 @@ it("guards against two decisions before the exit animation completes", () => {
   expect(onCommit).toHaveBeenCalledWith(movie, "save", "button");
 });
 
+it("does not commit an interrupted exit and unlocks for a retry", () => {
+  const completions: Animated.EndCallback[] = [];
+  const resetPan = jest.spyOn(Animated.ValueXY.prototype, "setValue");
+  jest.spyOn(Animated, "timing").mockImplementation(
+    (() => ({
+      start: (callback?: Animated.EndCallback) => {
+        if (callback) completions.push(callback);
+      },
+      stop: jest.fn(),
+      reset: jest.fn(),
+    })) as typeof Animated.timing
+  );
+  const onCommit = jest.fn();
+  renderDeck({ onCommit });
+
+  const save = screen.getByRole("button", { name: "Save" });
+  fireEvent.press(save);
+  act(() => completions[0]?.({ finished: false }));
+
+  expect(onCommit).not.toHaveBeenCalled();
+  expect(resetPan).toHaveBeenCalledWith({ x: 0, y: 0 });
+
+  fireEvent.press(save);
+  expect(completions).toHaveLength(2);
+});
+
 it("uses horizontal intent and maps a swipe through the guarded gesture path", () => {
   let responderConfig: Parameters<typeof PanResponder.create>[0] | undefined;
   jest.spyOn(PanResponder, "create").mockImplementation((config) => {

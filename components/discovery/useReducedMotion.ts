@@ -6,14 +6,20 @@ export function useReducedMotion(): boolean {
 
   useEffect(() => {
     let mounted = true;
+    let receivedLiveChange = false;
 
     void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (mounted) setReducedMotion(enabled);
+      if (mounted && !receivedLiveChange) setReducedMotion(enabled);
     });
+
+    const handleChange = (enabled: boolean) => {
+      receivedLiveChange = true;
+      if (mounted) setReducedMotion(enabled);
+    };
 
     const subscription = AccessibilityInfo.addEventListener(
       "reduceMotionChanged",
-      setReducedMotion
+      handleChange
     );
 
     return () => {
