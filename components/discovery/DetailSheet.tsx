@@ -1,5 +1,5 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -361,7 +361,25 @@ export function DetailSheet({
   const wide = width >= 760;
   const opacity = useRef(new Animated.Value(1)).current;
   const translateY = useRef(new Animated.Value(0)).current;
+  const [imageFailed, setImageFailed] = useState(false);
   const motion = useMemo(() => getMotionSpec(reducedMotion), [reducedMotion]);
+  const matchingDetail =
+    selection && detail?.category === selection.category ? detail : null;
+  const imageUrl = (() => {
+    if (!selection) return undefined;
+    if (!matchingDetail) return selection.item.imageUrl;
+    switch (matchingDetail.category) {
+      case "movies":
+        return matchingDetail.data.backdropUrl ??
+          matchingDetail.data.posterUrl ??
+          selection.item.imageUrl;
+      case "books":
+        return matchingDetail.data.coverUrl ?? selection.item.imageUrl;
+      case "artists":
+      case "albums":
+        return matchingDetail.data.imageUrl ?? selection.item.imageUrl;
+    }
+  })();
 
   useEffect(() => {
     if (!visible || !selection) return;
@@ -390,23 +408,15 @@ export function DetailSheet({
     return () => animation.stop();
   }, [motion.commitDurationMs, opacity, reducedMotion, selection, translateY, visible]);
 
+  useEffect(() => {
+    setImageFailed(false);
+  }, [imageUrl]);
+
   if (!selection) return null;
 
   const { category, item, origin } = selection;
   const theme = getCategoryTheme(category);
-  const matchingDetail = detail?.category === category ? detail : null;
-  const imageUrl = (() => {
-    if (!matchingDetail) return item.imageUrl;
-    switch (matchingDetail.category) {
-      case "movies":
-        return matchingDetail.data.backdropUrl ?? matchingDetail.data.posterUrl ?? item.imageUrl;
-      case "books":
-        return matchingDetail.data.coverUrl ?? item.imageUrl;
-      case "artists":
-      case "albums":
-        return matchingDetail.data.imageUrl ?? item.imageUrl;
-    }
-  })();
+  const showImage = Boolean(imageUrl) && !imageFailed;
   const saveLabel = saved ? "Remove from saved" : "Save";
 
   return (
@@ -428,7 +438,6 @@ export function DetailSheet({
         ]}
       >
         <Animated.View
-          accessible
           accessibilityLabel={`${item.title} details`}
           accessibilityViewIsModal
           aria-modal
@@ -491,18 +500,22 @@ export function DetailSheet({
               style={[
                 styles.hero,
                 category === "books" ? styles.bookHero : null,
+                category === "artists" || category === "albums" ? styles.squareHero : null,
                 { backgroundColor: palette.isDark ? theme.softDark : theme.softLight },
               ]}
+              testID="detail-sheet-hero"
             >
-              {imageUrl ? (
+              {showImage ? (
                 <Image
                   accessible={false}
+                  onError={() => setImageFailed(true)}
                   resizeMode="cover"
                   source={{ uri: imageUrl }}
                   style={styles.heroImage}
+                  testID="detail-sheet-hero-image"
                 />
               ) : (
-                <View style={styles.heroFallback}>
+                <View style={styles.heroFallback} testID="detail-sheet-hero-fallback">
                   <FontAwesome name={theme.icon} size={54} color={theme.accent} />
                   <Text style={[styles.heroFallbackText, { color: theme.accent }]}>
                     {theme.badge}
@@ -692,6 +705,10 @@ const styles = StyleSheet.create({
   bookHero: {
     aspectRatio: 3 / 4,
     maxWidth: 280,
+  },
+  squareHero: {
+    aspectRatio: 1,
+    maxWidth: 320,
   },
   heroImage: {
     height: "100%",

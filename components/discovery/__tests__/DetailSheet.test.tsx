@@ -33,11 +33,50 @@ it("offers deck actions and an accessible close path for a deck item", () => {
       onShare={jest.fn()}
     />
   );
-  expect(screen.getByRole("dialog", { name: "Arrival details" })).toBeTruthy();
+  expect(screen.getByTestId("detail-sheet-surface").props).toMatchObject({
+    accessibilityLabel: "Arrival details",
+    accessibilityViewIsModal: true,
+    "aria-modal": true,
+    role: "dialog",
+  });
   fireEvent.press(screen.getByRole("button", { name: "Save" }));
   expect(onSave).toHaveBeenCalledWith(item);
   fireEvent.press(screen.getByRole("button", { name: "Close details" }));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("keeps interactive descendants exposed instead of grouping the dialog surface", () => {
+  render(
+    <DetailSheet
+      visible
+      selection={{ category: "movies", item, origin: "deck" }}
+      detail={null}
+      loading={false}
+      errorMessage="Couldn't load all the details. Try again."
+      saved={false}
+      palette={darkPalette}
+      reducedMotion
+      onClose={jest.fn()}
+      onRetry={jest.fn()}
+      onSave={jest.fn()}
+      onSkip={jest.fn()}
+      onSimilar={jest.fn()}
+      onShare={jest.fn()}
+    />
+  );
+
+  const surface = screen.getByTestId("detail-sheet-surface");
+  expect(surface.props).toMatchObject({
+    accessibilityLabel: "Arrival details",
+    accessibilityViewIsModal: true,
+    "aria-modal": true,
+    role: "dialog",
+  });
+  expect(surface.props.accessible).not.toBe(true);
+  expect(screen.getByRole("button", { name: "Close details" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry loading details" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Open JustWatch" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
 });
 
 it("does not let a stored item skip an unrelated active deck", () => {
@@ -192,6 +231,79 @@ it("uses the result subtitle when book detail has no author", () => {
   );
 
   expect(screen.getAllByText("Fallback Author")).toHaveLength(2);
+});
+
+it("shows the themed fallback after an image error and retries when the URL changes", () => {
+  const firstItem: ResultItem = { ...item, imageUrl: "https://example.com/first.jpg" };
+  const nextItem: ResultItem = { ...item, id: "11", imageUrl: "https://example.com/next.jpg" };
+  const commonProps = {
+    visible: true,
+    detail: null,
+    loading: false,
+    errorMessage: null,
+    saved: false,
+    palette: darkPalette,
+    reducedMotion: true,
+    onClose: jest.fn(),
+    onRetry: jest.fn(),
+    onSave: jest.fn(),
+    onSkip: jest.fn(),
+    onSimilar: jest.fn(),
+    onShare: jest.fn(),
+  } as const;
+  const view = render(
+    <DetailSheet
+      {...commonProps}
+      selection={{ category: "movies", item: firstItem, origin: "deck" }}
+    />
+  );
+
+  fireEvent(screen.getByTestId("detail-sheet-hero-image"), "error");
+  expect(screen.queryByTestId("detail-sheet-hero-image")).toBeNull();
+  expect(screen.getByTestId("detail-sheet-hero-fallback")).toBeTruthy();
+  expect(screen.getByText("TONIGHT'S FEATURE")).toBeTruthy();
+
+  view.rerender(
+    <DetailSheet
+      {...commonProps}
+      selection={{ category: "movies", item: nextItem, origin: "deck" }}
+    />
+  );
+  expect(screen.queryByTestId("detail-sheet-hero-fallback")).toBeNull();
+  expect(screen.getByTestId("detail-sheet-hero-image").props.source).toEqual({
+    uri: "https://example.com/next.jpg",
+  });
+});
+
+it.each([
+  ["movies", 16 / 9, 600],
+  ["books", 3 / 4, 280],
+  ["artists", 1, 320],
+  ["albums", 1, 320],
+] as const)("uses bounded %s artwork proportions", (category, aspectRatio, maxWidth) => {
+  render(
+    <DetailSheet
+      visible
+      selection={{ category, item, origin: "deck" }}
+      detail={null}
+      loading={false}
+      errorMessage={null}
+      saved={false}
+      palette={darkPalette}
+      reducedMotion
+      onClose={jest.fn()}
+      onRetry={jest.fn()}
+      onSave={jest.fn()}
+      onSkip={jest.fn()}
+      onSimilar={jest.fn()}
+      onShare={jest.fn()}
+    />
+  );
+
+  expect(StyleSheet.flatten(screen.getByTestId("detail-sheet-hero").props.style)).toMatchObject({
+    aspectRatio,
+    maxWidth,
+  });
 });
 
 it("supports accessibility escape and removes transforms for reduced motion", () => {
