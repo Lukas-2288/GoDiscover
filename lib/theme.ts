@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export type Palette = {
+  isDark: boolean;
   bg: string;
   surface: string;
   surfaceAlt: string;
@@ -23,9 +24,14 @@ export type Palette = {
   accentBorder: string;
   onAccent: string;
   gradientMid: string;
+  focus: string;
+  success: string;
+  warning: string;
+  danger: string;
 };
 
 export const darkPalette: Palette = {
+  isDark: true,
   bg: '#0a0a0a',
   surface: '#141414',
   surfaceAlt: 'rgba(255,255,255,0.05)',
@@ -46,9 +52,14 @@ export const darkPalette: Palette = {
   accentBorder: 'rgba(154,77,255,0.35)',
   onAccent: '#ffffff',
   gradientMid: 'rgba(20,20,20,0.75)',
+  focus: '#B783FF',
+  success: '#4CD97B',
+  warning: '#FFD166',
+  danger: '#FF6B7A',
 };
 
 export const lightPalette: Palette = {
+  isDark: false,
   bg: '#f5f5f7',
   surface: '#ffffff',
   surfaceAlt: 'rgba(0,0,0,0.04)',
@@ -69,6 +80,10 @@ export const lightPalette: Palette = {
   accentBorder: 'rgba(123,59,212,0.35)',
   onAccent: '#ffffff',
   gradientMid: 'rgba(245,245,247,0.75)',
+  focus: '#6D28D9',
+  success: '#187A3D',
+  warning: '#8A5A00',
+  danger: '#B42335',
 };
 
 const STORAGE_KEY = 'godiscover:theme-mode:v1';
