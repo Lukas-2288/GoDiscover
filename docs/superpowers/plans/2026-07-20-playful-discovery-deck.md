@@ -588,7 +588,11 @@ describe("discoveryDeckReducer", () => {
 
   it("ends a departing request without erasing its completed queue", () => {
     const base = createInitialDiscoveryDeckState({ movies: [movie] });
-    const started = discoveryDeckReducer(base, {
+    const selected = discoveryDeckReducer(base, {
+      type: "selectCategory",
+      category: "movies",
+    });
+    const started = discoveryDeckReducer(selected, {
       type: "requestStarted",
       request: { id: 9, category: "movies" },
       input: { category: "movies", mode: "randomize" },
