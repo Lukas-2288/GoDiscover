@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import { darkPalette } from "../../../lib/theme";
 import { CategoryPicker } from "../CategoryPicker";
 
@@ -37,5 +38,24 @@ describe("CategoryPicker", () => {
     );
     expect(screen.getByRole("button", { name: "Change category. Albums selected" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Movies" })).toBeNull();
+  });
+
+  it("lets the compact control grow for Dynamic Type", () => {
+    render(
+      <CategoryPicker
+        selected="albums"
+        compact
+        palette={darkPalette}
+        onSelect={jest.fn()}
+      />
+    );
+
+    const button = screen.getByRole("button", {
+      name: "Change category. Albums selected",
+    });
+    const style = StyleSheet.flatten(button.props.style);
+
+    expect(style.minHeight).toBeGreaterThanOrEqual(44);
+    expect(style.height).toBeUndefined();
   });
 });

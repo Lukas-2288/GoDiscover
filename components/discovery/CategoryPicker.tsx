@@ -187,9 +187,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: "row",
     gap: 9,
-    height: 44,
     maxWidth: 960,
     paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 44,
     width: "100%",
   },
   compactLabel: {

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import { darkPalette } from "../../../lib/theme";
 import { DiscoveryControls } from "../DiscoveryControls";
 
@@ -23,6 +24,13 @@ const baseProps = {
   onSubmit: jest.fn(),
 };
 
+function flattenedStyle(element: { props: { style: unknown } }) {
+  const style = element.props.style;
+  return StyleSheet.flatten(
+    typeof style === "function" ? style({ pressed: false }) : style
+  );
+}
+
 describe("DiscoveryControls", () => {
   beforeEach(() => jest.clearAllMocks());
 
@@ -45,5 +53,46 @@ describe("DiscoveryControls", () => {
   it("does not advertise unsupported album rating filters", () => {
     render(<DiscoveryControls {...baseProps} category="albums" activeAction="filter" />);
     expect(screen.queryByText("Rating")).toBeNull();
+  });
+
+  it("uses growable 44-point controls and chips for Dynamic Type", () => {
+    render(
+      <DiscoveryControls
+        {...baseProps}
+        activeAction="filter"
+        openSection="genre"
+      />
+    );
+
+    const controls = [
+      screen.getByRole("button", { name: "Search movies" }),
+      screen.getByRole("button", { name: "Filter movies" }),
+      screen.getByRole("button", { name: "Surprise me with a movie" }),
+      screen.getByRole("button", { name: "Apply filters" }),
+    ];
+
+    controls.forEach((control) => {
+      const style = flattenedStyle(control);
+      expect(style.minHeight).toBeGreaterThanOrEqual(44);
+      expect(style.height).toBeUndefined();
+    });
+
+    const chip = screen.getByRole("button", { name: "Action" });
+    const chipStyle = flattenedStyle(chip);
+    expect(chipStyle.minHeight).toBeGreaterThanOrEqual(44);
+    expect(chipStyle.height).toBeUndefined();
+  });
+
+  it("uses growable search controls for Dynamic Type", () => {
+    render(<DiscoveryControls {...baseProps} activeAction="search" query="space" />);
+
+    const searchInput = screen.getByLabelText("Search movies");
+    const findButton = screen.getByRole("button", { name: "Find movies" });
+
+    [searchInput, findButton].forEach((control) => {
+      const style = flattenedStyle(control);
+      expect(style.minHeight).toBeGreaterThanOrEqual(44);
+      expect(style.height).toBeUndefined();
+    });
   });
 });
