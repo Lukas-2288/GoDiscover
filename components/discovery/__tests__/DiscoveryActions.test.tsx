@@ -58,4 +58,31 @@ describe("DiscoveryActions", () => {
       expect(style.height).toBeUndefined();
     });
   });
+
+  it("keeps action buttons and labels contained when text scales", () => {
+    render(
+      <DiscoveryActions
+        disabled={false}
+        palette={darkPalette}
+        accent="#FF5CA8"
+        onAccent="#19000C"
+        onSave={jest.fn()}
+        onSkip={jest.fn()}
+        onSimilar={jest.fn()}
+      />
+    );
+
+    ["Save", "Not for me", "Find similar"].forEach((name) => {
+      const button = screen.getByRole("button", { name });
+      const buttonStyle = StyleSheet.flatten(button.props.style);
+      const labelStyle = StyleSheet.flatten(screen.getByText(name).props.style);
+
+      expect(buttonStyle.maxWidth).toBe("100%");
+      expect(buttonStyle.flexShrink).toBeGreaterThanOrEqual(1);
+      expect(labelStyle.flexShrink).toBeGreaterThanOrEqual(1);
+      expect(labelStyle.flexWrap).toBe("wrap");
+      expect(labelStyle.textAlign).toBe("center");
+      expect(labelStyle.numberOfLines).toBeUndefined();
+    });
+  });
 });
