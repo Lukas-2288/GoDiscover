@@ -2,7 +2,15 @@ import AntDesign from "@expo/vector-icons/AntDesign";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { LinearGradient } from "expo-linear-gradient";
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -55,6 +63,12 @@ import {
   getSimilarArtists,
   SPOTIFY_GENRE_MAP,
 } from "../lib/api/discogs";
+import {
+  discoveryReducer,
+  initialDiscoveryState,
+  type DiscoveryActionMode,
+} from "../lib/discovery/state";
+import { createDiscoveryRequestTracker } from "../lib/discovery/requestTracker";
 import type {
   ContentCategory,
   ResultItem,
@@ -379,12 +393,21 @@ function FilterSection({
 }
 
 export default function HomeScreen() {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [openSection, setOpenSection] = useState<string | null>(null);
-  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
-  const [results, setResults] = useState<ResultItem[] | null>(null);
+  const [discovery, dispatchDiscovery] = useReducer(
+    discoveryReducer,
+    initialDiscoveryState
+  );
+  const requestTrackerRef = useRef(createDiscoveryRequestTracker());
+  const {
+    selected,
+    activeAction,
+    searchQuery,
+    openSection,
+    selectedFilters,
+    loading,
+  } = discovery;
+  const results =
+    discovery.results?.category === selected ? discovery.results.items : null;
   const [detailItem, setDetailItem] = useState<ResultItem | null>(null);
   const [movieDetail, setMovieDetail] = useState<MovieDetail | null>(null);
   const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
@@ -392,7 +415,6 @@ export default function HomeScreen() {
   const [albumDetail, setAlbumDetail] = useState<AlbumDetail | null>(null);
   const [similarItems, setSimilarItems] = useState<ResultItem[]>([]);
   const [detailError, setDetailError] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [howToOpen, setHowToOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -600,86 +622,103 @@ export default function HomeScreen() {
   ): ResultItem[] =>
     arr.map((r, i) => ({ id: `${r.title}-${i}`, ...r }));
 
-  const runAction = async (action: "search" | "filter" | "randomize") => {
+  const handleCategorySelect = (category: ContentCategory) => {
+    requestTrackerRef.current.invalidate();
+    dispatchDiscovery({ type: "selectCategory", category });
+    setDetailItem(null);
+  };
+
+  const openStoredItem = (category: ContentCategory, item: ResultItem) => {
+    requestTrackerRef.current.invalidate();
+    dispatchDiscovery({ type: "selectCategory", category });
+    setDetailItem(item);
+  };
+
+  const runAction = async (action: DiscoveryActionMode) => {
     if (!selected || loading) return;
     if (action === "search" && !searchQuery.trim()) return;
-    setLoading(true);
-    try {
-      const decade = selectedFilters.find((f) => /^\d{2}s$/.test(f));
-      const range = decade ? decadeToYearRange(decade) : null;
-      const ratingFilter = selectedFilters.find((f) => /^\d(\.\d)?\+$/.test(f));
-      const minRating = ratingFilter ? parseFloat(ratingFilter) : undefined;
 
-      if (selected === "movies") {
+    const category = selected;
+    const query = searchQuery;
+    const filters = [...selectedFilters];
+    const request = requestTrackerRef.current.start(category);
+    dispatchDiscovery({ type: "requestStarted", request });
+
+    try {
+      const decade = filters.find((filter) => /^\d{2}s$/.test(filter));
+      const range = decade ? decadeToYearRange(decade) : null;
+      const ratingFilter = filters.find((filter) => /^\d(\.\d)?\+$/.test(filter));
+      const minRating = ratingFilter ? parseFloat(ratingFilter) : undefined;
+      let nextResults: ResultItem[];
+
+      if (category === "movies") {
         if (action === "search") {
-          setResults(await searchMovies(searchQuery));
+          nextResults = await searchMovies(query);
         } else if (action === "randomize") {
-          setResults(await randomMovies());
+          nextResults = await randomMovies();
         } else {
-          const genreIds = selectedFilters
-            .map((f) => TMDB_GENRES[f])
-            .filter((v): v is number => typeof v === "number");
-          setResults(
-            await filterMovies({
-              genreIds: genreIds.length ? genreIds : undefined,
-              yearFrom: range?.yearFrom,
-              yearTo: range?.yearTo,
-              minRating,
-            })
-          );
+          const genreIds = filters
+            .map((filter) => TMDB_GENRES[filter])
+            .filter((value): value is number => typeof value === "number");
+          nextResults = await filterMovies({
+            genreIds: genreIds.length ? genreIds : undefined,
+            yearFrom: range?.yearFrom,
+            yearTo: range?.yearTo,
+            minRating,
+          });
         }
-      } else if (selected === "books") {
+      } else if (category === "books") {
         if (action === "search") {
-          setResults(await searchBooks(searchQuery));
+          nextResults = await searchBooks(query);
         } else if (action === "randomize") {
-          setResults(await randomBooks());
+          nextResults = await randomBooks();
         } else {
-          const subjects = selectedFilters
-            .map((f) => OL_SUBJECTS[f])
-            .filter((v): v is string => typeof v === "string");
-          setResults(
-            await filterBooks({
-              subjects: subjects.length ? subjects : undefined,
-              yearFrom: range?.yearFrom,
-              yearTo: range?.yearTo,
-              minRating,
-            })
-          );
+          const subjects = filters
+            .map((filter) => OL_SUBJECTS[filter])
+            .filter((value): value is string => typeof value === "string");
+          nextResults = await filterBooks({
+            subjects: subjects.length ? subjects : undefined,
+            yearFrom: range?.yearFrom,
+            yearTo: range?.yearTo,
+            minRating,
+          });
         }
-      } else if (selected === "artists" || selected === "albums") {
+      } else if (category === "artists" || category === "albums") {
         if (action === "search") {
-          setResults(
-            selected === "artists"
-              ? await searchArtists(searchQuery)
-              : await searchAlbums(searchQuery)
-          );
+          nextResults =
+            category === "artists"
+              ? await searchArtists(query)
+              : await searchAlbums(query);
         } else if (action === "randomize") {
-          setResults(
-            selected === "artists" ? await randomArtists() : await randomAlbums()
-          );
+          nextResults =
+            category === "artists"
+              ? await randomArtists()
+              : await randomAlbums();
         } else {
-          const genres = selectedFilters
-            .map((f) => SPOTIFY_GENRE_MAP[f])
-            .filter((v): v is string => typeof v === "string");
+          const genres = filters
+            .map((filter) => SPOTIFY_GENRE_MAP[filter])
+            .filter((value): value is string => typeof value === "string");
           const params = {
             genres: genres.length ? genres : undefined,
             yearFrom: range?.yearFrom,
             yearTo: range?.yearTo,
           };
-          setResults(
-            selected === "artists"
+          nextResults =
+            category === "artists"
               ? await filterArtists(params)
-              : await filterAlbums(params)
-          );
+              : await filterAlbums(params);
         }
       } else {
-        setResults(toResultItems(MOCK_RESULTS[selected]));
+        nextResults = toResultItems(MOCK_RESULTS[category]);
       }
-    } catch (e: any) {
-      Alert.alert("Error", e.message ?? "Something went wrong");
-      setResults(null);
-    } finally {
-      setLoading(false);
+
+      if (!requestTrackerRef.current.isCurrent(request)) return;
+      dispatchDiscovery({ type: "requestSucceeded", request, items: nextResults });
+    } catch (error) {
+      if (!requestTrackerRef.current.isCurrent(request)) return;
+      const message = error instanceof Error ? error.message : "Something went wrong";
+      dispatchDiscovery({ type: "requestFailed", request, message });
+      Alert.alert("Error", message);
     }
   };
 
@@ -756,11 +795,7 @@ export default function HomeScreen() {
   }, [detailItem, selected]);
 
   const toggleFilter = (value: string) => {
-    setSelectedFilters((prev) =>
-      prev.includes(value)
-        ? prev.filter((f) => f !== value)
-        : [...prev, value]
-    );
+    dispatchDiscovery({ type: "toggleFilter", value });
   };
 
   const genreOptions = selected
@@ -831,25 +866,25 @@ export default function HomeScreen() {
             label="🎤 Artists"
             value="artists"
             selected={selected}
-            onPress={() => { setSelected("artists"); setSelectedFilters([]); setOpenSection(null); }}
+            onPress={() => handleCategorySelect("artists")}
           />
           <ContentButton
             label="🎵 Albums"
             value="albums"
             selected={selected}
-            onPress={() => { setSelected("albums"); setSelectedFilters([]); setOpenSection(null); }}
+            onPress={() => handleCategorySelect("albums")}
           />
           <ContentButton
             label="📚 Books"
             value="books"
             selected={selected}
-            onPress={() => { setSelected("books"); setSelectedFilters([]); setOpenSection(null); }}
+            onPress={() => handleCategorySelect("books")}
           />
           <ContentButton
             label="🎬 Movies"
             value="movies"
             selected={selected}
-            onPress={() => { setSelected("movies"); setSelectedFilters([]); setOpenSection(null); }}
+            onPress={() => handleCategorySelect("movies")}
           />
         </View>
 
@@ -859,19 +894,25 @@ export default function HomeScreen() {
             label="Search"
             value="search"
             activateAction={activeAction ?? ""}
-            onPress={() => setActiveAction("search")}
+            onPress={() =>
+              dispatchDiscovery({ type: "setActiveAction", action: "search" })
+            }
           />
           <ActionButton
             label="Filter"
             value="filter"
             activateAction={activeAction ?? ""}
-            onPress={() => setActiveAction("filter")}
+            onPress={() =>
+              dispatchDiscovery({ type: "setActiveAction", action: "filter" })
+            }
           />
           <ActionButton
             label="Randomize"
             value="randomize"
             activateAction={activeAction ?? ""}
-            onPress={() => setActiveAction("randomize")}
+            onPress={() =>
+              dispatchDiscovery({ type: "setActiveAction", action: "randomize" })
+            }
           />
         </View>
 
@@ -894,8 +935,7 @@ export default function HomeScreen() {
                     pressed && { opacity: 0.75 },
                   ]}
                   onPress={() => {
-                    setSelected(item.category);
-                    setDetailItem(item);
+                    openStoredItem(item.category, item);
                   }}
                 >
                   {item.imageUrl ? (
@@ -949,7 +989,9 @@ export default function HomeScreen() {
                 style={styles.searchIcon}
               />
               <TextInput
-                onChangeText={setSearchQuery}
+                onChangeText={(query) =>
+                  dispatchDiscovery({ type: "setSearchQuery", query })
+                }
                 value={searchQuery}
                 style={styles.searchInput}
                 placeholder={`Describe the ${selected} you're looking for...`}
@@ -963,7 +1005,7 @@ export default function HomeScreen() {
                   styles.searchButton,
                   pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
                 ]}
-                onPress={() => runAction(activeAction as "search" | "randomize")}
+                onPress={() => runAction("search")}
               >
                 <Text style={styles.searchButtonText}>Find {selected}</Text>
                 <AntDesign name="arrow-right" size={16} color={palette.onAccent} />
@@ -977,7 +1019,7 @@ export default function HomeScreen() {
           <View style={styles.filterState}>
             {selectedFilters.length > 0 && (
               <Pressable
-                onPress={() => setSelectedFilters([])}
+                onPress={() => dispatchDiscovery({ type: "clearFilters" })}
                 style={({ pressed }) => pressed && { opacity: 0.6 }}
               >
                 <Text style={styles.clearFiltersText}>Clear all</Text>
@@ -989,7 +1031,10 @@ export default function HomeScreen() {
               options={genreOptions}
               openSection={openSection}
               onToggle={() =>
-                setOpenSection(openSection === "genre" ? null : "genre")
+                dispatchDiscovery({
+                  type: "setOpenSection",
+                  section: openSection === "genre" ? null : "genre",
+                })
               }
               selectedFilters={selectedFilters}
               onChipPress={toggleFilter}
@@ -1000,7 +1045,10 @@ export default function HomeScreen() {
               options={eraOptions}
               openSection={openSection}
               onToggle={() =>
-                setOpenSection(openSection === "era" ? null : "era")
+                dispatchDiscovery({
+                  type: "setOpenSection",
+                  section: openSection === "era" ? null : "era",
+                })
               }
               selectedFilters={selectedFilters}
               onChipPress={toggleFilter}
@@ -1012,7 +1060,10 @@ export default function HomeScreen() {
                 options={ratingOptions}
                 openSection={openSection}
                 onToggle={() =>
-                  setOpenSection(openSection === "rating" ? null : "rating")
+                  dispatchDiscovery({
+                    type: "setOpenSection",
+                    section: openSection === "rating" ? null : "rating",
+                  })
                 }
                 selectedFilters={selectedFilters}
                 onChipPress={toggleFilter}
@@ -1025,9 +1076,11 @@ export default function HomeScreen() {
                 options={popularityOptions}
                 openSection={openSection}
                 onToggle={() =>
-                  setOpenSection(
-                    openSection === "popularity" ? null : "popularity"
-                  )
+                  dispatchDiscovery({
+                    type: "setOpenSection",
+                    section:
+                      openSection === "popularity" ? null : "popularity",
+                  })
                 }
                 selectedFilters={selectedFilters}
                 onChipPress={toggleFilter}
@@ -1088,7 +1141,7 @@ export default function HomeScreen() {
             <View style={styles.resultsHeader}>
               <Text style={styles.resultsTitle}>Results</Text>
               <Pressable
-                onPress={() => setResults(null)}
+                onPress={() => dispatchDiscovery({ type: "clearResults" })}
                 style={({ pressed }) => pressed && { opacity: 0.6 }}
               >
                 <Text style={styles.clearResultsText}>Clear</Text>
@@ -1739,8 +1792,7 @@ export default function HomeScreen() {
                               pressed && { opacity: 0.7 },
                             ]}
                             onPress={() => {
-                              setSelected(item.category);
-                              setDetailItem(item);
+                              openStoredItem(item.category, item);
                               setSavedOpen(false);
                             }}
                           >
