@@ -77,6 +77,9 @@ export default function HomeScreen() {
   const [savedSheetMutationError, setSavedSheetMutationError] = useState<
     string | null
   >(null);
+  const [accountSavedMutationError, setAccountSavedMutationError] = useState<
+    string | null
+  >(null);
   const discoveryController = useDiscoveryController({
     onSavedItemsChange: setSavedItems,
   });
@@ -99,6 +102,7 @@ export default function HomeScreen() {
   const detailRequestSequenceRef = useRef(0);
   const detailSavedMutationSequenceRef = useRef(0);
   const savedSheetMutationSequenceRef = useRef(0);
+  const accountSavedMutationSequenceRef = useRef(0);
   const detailSelectionRef = useRef<DetailSelection | null>(null);
   detailSelectionRef.current = detailSelection;
   const [howToOpen, setHowToOpen] = useState(false);
@@ -124,6 +128,18 @@ export default function HomeScreen() {
   const changeThemeMode = (mode: ThemeMode) => {
     setThemeMode(mode);
     saveThemeMode(mode);
+  };
+
+  const openAccount = () => {
+    accountSavedMutationSequenceRef.current += 1;
+    setAccountSavedMutationError(null);
+    setAccountOpen(true);
+  };
+
+  const closeAccount = () => {
+    accountSavedMutationSequenceRef.current += 1;
+    setAccountSavedMutationError(null);
+    setAccountOpen(false);
   };
 
   useEffect(() => {
@@ -152,19 +168,23 @@ export default function HomeScreen() {
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, s) => {
       setAuthSession(s);
       if (event === "SIGNED_IN" && s) {
-        await applySavedMutation(() =>
-          runSavedMutation(async () => {
-            await syncLocalToCloud();
-            return listSaved();
-          })
+        await applySavedMutation(
+          () =>
+            runSavedMutation(async () => {
+              await syncLocalToCloud();
+              return listSaved();
+            }),
+          "account"
         );
       }
       if (event === "SIGNED_OUT") {
-        await applySavedMutation(() =>
-          runSavedMutation(async () => {
-            await clearLocalSaved();
-            return [];
-          })
+        await applySavedMutation(
+          () =>
+            runSavedMutation(async () => {
+              await clearLocalSaved();
+              return [];
+            }),
+          "account"
         );
       }
     });
@@ -265,29 +285,30 @@ export default function HomeScreen() {
 
   const applySavedMutation = async (
     mutation: () => Promise<SavedItem[]>,
-    scope?: "detail" | "savedSheet"
+    scope: "detail" | "savedSheet" | "account"
   ): Promise<boolean> => {
     const sequenceRef =
       scope === "detail"
         ? detailSavedMutationSequenceRef
         : scope === "savedSheet"
         ? savedSheetMutationSequenceRef
-        : null;
+        : accountSavedMutationSequenceRef;
     const setError =
       scope === "detail"
         ? setDetailSavedMutationError
         : scope === "savedSheet"
         ? setSavedSheetMutationError
-        : null;
-    const operationId = sequenceRef ? ++sequenceRef.current : 0;
-    setError?.(null);
+        : setAccountSavedMutationError;
+    const operationId = ++sequenceRef.current;
+    setError(null);
     try {
       setSavedItems(await mutation());
-      if (sequenceRef?.current === operationId) setError?.(null);
+      if (sequenceRef.current === operationId) setError(null);
       return true;
     } catch {
-      if (sequenceRef?.current === operationId) {
-        setError?.(SAVED_MUTATION_ERROR);
+      if (sequenceRef.current === operationId) {
+        setError(SAVED_MUTATION_ERROR);
+        if (scope === "account") setAccountOpen(true);
       }
       return false;
     }
@@ -492,7 +513,7 @@ export default function HomeScreen() {
             ]}
             onPress={() => {
               invalidateDetailFocusRestoration();
-              setAccountOpen(true);
+              openAccount();
             }}
           >
             <FontAwesome
@@ -724,7 +745,13 @@ export default function HomeScreen() {
           <DiscoveryAnnouncer
             message={announcement}
             actionErrorMessage={
-              discoveryController.actionErrorAnnouncement
+              (accountOpen
+                ? accountSavedMutationError
+                : detailSelection
+                ? detailSavedMutationError
+                : savedOpen
+                ? savedSheetMutationError
+                : null) ?? discoveryController.actionErrorAnnouncement
             }
           />
         </View>
@@ -909,7 +936,7 @@ export default function HomeScreen() {
                 accessibilityRole="button"
                 onPress={() => {
                   closeSavedSheet();
-                  setAccountOpen(true);
+                  openAccount();
                 }}
                 style={({ pressed }) => [
                   styles.savedSignInBanner,
@@ -1040,14 +1067,14 @@ export default function HomeScreen() {
         visible={accountOpen}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setAccountOpen(false)}
+        onRequestClose={closeAccount}
       >
         <View style={styles.modalOverlay}>
           <View
             accessibilityLabel="Account"
             accessibilityViewIsModal
             aria-modal
-            onAccessibilityEscape={() => setAccountOpen(false)}
+            onAccessibilityEscape={closeAccount}
             role="dialog"
             style={styles.modalContent}
           >
@@ -1055,7 +1082,7 @@ export default function HomeScreen() {
               accessibilityLabel="Close account"
               accessibilityRole="button"
               style={styles.modalClose}
-              onPress={() => setAccountOpen(false)}
+              onPress={closeAccount}
             >
               <AntDesign
                 accessible={false}
@@ -1065,6 +1092,16 @@ export default function HomeScreen() {
               />
             </Pressable>
             <ScrollView showsVerticalScrollIndicator={false}>
+              {accountSavedMutationError ? (
+                <Text
+                  accessibilityLabel={accountSavedMutationError}
+                  accessibilityLiveRegion="polite"
+                  accessibilityRole="alert"
+                  style={styles.savedMutationError}
+                >
+                  {accountSavedMutationError}
+                </Text>
+              ) : null}
               {authSession ? (
                 <>
                   <View style={styles.authHeader}>

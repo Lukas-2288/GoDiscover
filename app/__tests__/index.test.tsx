@@ -6,9 +6,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react-native";
-import { StyleSheet } from "react-native";
+import { AccessibilityInfo, Platform, StyleSheet } from "react-native";
 
 import type { MovieDetail, ResultItem } from "../../types/content";
+
+let mockAuthStateChangeHandler:
+  | ((event: string, session: unknown) => Promise<void>)
+  | null = null;
 
 jest.mock(
   "@react-native-async-storage/async-storage",
@@ -41,9 +45,12 @@ jest.mock("../../lib/supabase", () => ({
   supabase: {
     auth: {
       getSession: jest.fn(async () => ({ data: { session: null } })),
-      onAuthStateChange: jest.fn(() => ({
-        data: { subscription: { unsubscribe: jest.fn() } },
-      })),
+      onAuthStateChange: jest.fn((handler) => {
+        mockAuthStateChangeHandler = handler;
+        return {
+          data: { subscription: { unsubscribe: jest.fn() } },
+        };
+      }),
       signInWithPassword: jest.fn(),
       signUp: jest.fn(),
       updateUser: jest.fn(),
@@ -122,8 +129,16 @@ jest.mock("../../components/discovery/SwipeDeck", () => {
 import { getSimilarMovies } from "../../lib/api/tmdb";
 import { loadDetail } from "../../lib/discovery/loadDetail";
 import { loadDiscovery } from "../../lib/discovery/loadDiscovery";
-import { addSaved, listSaved, removeSaved } from "../../lib/storage/saved";
+import {
+  addSaved,
+  listSaved,
+  removeSaved,
+  syncLocalToCloud,
+} from "../../lib/storage/saved";
 import HomeScreen from "../index";
+
+const SAVED_MUTATION_ERROR = "Couldn't update saved discoveries. Try again.";
+const originalPlatform = Platform.OS;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -156,8 +171,24 @@ function expectMinimumTarget(element: { props: { style: unknown } }) {
   expect(style.minWidth ?? style.width).toBeGreaterThanOrEqual(44);
 }
 
+function spyOnIOSAnnouncements() {
+  Object.defineProperty(Platform, "OS", { configurable: true, value: "ios" });
+  return jest
+    .spyOn(AccessibilityInfo, "announceForAccessibility")
+    .mockImplementation(() => undefined);
+}
+
+function countSavedMutationAnnouncements(
+  announce: jest.SpyInstance<void, [string]>
+): number {
+  return announce.mock.calls.filter(
+    ([message]) => message === SAVED_MUTATION_ERROR
+  ).length;
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
+  mockAuthStateChangeHandler = null;
   jest.mocked(loadDiscovery).mockResolvedValue([arrival]);
   jest.mocked(loadDetail).mockResolvedValue({ category: "movies", data: movieDetail });
   jest.mocked(listSaved).mockResolvedValue([]);
@@ -167,6 +198,14 @@ beforeEach(() => {
     savedAt: 1,
   }]);
   jest.mocked(removeSaved).mockResolvedValue([]);
+});
+
+afterEach(() => {
+  Object.defineProperty(Platform, "OS", {
+    configurable: true,
+    value: originalPlatform,
+  });
+  jest.restoreAllMocks();
 });
 
 it("gives every header action an explicit name and 44-point target", async () => {
@@ -399,6 +438,7 @@ it("does not remove a pre-existing saved discovery after deck Save", async () =>
 });
 
 it("shows stable feedback when a Saved-sheet removal fails", async () => {
+  const announce = spyOnIOSAnnouncements();
   jest.mocked(listSaved).mockResolvedValue([{
     ...arrival,
     category: "movies",
@@ -424,6 +464,7 @@ it("shows stable feedback when a Saved-sheet removal fails", async () => {
     })
   ).toBeTruthy();
   expect(screen.queryByText(/Supabase|token|expired/i)).toBeNull();
+  expect(countSavedMutationAnnouncements(announce)).toBe(1);
 
   fireEvent.press(
     within(savedDialog).getByRole("button", { name: "Close saved discoveries" })
@@ -436,6 +477,7 @@ it("shows stable feedback when a Saved-sheet removal fails", async () => {
 });
 
 it("shows stored-detail mutation failures inside the active detail sheet", async () => {
+  const announce = spyOnIOSAnnouncements();
   jest.mocked(listSaved).mockResolvedValue([{
     ...arrival,
     category: "movies",
@@ -457,6 +499,7 @@ it("shows stored-detail mutation failures inside the active detail sheet", async
       name: "Couldn't update saved discoveries. Try again.",
     })
   ).toBeTruthy();
+  expect(countSavedMutationAnnouncements(announce)).toBe(1);
 
   fireEvent.press(within(detailSheet).getByRole("button", { name: "Close details" }));
   await waitFor(() =>
@@ -464,6 +507,38 @@ it("shows stored-detail mutation failures inside the active detail sheet", async
       screen.queryByText("Couldn't update saved discoveries. Try again.")
     ).toBeNull()
   );
+});
+
+it("shows and announces saved-sync failures in the Account modal", async () => {
+  const announce = spyOnIOSAnnouncements();
+  jest
+    .mocked(syncLocalToCloud)
+    .mockRejectedValueOnce(new Error("private auth sync token"));
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(mockAuthStateChangeHandler).not.toBeNull());
+
+  await act(async () => {
+    const handler = mockAuthStateChangeHandler;
+    if (!handler) throw new Error("Auth listener was not registered");
+    await handler("SIGNED_IN", {
+      user: { id: "account-1", email: "reader@example.com", user_metadata: {} },
+    });
+  });
+
+  const accountDialog = await screen.findByLabelText("Account");
+  expect(
+    within(accountDialog).getByRole("alert", {
+      name: SAVED_MUTATION_ERROR,
+    })
+  ).toBeTruthy();
+  expect(screen.queryByText(/private|token/i)).toBeNull();
+  expect(countSavedMutationAnnouncements(announce)).toBe(1);
+
+  fireEvent.press(
+    within(accountDialog).getByRole("button", { name: "Close account" })
+  );
+  await waitFor(() => expect(screen.queryByText(SAVED_MUTATION_ERROR)).toBeNull());
 });
 
 it("does not let a dismissed Saved-sheet failure suppress a later deck Undo", async () => {
