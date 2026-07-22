@@ -260,6 +260,89 @@ it("keeps a failed Undo available and shows only safe action copy", async () => 
   expect(result.current.state.actionError).toBe("Couldn't undo that save. Try again.");
 });
 
+it("keeps Undo available while its removal is pending past the expiry window", async () => {
+  jest.useFakeTimers();
+  const clearTimeoutSpy = jest.spyOn(global, "clearTimeout");
+  let finishRemove: (items: SavedItem[]) => void = () => undefined;
+  const removeSaved = jest.fn(
+    () =>
+      new Promise<SavedItem[]>((resolve) => {
+        finishRemove = resolve;
+      })
+  );
+  const { result, unmount } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie] },
+      dependencies: {
+        load: jest.fn(),
+        addSaved: jest.fn(async () => [savedItem(movie)]),
+        removeSaved,
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+  act(() => jest.advanceTimersByTime(4_400));
+
+  let pendingUndo!: Promise<void>;
+  act(() => {
+    pendingUndo = result.current.undo();
+  });
+  expect(clearTimeoutSpy).toHaveBeenCalled();
+  act(() => jest.advanceTimersByTime(200));
+  expect(result.current.state.lastSave?.item).toEqual(movie);
+
+  await act(async () => {
+    finishRemove([]);
+    await pendingUndo;
+  });
+
+  expect(result.current.activeItem).toEqual(movie);
+  expect(result.current.state.lastSave).toBeNull();
+  unmount();
+});
+
+it("announces the current deck card after a deferred Save confirms", async () => {
+  let finishSave: (items: SavedItem[]) => void = () => undefined;
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie, secondMovie] },
+      dependencies: {
+        load: jest.fn(),
+        addSaved: jest.fn(
+          () =>
+            new Promise<SavedItem[]>((resolve) => {
+              finishSave = resolve;
+            })
+        ),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  let pendingSave!: Promise<void>;
+  act(() => {
+    pendingSave = result.current.commit(movie, "save");
+  });
+  await act(async () => {
+    await result.current.commit(secondMovie, "skip");
+  });
+  expect(result.current.activeItem).toBeNull();
+
+  await act(async () => {
+    finishSave([savedItem(movie)]);
+    await pendingSave;
+  });
+
+  expect(result.current.announcement).toBe(
+    "Saved Arrival. That's the end of this deck."
+  );
+});
+
 it("expires only the current Save undo operation after 4.5 seconds", async () => {
   jest.useFakeTimers();
   const { result, unmount } = renderHook(() =>

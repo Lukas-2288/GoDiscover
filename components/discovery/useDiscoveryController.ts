@@ -317,10 +317,10 @@ export function useDiscoveryController(
       if (activeDeckItem(session.deck)?.id !== item.id) return;
 
       const safeItem = copyItem(item);
-      const nextItem = session.deck.queue[1] ?? null;
       setUndoError(null);
 
       if (decision === "skip") {
+        const nextItem = session.deck.queue[1] ?? null;
         const dismissed = dispatch({
           type: "skipCurrent",
           category,
@@ -359,6 +359,9 @@ export function useDiscoveryController(
       dispatch({ type: "saveSucceeded", operationId: operation.id });
       onSavedItemsChangeRef.current?.(savedItems);
       if (stateRef.current.lastSave?.id === operation.id) {
+        const nextItem = activeDeckItem(
+          stateRef.current.sessions[operation.category].deck
+        );
         setAnnouncement(nextCardAnnouncement(`Saved ${safeItem.title}.`, nextItem));
         startUndoTimer(operation.id);
       }
@@ -385,6 +388,7 @@ export function useDiscoveryController(
 
     undoInFlightRef.current = operation.id;
     setUndoError(null);
+    clearUndoTimer(operation.id);
     let savedItems: SavedItem[];
     try {
       savedItems = await dependenciesRef.current.removeSaved(
@@ -392,10 +396,11 @@ export function useDiscoveryController(
         operation.item.id
       );
     } catch {
+      undoInFlightRef.current = null;
       if (mountedRef.current && stateRef.current.lastSave?.id === operation.id) {
         setUndoError(UNDO_ERROR);
+        startUndoTimer(operation.id);
       }
-      undoInFlightRef.current = null;
       return;
     }
     undoInFlightRef.current = null;
@@ -403,6 +408,7 @@ export function useDiscoveryController(
     if (!mountedRef.current || stateRef.current.lastSave?.id !== operation.id) return;
     if (containsSavedItem(savedItems, operation)) {
       setUndoError(UNDO_ERROR);
+      startUndoTimer(operation.id);
       return;
     }
 
@@ -411,7 +417,7 @@ export function useDiscoveryController(
     clearUndoTimer(operation.id);
     onSavedItemsChangeRef.current?.(savedItems);
     setAnnouncement(`${operation.item.title} returned to your deck.`);
-  }, [clearUndoTimer, dispatch]);
+  }, [clearUndoTimer, dispatch, startUndoTimer]);
 
   const clearActionError = useCallback(() => {
     setUndoError(null);
