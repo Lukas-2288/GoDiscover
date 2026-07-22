@@ -32,10 +32,12 @@ function savedItem(
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => undefined;
-  const promise = new Promise<T>((finish) => {
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((finish, fail) => {
     resolve = finish;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 afterEach(() => {
@@ -420,6 +422,135 @@ it("restores the exact Save being undone after a newer Save confirms", async () 
   expect(result.current.state.lastSave?.item).toEqual(secondMovie);
   expect(onSavedItemsChange).toHaveBeenLastCalledWith([savedItem(secondMovie)]);
   expect(result.current.announcement).toBe("Arrival returned to your deck.");
+  unmount();
+});
+
+it("makes a rejected older Undo retryable after a newer Save confirms", async () => {
+  jest.useFakeTimers();
+  const secondSave = deferred<SavedItem[]>();
+  const removal = deferred<SavedItem[]>();
+  const addSaved = jest.fn(
+    async (_category: ContentCategory, item: ResultItem) => {
+      if (item.id === movie.id) return [savedItem(movie)];
+      return secondSave.promise;
+    }
+  );
+  const removeSaved = jest.fn(() => removal.promise);
+  const { result, unmount } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie, secondMovie] },
+      dependencies: { load: jest.fn(), addSaved, removeSaved },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+
+  let pendingSecondSave!: Promise<void>;
+  act(() => {
+    pendingSecondSave = result.current.commit(secondMovie, "save");
+  });
+  let pendingUndo!: Promise<void>;
+  act(() => {
+    pendingUndo = result.current.undo();
+  });
+
+  await act(async () => {
+    secondSave.resolve([savedItem(secondMovie), savedItem(movie)]);
+    await pendingSecondSave;
+  });
+  await waitFor(() => expect(removeSaved).toHaveBeenCalledWith("movies", movie.id));
+  expect(result.current.state.lastSave?.item).toEqual(secondMovie);
+
+  await act(async () => {
+    removal.reject(new Error("write failed"));
+    await pendingUndo;
+  });
+
+  expect(result.current.state.lastSave?.item).toEqual(movie);
+  expect(result.current.state.actionError).toBe(
+    "Couldn't undo that save. Try again."
+  );
+  expect(result.current.activeItem).toBeNull();
+
+  act(() => jest.advanceTimersByTime(4_499));
+  expect(result.current.state.lastSave?.item).toEqual(movie);
+  act(() => jest.advanceTimersByTime(1));
+  expect(result.current.state.lastSave).toBeNull();
+  unmount();
+});
+
+it("retries an unconfirmed older Undo after a newer Save confirms", async () => {
+  const secondSave = deferred<SavedItem[]>();
+  const removal = deferred<SavedItem[]>();
+  const addSaved = jest.fn(
+    async (_category: ContentCategory, item: ResultItem) => {
+      if (item.id === movie.id) return [savedItem(movie)];
+      return secondSave.promise;
+    }
+  );
+  let removeCalls = 0;
+  const removeSaved = jest.fn(() => {
+    removeCalls += 1;
+    return removeCalls === 1
+      ? removal.promise
+      : Promise.resolve([savedItem(secondMovie)]);
+  });
+  const onSavedItemsChange = jest.fn();
+  const { result, unmount } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie, secondMovie] },
+      dependencies: { load: jest.fn(), addSaved, removeSaved },
+      onSavedItemsChange,
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+
+  let pendingSecondSave!: Promise<void>;
+  act(() => {
+    pendingSecondSave = result.current.commit(secondMovie, "save");
+  });
+  let pendingUndo!: Promise<void>;
+  act(() => {
+    pendingUndo = result.current.undo();
+  });
+
+  await act(async () => {
+    secondSave.resolve([savedItem(secondMovie), savedItem(movie)]);
+    await pendingSecondSave;
+  });
+  await waitFor(() => expect(removeSaved).toHaveBeenCalledWith("movies", movie.id));
+
+  await act(async () => {
+    removal.resolve([savedItem(secondMovie), savedItem(movie)]);
+    await pendingUndo;
+  });
+
+  expect(result.current.state.lastSave?.item).toEqual(movie);
+  expect(result.current.state.actionError).toBe(
+    "Couldn't undo that save. Try again."
+  );
+  expect(result.current.activeItem).toBeNull();
+  expect(onSavedItemsChange).toHaveBeenCalledTimes(2);
+
+  await act(async () => {
+    await result.current.undo();
+  });
+
+  expect(removeSaved.mock.calls).toEqual([
+    ["movies", movie.id],
+    ["movies", movie.id],
+  ]);
+  expect(result.current.activeItem).toEqual(movie);
+  expect(result.current.state.lastSave).toBeNull();
+  expect(result.current.state.actionError).toBeNull();
+  expect(onSavedItemsChange).toHaveBeenLastCalledWith([savedItem(secondMovie)]);
   unmount();
 });
 

@@ -218,6 +218,16 @@ export function useDiscoveryController(
     [clearUndoTimer, dispatch]
   );
 
+  const makeUndoRetryable = useCallback(
+    (operation: SaveOperation) => {
+      if (!mountedRef.current) return;
+      dispatch({ type: "undoSaveFailed", operation });
+      setUndoError(UNDO_ERROR);
+      startUndoTimer(operation.id);
+    },
+    [dispatch, startUndoTimer]
+  );
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -426,20 +436,14 @@ export function useDiscoveryController(
       );
     } catch {
       undoInFlightRef.current.delete(operation.id);
-      if (mountedRef.current && stateRef.current.lastSave?.id === operation.id) {
-        setUndoError(UNDO_ERROR);
-        startUndoTimer(operation.id);
-      }
+      makeUndoRetryable(operation);
       return;
     }
     undoInFlightRef.current.delete(operation.id);
 
     if (!mountedRef.current) return;
     if (containsSavedItem(savedItems, operation)) {
-      if (stateRef.current.lastSave?.id === operation.id) {
-        setUndoError(UNDO_ERROR);
-        startUndoTimer(operation.id);
-      }
+      makeUndoRetryable(operation);
       return;
     }
 
@@ -448,7 +452,7 @@ export function useDiscoveryController(
     clearUndoTimer(operation.id);
     onSavedItemsChangeRef.current?.(savedItems);
     setAnnouncement(`${operation.item.title} returned to your deck.`);
-  }, [clearUndoTimer, dispatch, runSavedMutation, startUndoTimer]);
+  }, [clearUndoTimer, dispatch, makeUndoRetryable, runSavedMutation]);
 
   const clearActionError = useCallback(() => {
     setUndoError(null);

@@ -62,6 +62,7 @@ export type DiscoveryDeckAction =
   | { type: "saveSucceeded"; operationId: number }
   | { type: "saveFailed"; operationId: number; message: string }
   | { type: "undoSave"; operation: SaveOperation }
+  | { type: "undoSaveFailed"; operation: SaveOperation }
   | { type: "clearUndo"; operationId: number }
   | { type: "clearActionError" };
 
@@ -322,6 +323,10 @@ export function discoveryDeckReducer(
         actionError: null,
       };
     }
+
+    case "undoSaveFailed":
+      if (state.lastSave?.id === action.operation.id) return state;
+      return { ...state, lastSave: action.operation };
 
     case "clearUndo":
       if (state.lastSave?.id !== action.operationId) return state;

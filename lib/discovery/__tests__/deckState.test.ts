@@ -297,6 +297,31 @@ describe("discoveryDeckReducer", () => {
     expect(state.lastSave).toEqual(newer);
   });
 
+  it("makes an exact failed Undo the single retryable Save", () => {
+    const failed = { id: 24, category: "movies" as const, item: movie };
+    const newer = { id: 25, category: "movies" as const, item: secondMovie };
+    let state = createInitialDiscoveryDeckState({ movies: [movie, secondMovie] });
+    state = discoveryDeckReducer(state, { type: "saveStarted", operation: failed });
+    state = discoveryDeckReducer(state, {
+      type: "saveSucceeded",
+      operationId: failed.id,
+    });
+    state = discoveryDeckReducer(state, { type: "saveStarted", operation: newer });
+    state = discoveryDeckReducer(state, {
+      type: "saveSucceeded",
+      operationId: newer.id,
+    });
+
+    state = discoveryDeckReducer(state, {
+      type: "undoSaveFailed",
+      operation: failed,
+    });
+
+    expect(state.lastSave).toEqual(failed);
+    expect(activeDeckItem(state.sessions.movies.deck)).toBeNull();
+    expect(state.sessions.movies.deck.seenCount).toBe(2);
+  });
+
   it("clears only matching undo state and clears action errors independently", () => {
     const saved = { id: 17, category: "movies" as const, item: movie };
     const failed = { id: 18, category: "movies" as const, item: secondMovie };
