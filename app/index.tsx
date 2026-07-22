@@ -85,6 +85,7 @@ export default function HomeScreen() {
   const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(null);
   const [detailRetryKey, setDetailRetryKey] = useState(0);
   const deckRef = useRef<SwipeDeckHandle>(null);
+  const detailFocusGenerationRef = useRef(0);
   const detailRequestSequenceRef = useRef(0);
   const detailSelectionRef = useRef<DetailSelection | null>(null);
   detailSelectionRef.current = detailSelection;
@@ -244,17 +245,32 @@ export default function HomeScreen() {
   };
 
   const clearDetail = () => {
+    detailSelectionRef.current = null;
     setDetailSelection(null);
     setDetail(null);
     setDetailLoading(false);
     setDetailErrorMessage(null);
   };
 
-  const focusActiveCardAfterDismissal = () => {
-    setTimeout(() => deckRef.current?.focusActiveCard(), 0);
+  const invalidateDetailFocusRestoration = () => {
+    detailFocusGenerationRef.current += 1;
+  };
+
+  const focusActiveCardAfterDismissal = (generation: number) => {
+    setTimeout(() => {
+      if (
+        detailFocusGenerationRef.current !== generation ||
+        detailSelectionRef.current !== null
+      ) {
+        return;
+      }
+      deckRef.current?.focusActiveCard();
+    }, 0);
   };
 
   const openDetail = (selection: DetailSelection) => {
+    invalidateDetailFocusRestoration();
+    detailSelectionRef.current = selection;
     setDetailRetryKey(0);
     setDetailSelection(selection);
   };
@@ -293,8 +309,9 @@ export default function HomeScreen() {
 
   const closeDetail = () => {
     const restoreDeckFocus = detailSelectionRef.current?.origin === "deck";
+    const focusGeneration = detailFocusGenerationRef.current;
     clearDetail();
-    if (restoreDeckFocus) focusActiveCardAfterDismissal();
+    if (restoreDeckFocus) focusActiveCardAfterDismissal(focusGeneration);
   };
 
   const handleDetailSave = async (item: ResultItem) => {
@@ -309,9 +326,10 @@ export default function HomeScreen() {
       return;
     }
 
+    const focusGeneration = detailFocusGenerationRef.current;
     clearDetail();
     await discoveryController.commit(item, "save");
-    focusActiveCardAfterDismissal();
+    focusActiveCardAfterDismissal(focusGeneration);
   };
 
   const handleDetailSkip = async (item: ResultItem) => {
@@ -320,21 +338,24 @@ export default function HomeScreen() {
       return;
     }
 
+    const focusGeneration = detailFocusGenerationRef.current;
     clearDetail();
     await discoveryController.commit(item, "skip");
-    focusActiveCardAfterDismissal();
+    focusActiveCardAfterDismissal(focusGeneration);
   };
 
   const handleDetailSimilar = async (item: ResultItem) => {
     const selection = detailSelectionRef.current;
     if (!selection || selection.item.id !== item.id) return;
 
+    const focusGeneration = detailFocusGenerationRef.current;
     clearDetail();
     await discoveryController.similar(item);
-    focusActiveCardAfterDismissal();
+    focusActiveCardAfterDismissal(focusGeneration);
   };
 
   const handleCategorySelect = (category: ContentCategory) => {
+    invalidateDetailFocusRestoration();
     if (!categoryPickerExpanded && category === selected) {
       setCategoryPickerExpanded(true);
       return;
@@ -399,7 +420,10 @@ export default function HomeScreen() {
         <View style={styles.topBarLeft}>
           <Pressable
             style={({ pressed }) => pressed && { opacity: 0.6 }}
-            onPress={() => setAccountOpen(true)}
+            onPress={() => {
+              invalidateDetailFocusRestoration();
+              setAccountOpen(true);
+            }}
           >
             <FontAwesome
               name={authSession ? "user-circle" : "user-circle-o"}
@@ -412,7 +436,10 @@ export default function HomeScreen() {
         <View style={styles.topBarRight}>
           <Pressable
             style={({ pressed }) => pressed && { opacity: 0.6 }}
-            onPress={() => setSavedOpen(true)}
+            onPress={() => {
+              invalidateDetailFocusRestoration();
+              setSavedOpen(true);
+            }}
           >
             <FontAwesome
               name={savedItems.length > 0 ? "bookmark" : "bookmark-o"}
@@ -422,7 +449,10 @@ export default function HomeScreen() {
           </Pressable>
           <Pressable
             style={({ pressed }) => pressed && { opacity: 0.6 }}
-            onPress={() => setHowToOpen(true)}
+            onPress={() => {
+              invalidateDetailFocusRestoration();
+              setHowToOpen(true);
+            }}
           >
             <FontAwesome name="question-circle-o" size={24} color={palette.textMuted} />
           </Pressable>
@@ -609,7 +639,7 @@ export default function HomeScreen() {
         loading={detailLoading}
         errorMessage={detailErrorMessage}
         saved={
-          detailSelection
+          detailSelection?.origin === "stored"
             ? isItemSaved(detailSelection.category, detailSelection.item)
             : false
         }
