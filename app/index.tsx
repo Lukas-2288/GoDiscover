@@ -419,13 +419,19 @@ export default function HomeScreen() {
       <View style={styles.topBar}>
         <View style={styles.topBarLeft}>
           <Pressable
-            style={({ pressed }) => pressed && { opacity: 0.6 }}
+            accessibilityLabel="Open account"
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.topBarAction,
+              pressed && { opacity: 0.6 },
+            ]}
             onPress={() => {
               invalidateDetailFocusRestoration();
               setAccountOpen(true);
             }}
           >
             <FontAwesome
+              accessible={false}
               name={authSession ? "user-circle" : "user-circle-o"}
               size={26}
               color={palette.accent}
@@ -435,26 +441,42 @@ export default function HomeScreen() {
         <Text style={styles.logoText}>GoDiscover</Text>
         <View style={styles.topBarRight}>
           <Pressable
-            style={({ pressed }) => pressed && { opacity: 0.6 }}
+            accessibilityLabel="Open saved discoveries"
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.topBarAction,
+              pressed && { opacity: 0.6 },
+            ]}
             onPress={() => {
               invalidateDetailFocusRestoration();
               setSavedOpen(true);
             }}
           >
             <FontAwesome
+              accessible={false}
               name={savedItems.length > 0 ? "bookmark" : "bookmark-o"}
               size={22}
               color={savedItems.length > 0 ? palette.accent : palette.borderStrong}
             />
           </Pressable>
           <Pressable
-            style={({ pressed }) => pressed && { opacity: 0.6 }}
+            accessibilityLabel="How to use GoDiscover"
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.topBarAction,
+              pressed && { opacity: 0.6 },
+            ]}
             onPress={() => {
               invalidateDetailFocusRestoration();
               setHowToOpen(true);
             }}
           >
-            <FontAwesome name="question-circle-o" size={24} color={palette.textMuted} />
+            <FontAwesome
+              accessible={false}
+              name="question-circle-o"
+              size={24}
+              color={palette.textMuted}
+            />
           </Pressable>
         </View>
       </View>
@@ -489,6 +511,8 @@ export default function HomeScreen() {
                 {recentItems.map((item) => (
                   <Pressable
                     key={`${item.category}:${item.id}`}
+                    accessibilityLabel={`Open ${item.title} details`}
+                    accessibilityRole="button"
                     style={({ pressed }) => [
                       styles.recentCard,
                       pressed && { opacity: 0.75 },
@@ -497,6 +521,7 @@ export default function HomeScreen() {
                   >
                     {item.imageUrl ? (
                       <Image
+                        accessible={false}
                         source={{ uri: item.imageUrl }}
                         style={styles.recentImage}
                       />
@@ -666,21 +691,40 @@ export default function HomeScreen() {
         onRequestClose={() => setHowToOpen(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View
+            accessibilityLabel="How to use GoDiscover"
+            accessibilityViewIsModal
+            aria-modal
+            onAccessibilityEscape={() => setHowToOpen(false)}
+            role="dialog"
+            style={styles.modalContent}
+          >
             <Pressable
+              accessibilityLabel="Close How to use"
+              accessibilityRole="button"
               style={styles.modalClose}
               onPress={() => setHowToOpen(false)}
             >
-              <AntDesign name="close" size={20} color={palette.textMuted} />
+              <AntDesign
+                accessible={false}
+                name="close"
+                size={20}
+                color={palette.textMuted}
+              />
             </Pressable>
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.howToHeader}>
                 <View style={styles.howToIconCircle}>
-                  <FontAwesome name="compass" size={36} color={palette.accent} />
+                  <FontAwesome
+                    accessible={false}
+                    name="compass"
+                    size={36}
+                    color={palette.accent}
+                  />
                 </View>
                 <Text style={styles.howToTitle}>How to use GoDiscover</Text>
                 <Text style={styles.howToSubtitle}>
-                  Discover something new in three simple steps
+                  Four simple steps to find your next spark
                 </Text>
               </View>
 
@@ -690,10 +734,9 @@ export default function HomeScreen() {
                     <Text style={styles.stepNumberText}>1</Text>
                   </View>
                   <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Pick a category</Text>
+                    <Text style={styles.stepTitle}>Choose your category</Text>
                     <Text style={styles.stepDescription}>
-                      Choose between Artists, Albums, Books, or Movies — whatever
-                      you're in the mood to discover.
+                      Movies, Books, Artists, or Albums each has its own vibe.
                     </Text>
                   </View>
                 </View>
@@ -703,11 +746,9 @@ export default function HomeScreen() {
                     <Text style={styles.stepNumberText}>2</Text>
                   </View>
                   <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Choose how to discover</Text>
+                    <Text style={styles.stepTitle}>Let it surprise you</Text>
                     <Text style={styles.stepDescription}>
-                      <Text style={styles.stepBold}>Search</Text> with a description,{" "}
-                      <Text style={styles.stepBold}>Filter</Text> by genre and era, or hit{" "}
-                      <Text style={styles.stepBold}>Randomize</Text> for a surprise.
+                      Surprise Me stays random; Search and Filter are optional.
                     </Text>
                   </View>
                 </View>
@@ -717,10 +758,22 @@ export default function HomeScreen() {
                     <Text style={styles.stepNumberText}>3</Text>
                   </View>
                   <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Explore & save</Text>
+                    <Text style={styles.stepTitle}>Make your move</Text>
                     <Text style={styles.stepDescription}>
-                      Tap any result to see details and open it on your favorite
-                      platform. Save items you love to revisit later.
+                      Swipe right to Save or left for Not for me. The labeled buttons
+                      do the same thing.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.stepRow}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>4</Text>
+                  </View>
+                  <View style={styles.stepContent}>
+                    <Text style={styles.stepTitle}>Follow a spark</Text>
+                    <Text style={styles.stepDescription}>
+                      Similar makes a temporary related deck only when you ask for it.
                     </Text>
                   </View>
                 </View>
@@ -728,8 +781,7 @@ export default function HomeScreen() {
 
               <View style={styles.howToFooter}>
                 <Text style={styles.howToFooterText}>
-                  Browse freely without an account — sign in only when you want to
-                  save your finds.
+                  Your saves and skips never train Surprise Me.
                 </Text>
               </View>
             </ScrollView>
@@ -745,16 +797,32 @@ export default function HomeScreen() {
         onRequestClose={() => setSavedOpen(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.savedSheet}>
+          <View
+            accessibilityLabel="Saved discoveries"
+            accessibilityViewIsModal
+            aria-modal
+            onAccessibilityEscape={() => setSavedOpen(false)}
+            role="dialog"
+            style={styles.savedSheet}
+          >
             <Pressable
+              accessibilityLabel="Close saved discoveries"
+              accessibilityRole="button"
               style={styles.modalClose}
               onPress={() => setSavedOpen(false)}
             >
-              <AntDesign name="close" size={20} color={palette.onAccent} />
+              <AntDesign
+                accessible={false}
+                name="close"
+                size={20}
+                color={palette.onAccent}
+              />
             </Pressable>
             <Text style={styles.savedTitle}>Saved</Text>
             {!authSession && (
               <Pressable
+                accessibilityLabel="Sign in to sync saved discoveries"
+                accessibilityRole="button"
                 onPress={() => {
                   setSavedOpen(false);
                   setAccountOpen(true);
@@ -764,7 +832,12 @@ export default function HomeScreen() {
                   pressed && { opacity: 0.8 },
                 ]}
               >
-                <FontAwesome name="cloud" size={14} color={palette.accent} />
+                <FontAwesome
+                  accessible={false}
+                  name="cloud"
+                  size={14}
+                  color={palette.accent}
+                />
                 <Text style={styles.savedSignInText}>
                   Sign in to sync across devices
                 </Text>
@@ -772,7 +845,12 @@ export default function HomeScreen() {
             )}
             {savedItems.length === 0 ? (
               <View style={styles.savedEmpty}>
-                <FontAwesome name="bookmark-o" size={36} color={palette.textFaint} />
+                <FontAwesome
+                  accessible={false}
+                  name="bookmark-o"
+                  size={36}
+                  color={palette.textFaint}
+                />
                 <Text style={styles.savedEmptyText}>
                   Nothing saved yet. Tap the Save button on any result to keep it here.
                 </Text>
@@ -801,6 +879,8 @@ export default function HomeScreen() {
                         {group.map((item) => (
                           <Pressable
                             key={`${item.category}:${item.id}`}
+                            accessibilityLabel={`Open ${item.title} details`}
+                            accessibilityRole="button"
                             style={({ pressed }) => [
                               styles.savedItem,
                               pressed && { opacity: 0.7 },
@@ -812,6 +892,7 @@ export default function HomeScreen() {
                           >
                             {item.imageUrl ? (
                               <Image
+                                accessible={false}
                                 source={{ uri: item.imageUrl }}
                                 style={styles.savedItemImage}
                               />
@@ -833,6 +914,8 @@ export default function HomeScreen() {
                               </Text>
                             </View>
                             <Pressable
+                              accessibilityLabel={`Remove ${item.title} from saved discoveries`}
+                              accessibilityRole="button"
                               hitSlop={10}
                               onPress={async () => {
                                 const next = await removeSaved(item.category, item.id);
@@ -844,6 +927,7 @@ export default function HomeScreen() {
                               ]}
                             >
                               <AntDesign
+                                accessible={false}
                                 name="close"
                                 size={16}
                                 color={palette.textMuted}
@@ -869,19 +953,38 @@ export default function HomeScreen() {
         onRequestClose={() => setAccountOpen(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View
+            accessibilityLabel="Account"
+            accessibilityViewIsModal
+            aria-modal
+            onAccessibilityEscape={() => setAccountOpen(false)}
+            role="dialog"
+            style={styles.modalContent}
+          >
             <Pressable
+              accessibilityLabel="Close account"
+              accessibilityRole="button"
               style={styles.modalClose}
               onPress={() => setAccountOpen(false)}
             >
-              <AntDesign name="close" size={20} color={palette.textMuted} />
+              <AntDesign
+                accessible={false}
+                name="close"
+                size={20}
+                color={palette.textMuted}
+              />
             </Pressable>
             <ScrollView showsVerticalScrollIndicator={false}>
               {authSession ? (
                 <>
                   <View style={styles.authHeader}>
                     <View style={styles.howToIconCircle}>
-                      <FontAwesome name="user-circle" size={36} color={palette.accent} />
+                      <FontAwesome
+                        accessible={false}
+                        name="user-circle"
+                        size={36}
+                        color={palette.accent}
+                      />
                     </View>
                     <Text style={styles.howToTitle}>
                       {currentDisplayName() || "Signed in"}
@@ -894,6 +997,8 @@ export default function HomeScreen() {
                     <Text style={styles.authLabel}>Display name</Text>
                     <View style={styles.nameRow}>
                       <TextInput
+                        accessibilityLabel="Display name"
+                        accessibilityState={{ disabled: savingName }}
                         style={[styles.authInput, styles.nameInput]}
                         placeholder="Your name"
                         placeholderTextColor={palette.textFaint}
@@ -903,6 +1008,14 @@ export default function HomeScreen() {
                         autoCapitalize="words"
                       />
                       <Pressable
+                        accessibilityLabel="Save display name"
+                        accessibilityRole="button"
+                        accessibilityState={{
+                          disabled:
+                            savingName ||
+                            !displayNameDraft.trim() ||
+                            displayNameDraft.trim() === currentDisplayName(),
+                        }}
                         disabled={
                           savingName ||
                           !displayNameDraft.trim() ||
@@ -928,6 +1041,8 @@ export default function HomeScreen() {
                     </View>
 
                     <Pressable
+                      accessibilityLabel="Sign out"
+                      accessibilityRole="button"
                       style={({ pressed }) => [
                         styles.authPrimaryButton,
                         pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
@@ -942,7 +1057,12 @@ export default function HomeScreen() {
                 <>
                   <View style={styles.authHeader}>
                     <View style={styles.howToIconCircle}>
-                      <FontAwesome name="user-circle-o" size={36} color={palette.accent} />
+                      <FontAwesome
+                        accessible={false}
+                        name="user-circle-o"
+                        size={36}
+                        color={palette.accent}
+                      />
                     </View>
                     <Text style={styles.howToTitle}>
                       {authMode === "signin" ? "Welcome back" : "Create account"}
@@ -956,6 +1076,9 @@ export default function HomeScreen() {
 
                   <View style={styles.authForm}>
                     <Pressable
+                      accessibilityLabel="Continue with Google"
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: authLoading }}
                       style={({ pressed }) => [
                         styles.googleButton,
                         (pressed || authLoading) && { opacity: 0.85, transform: [{ scale: 0.98 }] },
@@ -963,7 +1086,12 @@ export default function HomeScreen() {
                       onPress={handleGoogleSignIn}
                       disabled={authLoading}
                     >
-                      <FontAwesome name="google" size={18} color={palette.text} />
+                      <FontAwesome
+                        accessible={false}
+                        name="google"
+                        size={18}
+                        color={palette.text}
+                      />
                       <Text style={styles.googleButtonText}>Continue with Google</Text>
                     </Pressable>
 
@@ -975,6 +1103,8 @@ export default function HomeScreen() {
 
                     <Text style={styles.authLabel}>Email</Text>
                     <TextInput
+                      accessibilityLabel="Email"
+                      accessibilityState={{ disabled: authLoading }}
                       style={styles.authInput}
                       placeholder="you@example.com"
                       placeholderTextColor={palette.textFaint}
@@ -988,6 +1118,8 @@ export default function HomeScreen() {
 
                     <Text style={styles.authLabel}>Password</Text>
                     <TextInput
+                      accessibilityLabel="Password"
+                      accessibilityState={{ disabled: authLoading }}
                       style={styles.authInput}
                       placeholder="••••••••"
                       placeholderTextColor={palette.textFaint}
@@ -998,6 +1130,9 @@ export default function HomeScreen() {
                     />
 
                     <Pressable
+                      accessibilityLabel={authMode === "signin" ? "Sign in" : "Sign up"}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: authLoading }}
                       style={({ pressed }) => [
                         styles.authPrimaryButton,
                         (pressed || authLoading) && {
@@ -1018,6 +1153,12 @@ export default function HomeScreen() {
                     </Pressable>
 
                     <Pressable
+                      accessibilityLabel={
+                        authMode === "signin"
+                          ? "Create an account"
+                          : "Sign in to your account"
+                      }
+                      accessibilityRole="button"
                       style={styles.authSwitch}
                       onPress={() => {
                         setAuthMode(authMode === "signin" ? "signup" : "signin");
@@ -1045,6 +1186,9 @@ export default function HomeScreen() {
                     return (
                       <Pressable
                         key={mode}
+                        accessibilityLabel={`Use ${mode} theme`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
                         style={({ pressed }) => [
                           styles.themeToggleOption,
                           active && styles.themeToggleOptionActive,
@@ -1090,13 +1234,24 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: c.accentBorder,
   },
-  topBarLeft: { flexDirection: "row", alignItems: "center", minWidth: 62 },
-  topBarRight: { flexDirection: "row", alignItems: "center", gap: 16, minWidth: 62, justifyContent: "flex-end" },
+  topBarLeft: { flexDirection: "row", alignItems: "center", minWidth: 88 },
+  topBarRight: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    minWidth: 88,
+  },
+  topBarAction: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
   logoText: { color: c.accent, fontSize: 20, fontWeight: "700", letterSpacing: 0.5 },
 
   // ── Discovery ──
@@ -1134,6 +1289,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     minHeight: 44,
+    minWidth: 44,
     paddingHorizontal: 8,
     paddingVertical: 10,
   },
@@ -1178,6 +1334,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     marginBottom: 14,
+    minHeight: 44,
   },
   savedSignInText: { color: c.accent, fontSize: 13, fontWeight: "600" },
   savedGroup: { marginBottom: 20 },
@@ -1189,12 +1346,23 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 8,
   },
-  savedItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
+  savedItem: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 68,
+    paddingVertical: 10,
+  },
   savedItemImage: { width: 48, height: 48, borderRadius: 6 },
   savedItemText: { flex: 1 },
   savedItemTitle: { color: c.text, fontSize: 15, fontWeight: "600" },
   savedItemSubtitle: { color: c.textMuted, fontSize: 13, marginTop: 2 },
-  savedRemove: { padding: 6 },
+  savedRemove: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 44,
+  },
 
   // ── Recently Viewed ──
   recentsSection: { marginTop: 8, marginBottom: 16 },
@@ -1213,7 +1381,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     textTransform: "uppercase",
   },
   recentsRow: { gap: 12, paddingRight: 16 },
-  recentCard: { width: 92 },
+  recentCard: { minHeight: 44, minWidth: 44, width: 92 },
   recentImage: {
     width: 92,
     height: 92,
@@ -1245,9 +1413,9 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     top: 14,
     right: 14,
     zIndex: 10,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: c.pillDark,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
@@ -1316,7 +1484,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   stepContent: { flex: 1, gap: 4 },
   stepTitle: { color: c.text, fontSize: 16, fontWeight: "600" },
   stepDescription: { color: c.textSecondary, fontSize: 14, lineHeight: 20 },
-  stepBold: { color: c.accent, fontWeight: "600" },
   howToFooter: { paddingHorizontal: 20, paddingVertical: 20, alignItems: "center" },
   howToFooterText: {
     color: c.textFaint,
@@ -1345,6 +1512,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 14,
     color: c.text,
     fontSize: 15,
+    minHeight: 48,
   },
   authPrimaryButton: {
     backgroundColor: c.accent,
@@ -1352,6 +1520,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     marginTop: 20,
+    minHeight: 44,
     shadowColor: c.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
@@ -1367,17 +1536,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   authDividerLine: { flex: 1, height: 1, backgroundColor: c.border },
   authDividerText: { color: c.textFaint, fontSize: 12, fontWeight: "500" },
-  authSocialRow: { flexDirection: "row", justifyContent: "center", gap: 12 },
-  authSocialButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: c.surfaceAlt,
-    borderWidth: 1,
-    borderColor: c.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1395,6 +1553,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
+    minHeight: 44,
     minWidth: 68,
   },
   nameSaveText: { color: c.onAccent, fontSize: 14, fontWeight: "600" },
@@ -1408,9 +1567,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderColor: c.border,
     paddingVertical: 14,
     borderRadius: 12,
+    minHeight: 44,
   },
   googleButtonText: { color: c.text, fontSize: 15, fontWeight: "600" },
-  authSwitch: { marginTop: 28, alignItems: "center" },
+  authSwitch: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 28,
+    minHeight: 44,
+  },
   authSwitchText: { color: c.textMuted, fontSize: 14 },
   authSwitchLink: { color: c.accent, fontWeight: "600" },
 
@@ -1441,6 +1606,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
     alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
   },
   themeToggleOptionActive: {
     backgroundColor: c.accent,

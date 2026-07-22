@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 
 import type { MovieDetail, ResultItem } from "../../types/content";
 
@@ -13,6 +14,8 @@ jest.mock(
   "@react-native-async-storage/async-storage",
   () => require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
+jest.mock("@expo/vector-icons/AntDesign", () => "AntDesign");
+jest.mock("@expo/vector-icons/FontAwesome", () => "FontAwesome");
 
 jest.mock("../../lib/storage/saved", () => ({
   listSaved: jest.fn(async () => []),
@@ -138,6 +141,19 @@ function deckFocusMock(): jest.Mock {
   ).deckFocus;
 }
 
+function flattenedStyle(element: { props: { style: unknown } }) {
+  const style = element.props.style;
+  return StyleSheet.flatten(
+    typeof style === "function" ? style({ pressed: false }) : style
+  );
+}
+
+function expectMinimumTarget(element: { props: { style: unknown } }) {
+  const style = flattenedStyle(element);
+  expect(style.minHeight ?? style.height).toBeGreaterThanOrEqual(44);
+  expect(style.minWidth ?? style.width).toBeGreaterThanOrEqual(44);
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(loadDiscovery).mockResolvedValue([arrival]);
@@ -151,7 +167,18 @@ beforeEach(() => {
   jest.mocked(removeSaved).mockResolvedValue([]);
 });
 
-it("moves from category selection to Surprise Me to one active deck card", async () => {
+it("gives every header action an explicit name and 44-point target", async () => {
+  render(<HomeScreen />);
+  await act(async () => undefined);
+
+  [
+    screen.getByRole("button", { name: "Open account" }),
+    screen.getByRole("button", { name: "Open saved discoveries" }),
+    screen.getByRole("button", { name: "How to use GoDiscover" }),
+  ].forEach(expectMinimumTarget);
+});
+
+it("keeps all three labeled deck actions available without gesture input", async () => {
   render(<HomeScreen />);
   fireEvent.press(screen.getByRole("button", { name: "Movies" }));
   fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
@@ -159,6 +186,95 @@ it("moves from category selection to Surprise Me to one active deck card", async
   expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Not for me" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Find similar" })).toBeTruthy();
+});
+
+it("renders a safe discovery error without provider or credential details", async () => {
+  const warning = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+  jest
+    .mocked(loadDiscovery)
+    .mockRejectedValueOnce(new Error("Discogs 401: Invalid consumer token"));
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Albums" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with an album" }));
+
+  expect(
+    await screen.findByText(
+      "Couldn't load albums. Check your connection and try again."
+    )
+  ).toBeTruthy();
+  expect(screen.queryByText(/Discogs/i)).toBeNull();
+  expect(screen.queryByText(/401/i)).toBeNull();
+  expect(screen.queryByText(/token/i)).toBeNull();
+  warning.mockRestore();
+});
+
+it("labels a temporary Similar deck and resets to unbiased Surprise Me", async () => {
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  await screen.findByText("Arrival");
+
+  fireEvent.press(screen.getByRole("button", { name: "Find similar" }));
+
+  expect(await screen.findByText("Similar to Arrival")).toBeTruthy();
+  const reset = screen.getByRole("button", {
+    name: "Back to unbiased Surprise Me",
+  });
+  expect(reset).toBeTruthy();
+  fireEvent.press(reset);
+
+  await waitFor(() => expect(screen.queryByText("Similar to Arrival")).toBeNull());
+  expect(loadDiscovery).toHaveBeenLastCalledWith({
+    category: "movies",
+    mode: "randomize",
+  });
+});
+
+it("exposes a 44-point detail close target and accessibility escape", async () => {
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: /Movies\. Arrival/ }));
+
+  const surface = await screen.findByTestId("detail-sheet-surface");
+  expectMinimumTarget(
+    within(surface).getByRole("button", { name: "Close details" })
+  );
+  fireEvent(surface, "accessibilityEscape");
+  await waitFor(() => expect(screen.queryByTestId("detail-sheet-surface")).toBeNull());
+});
+
+it("explains the four discovery steps and unbiased footer", async () => {
+  render(<HomeScreen />);
+  await act(async () => undefined);
+  fireEvent.press(
+    screen.getByRole("button", { name: "How to use GoDiscover" })
+  );
+
+  expect(screen.getByText("Choose your category")).toBeTruthy();
+  expect(
+    screen.getByText("Movies, Books, Artists, or Albums each has its own vibe.")
+  ).toBeTruthy();
+  expect(screen.getByText("Let it surprise you")).toBeTruthy();
+  expect(
+    screen.getByText("Surprise Me stays random; Search and Filter are optional.")
+  ).toBeTruthy();
+  expect(screen.getByText("Make your move")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Swipe right to Save or left for Not for me. The labeled buttons do the same thing."
+    )
+  ).toBeTruthy();
+  expect(screen.getByText("Follow a spark")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Similar makes a temporary related deck only when you ask for it."
+    )
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Your saves and skips never train Surprise Me.")
+  ).toBeTruthy();
 });
 
 it("loads tagged detail without a related request until Similar is explicit", async () => {

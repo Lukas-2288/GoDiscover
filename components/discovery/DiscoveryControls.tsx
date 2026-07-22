@@ -65,6 +65,9 @@ function FilterSection({
   return (
     <View style={[styles.filterSection, { borderColor: palette.border }]}>
       <Pressable
+        accessibilityLabel={`${title} filters${
+          activeCount > 0 ? `, ${activeCount} selected` : ""
+        }`}
         accessibilityRole="button"
         accessibilityState={{ expanded }}
         onPress={() => onOpenSection(expanded ? null : sectionKey)}
@@ -80,6 +83,7 @@ function FilterSection({
           ) : null}
         </Text>
         <FontAwesome
+          accessible={false}
           name={expanded ? "chevron-down" : "chevron-right"}
           size={12}
           color={palette.textMuted}
@@ -93,6 +97,7 @@ function FilterSection({
             return (
               <Pressable
                 key={option.value}
+                accessibilityLabel={option.label}
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
                 onPress={() => onToggleFilter(option.value)}
@@ -157,6 +162,7 @@ export function DiscoveryControls({
         }))
       : null;
   const searchDisabled = loading || query.trim().length === 0;
+  const surpriseArticle = category === "albums" ? "an" : "a";
 
   const submitSearch = () => {
     if (!searchDisabled) onSubmit("search");
@@ -182,7 +188,12 @@ export function DiscoveryControls({
             pressed && styles.pressed,
           ]}
         >
-          <FontAwesome name="search" size={15} color={palette.text} />
+          <FontAwesome
+            accessible={false}
+            name="search"
+            size={15}
+            color={palette.text}
+          />
           <Text style={[styles.secondaryButtonText, { color: palette.text }]}>
             Search {categoryLabel}
           </Text>
@@ -205,7 +216,12 @@ export function DiscoveryControls({
             pressed && styles.pressed,
           ]}
         >
-          <FontAwesome name="sliders" size={15} color={palette.text} />
+          <FontAwesome
+            accessible={false}
+            name="sliders"
+            size={15}
+            color={palette.text}
+          />
           <Text style={[styles.secondaryButtonText, { color: palette.text }]}>
             Filter {categoryLabel}
           </Text>
@@ -213,7 +229,7 @@ export function DiscoveryControls({
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Surprise me with a ${theme.singular}`}
+          accessibilityLabel={`Surprise me with ${surpriseArticle} ${theme.singular}`}
           accessibilityState={{ disabled: loading }}
           disabled={loading}
           onPress={() => onSubmit("randomize")}
@@ -225,7 +241,12 @@ export function DiscoveryControls({
             },
           ]}
         >
-          <FontAwesome name="random" size={15} color={theme.onAccent} />
+          <FontAwesome
+            accessible={false}
+            name="random"
+            size={15}
+            color={theme.onAccent}
+          />
           <Text style={[styles.surpriseButtonText, { color: theme.onAccent }]}>
             Surprise Me
           </Text>
@@ -277,6 +298,7 @@ export function DiscoveryControls({
         <View style={styles.panel}>
           {filters.length > 0 ? (
             <Pressable
+              accessibilityLabel="Clear all filters"
               accessibilityRole="button"
               onPress={onClearFilters}
               style={({ pressed }) => [
@@ -327,6 +349,7 @@ export function DiscoveryControls({
           ) : null}
 
           <Pressable
+            accessibilityLabel="Apply filters"
             accessibilityRole="button"
             accessibilityState={{ disabled: loading }}
             disabled={loading}
@@ -453,6 +476,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     paddingVertical: 10,
     minHeight: 44,
+    minWidth: 44,
   },
   chipText: {
     fontSize: 13,

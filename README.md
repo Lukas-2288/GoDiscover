@@ -8,12 +8,20 @@ Built with React Native (Expo), TypeScript, and Supabase. Deploys to iOS, Androi
 
 ## Features
 
-- **Content Type Selector** — Switch between Movies, Books, Artists, and Albums. Acts as a silent toggle that sets the context for all actions without changing the page layout.
-- **Randomize** — No filters, no decision fatigue. Hit the button, get 5 results (1 hero + 4 alternatives).
-- **Filters** — Narrow results by genre, year, rating, and more. Filter options vary by content type (see below).
+- **Category Picker** — Switch between Movies, Books, Artists, and Albums, each with its own visual theme.
+- **Surprise Me** — Start an unbiased, category-specific discovery deck with no filters or personalization.
+- **Search and Filters** — Optional ways to narrow a deck by query, genre, era, rating, and more.
+- **Swipe Deck** — Save with a right swipe or choose Not for me with a left swipe; labeled buttons provide the same actions without requiring gestures.
+- **Explicit Similar** — Start a visibly labeled, temporary related deck only when you choose Similar, then return to unbiased Surprise Me at any time.
 - **Saved Preferences** — Save items to your collection, organized by content type (4 sections: Movies, Books, Artists, Albums). Requires an account to persist.
-- **AI Search** _(coming soon)_ — Conversational discovery powered by AI.
 - **Light / Dark Mode** — Full theme support with accessible color contrast.
+- **Reduced Motion** — Honors the system setting by removing card flight, tilt, scale, parallax, expanding artwork, and repeated skeleton motion while preserving every action.
+
+## Discovery Architecture
+
+Discovery is split into three layers. `lib/discovery` contains pure request routing, category-session state, and transition logic. `components/discovery/useDiscoveryController.ts` is the side-effect boundary for provider requests, saved-item persistence, announcements, and Undo timing. The remaining `components/discovery` modules render the category picker, optional controls, swipe deck, status feedback, and detail sheet from that state.
+
+The interaction contract is the same on every platform: swipe right or choose **Save**, swipe left or choose **Not for me**, and choose **Similar** only when you want a temporary related deck. Every gesture has an always-visible labeled button equivalent. Reduced-motion mode changes the transitions, not the available controls or their meaning.
 
 ---
 
@@ -32,42 +40,34 @@ Built with React Native (Expo), TypeScript, and Supabase. Deploys to iOS, Androi
 
 ### Layout
 
-Single-page architecture (no bottom tabs). The page layout is the same regardless of selected content type.
+Single-page architecture (no bottom tabs). The category theme changes, but the discovery controls and interaction order stay consistent.
 
 ```
 ┌──────────────────────────────────┐
-│  Logo    [How to Use]  [Account] │  <- Top bar / nav
+│ [Account] GoDiscover [Saved] [?] │  <- Top bar
 ├──────────────────────────────────┤
-│                                  │
-│   [ Movies ] [ Books ]           │  <- Content type selector
-│   [ Artists ] [ Albums ]         │     (silent toggle)
-│                                  │
+│ [ Movies ] [ Books ]             │  <- Category picker
+│ [ Artists ] [ Albums ]           │
 ├──────────────────────────────────┤
-│                                  │
-│  [ Randomize ]  [ Filters ]      │  <- Action buttons
-│  [ AI Search (coming soon) ]     │
-│                                  │
+│ [Search] [Filter] [Surprise Me]  │  <- Discovery controls
 ├──────────────────────────────────┤
-│                                  │
-│  ┌──────────────────────┐        │
-│  │     Hero Result      │        │  <- 1 hero card (large)
-│  └──────────────────────┘        │
-│  ┌──────┐ ┌──────┐ ┌──────┐ ... │  <- 4 smaller cards
-│  └──────┘ └──────┘ └──────┘     │
-│                                  │
+│     ┌────────────────────┐       │
+│     │ Active deck card   │       │  <- Swipe or open details
+│     └────────────────────┘       │
+│ [Not for me] [Save] [Similar]    │  <- Labeled gesture parity
 └──────────────────────────────────┘
 ```
 
 ### Output Behavior
 
-- **Mobile**: Results appear in a modal. Tapping a result for details opens a second modal with full info (review, rating, release year, etc.).
-- **Web**: Results appear inline on the page. Clicking a result opens a detail modal.
+- **Mobile**: The deck stays inline; opening a card presents a bottom detail sheet.
+- **Web**: The deck stays inline and is bounded for desktop widths; opening a card presents a centered detail surface on wider screens.
 
 ### Modals
 
 - **How to Use** — Simple instructional modal accessible from the top bar.
 - **Account** — Sign in / sign up modal. Users can browse without an account; saving triggers a nudge to sign in.
-- **Detail View** — Full info about a selected item (varies by content type).
+- **Detail Sheet** — Category-aware details with explicit Save, Not for me, Similar, Share, and external-source actions as applicable.
 
 ---
 
@@ -180,19 +180,15 @@ EXPO_PUBLIC_SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 ## Project Structure
 
 ```
-app/                  # Expo Router file-based routes
-  index.tsx           # Main single-page layout
-  saved.tsx           # Saved preferences page
-components/           # Reusable UI components
-  ContentSelector.tsx # Movies / Books / Artists / Albums toggle
-  ResultCard.tsx      # Hero and small result cards
-  FilterModal.tsx     # Filter UI per content type
-  DetailModal.tsx     # Item detail view
-  HowToUseModal.tsx   # Instructional modal
-  AuthModal.tsx       # Sign in / sign up
-lib/                  # API clients, Supabase config, helpers
-types/                # TypeScript type definitions
-constants/            # Colors, themes, genres, config values
+app/                         # Expo Router routes and high-level composition
+  index.tsx                  # Main discovery, auth, saved, and recents route
+components/discovery/        # Category, controls, deck, status, and detail UI
+  useDiscoveryController.ts  # Provider, storage, announcement, and Undo effects
+lib/discovery/               # Pure request routing and discovery state logic
+lib/api/                     # TMDB, Open Library, and music provider clients
+lib/storage/                 # Saved-item and recent-item persistence
+types/                       # Shared content contracts
+constants/                   # Filter configuration
 ```
 
 ---

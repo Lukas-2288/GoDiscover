@@ -98,11 +98,21 @@ export function CategoryPicker({
           },
         ]}
       >
-        <FontAwesome name={theme.icon} size={16} color={theme.accent} />
+        <FontAwesome
+          accessible={false}
+          name={theme.icon}
+          size={16}
+          color={theme.accent}
+        />
         <Text style={[styles.compactLabel, { color: palette.text }]}>
           {theme.label}
         </Text>
-        <FontAwesome name="chevron-down" size={12} color={palette.textMuted} />
+        <FontAwesome
+          accessible={false}
+          name="chevron-down"
+          size={12}
+          color={palette.textMuted}
+        />
       </Pressable>
     );
   }
@@ -135,7 +145,12 @@ export function CategoryPicker({
           >
             <CategoryPatternView pattern={theme.pattern} color={theme.accent} />
             <View style={styles.tileContent}>
-              <FontAwesome name={theme.icon} size={25} color={theme.accent} />
+              <FontAwesome
+                accessible={false}
+                name={theme.icon}
+                size={25}
+                color={theme.accent}
+              />
               <Text style={[styles.tileLabel, { color: palette.text }]}>
                 {theme.label}
               </Text>

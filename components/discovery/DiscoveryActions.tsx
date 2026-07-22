@@ -42,7 +42,12 @@ export function DiscoveryActions({
           },
         ]}
       >
-        <FontAwesome name="times" size={16} color={palette.textSecondary} />
+        <FontAwesome
+          accessible={false}
+          name="times"
+          size={16}
+          color={palette.textSecondary}
+        />
         <Text style={[styles.secondaryLabel, { color: palette.textSecondary }]}>Not for me</Text>
       </Pressable>
 
@@ -61,7 +66,12 @@ export function DiscoveryActions({
           },
         ]}
       >
-        <FontAwesome name="heart" size={16} color={onAccent} />
+        <FontAwesome
+          accessible={false}
+          name="heart"
+          size={16}
+          color={onAccent}
+        />
         <Text style={[styles.primaryLabel, { color: onAccent }]}>Save</Text>
       </Pressable>
 
@@ -81,7 +91,12 @@ export function DiscoveryActions({
           },
         ]}
       >
-        <FontAwesome name="clone" size={15} color={palette.textSecondary} />
+        <FontAwesome
+          accessible={false}
+          name="clone"
+          size={15}
+          color={palette.textSecondary}
+        />
         <Text style={[styles.secondaryLabel, { color: palette.textSecondary }]}>Find similar</Text>
       </Pressable>
     </View>

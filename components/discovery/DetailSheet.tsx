@@ -85,7 +85,12 @@ function ExternalLink({
         },
       ]}
     >
-      <FontAwesome name="external-link" size={14} color={accent} />
+      <FontAwesome
+        accessible={false}
+        name="external-link"
+        size={14}
+        color={accent}
+      />
       <Text style={[styles.linkLabel, { color: palette.text }]}>{label}</Text>
     </Pressable>
   );
@@ -335,7 +340,7 @@ function ActionButton({
         },
       ]}
     >
-      <FontAwesome name={icon} size={15} color={color} />
+      <FontAwesome accessible={false} name={icon} size={15} color={color} />
       <Text style={[styles.actionLabel, { color }]}>{label}</Text>
     </Pressable>
   );
@@ -483,7 +488,12 @@ export function DetailSheet({
               },
             ]}
           >
-            <FontAwesome name="close" size={18} color={palette.onAccent} />
+            <FontAwesome
+              accessible={false}
+              name="close"
+              size={18}
+              color={palette.onAccent}
+            />
           </Pressable>
 
           <ScrollView
@@ -492,7 +502,12 @@ export function DetailSheet({
             showsVerticalScrollIndicator={false}
           >
             <View style={[styles.badge, { backgroundColor: theme.accent }]}>
-              <FontAwesome name={theme.icon} size={13} color={theme.onAccent} />
+              <FontAwesome
+                accessible={false}
+                name={theme.icon}
+                size={13}
+                color={theme.onAccent}
+              />
               <Text style={[styles.badgeText, { color: theme.onAccent }]}>{theme.label}</Text>
             </View>
 
@@ -516,7 +531,12 @@ export function DetailSheet({
                 />
               ) : (
                 <View style={styles.heroFallback} testID="detail-sheet-hero-fallback">
-                  <FontAwesome name={theme.icon} size={54} color={theme.accent} />
+                  <FontAwesome
+                    accessible={false}
+                    name={theme.icon}
+                    size={54}
+                    color={theme.accent}
+                  />
                   <Text style={[styles.heroFallbackText, { color: theme.accent }]}>
                     {theme.badge}
                   </Text>
@@ -534,7 +554,7 @@ export function DetailSheet({
 
             {loading ? (
               <View accessibilityLabel="Loading details" accessibilityRole="progressbar" style={styles.status}>
-                <ActivityIndicator color={theme.accent} />
+                <ActivityIndicator accessible={false} color={theme.accent} />
                 <Text style={[styles.statusText, { color: palette.textSecondary }]}>Loading details…</Text>
               </View>
             ) : null}

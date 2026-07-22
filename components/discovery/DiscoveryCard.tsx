@@ -167,7 +167,12 @@ export const DiscoveryCard = forwardRef<DiscoveryCardHandle, DiscoveryCardProps>
               ]}
               testID="artwork-fallback"
             >
-              <FontAwesome name={theme.icon} size={58} color={theme.accent} />
+              <FontAwesome
+                accessible={false}
+                name={theme.icon}
+                size={58}
+                color={theme.accent}
+              />
               <Text style={[styles.fallbackText, { color: theme.accent }]}>{theme.label}</Text>
             </View>
           )}
