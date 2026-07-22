@@ -3,18 +3,13 @@ import FontAwesome from "@expo/vector-icons/FontAwesome";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { LinearGradient } from "expo-linear-gradient";
 import React, {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
-  useReducer,
-  useRef,
   useState,
 } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Image,
   Linking,
   Modal,
@@ -28,47 +23,15 @@ import {
   useColorScheme,
 } from "react-native";
 import {
-  GENRE_FILTERS,
-  ERA_FILTERS,
-  RATING_FILTERS,
-  POPULARITY_FILTERS,
-} from "../constants/Filters";
-import {
-  searchMovies,
-  randomMovies,
-  filterMovies,
   getMovieDetail,
-  getSimilarMovies,
-  decadeToYearRange,
-  TMDB_GENRES,
 } from "../lib/api/tmdb";
 import {
-  searchBooks,
-  randomBooks,
-  filterBooks,
   getBookDetail,
-  getSimilarBooks,
-  OL_SUBJECTS,
 } from "../lib/api/openlibrary";
 import {
-  searchArtists,
-  searchAlbums,
-  randomArtists,
-  randomAlbums,
-  filterArtists,
-  filterAlbums,
   getArtistDetail,
   getAlbumDetail,
-  getSimilarAlbums,
-  getSimilarArtists,
-  SPOTIFY_GENRE_MAP,
 } from "../lib/api/discogs";
-import {
-  discoveryReducer,
-  initialDiscoveryState,
-  type DiscoveryActionMode,
-} from "../lib/discovery/state";
-import { createDiscoveryRequestTracker } from "../lib/discovery/requestTracker";
 import type {
   ContentCategory,
   ResultItem,
@@ -96,332 +59,41 @@ import {
   loadThemeMode,
   saveThemeMode,
 } from "../lib/theme";
-
-type ThemeStyles = ReturnType<typeof makeStyles>;
-const ThemeContext = createContext<{ palette: Palette; styles: ThemeStyles } | null>(null);
-const useTheme = () => {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error("useTheme must be used within ThemeContext.Provider");
-  return ctx;
-};
-
-// Placeholder results until APIs are connected
-const MOCK_RESULTS: Record<string, { title: string; subtitle: string; meta: string }[]> = {
-  artists: [
-    { title: "Arctic Monkeys", subtitle: "Indie Rock", meta: "21M listeners" },
-    { title: "Tame Impala", subtitle: "Psychedelic Rock", meta: "18M listeners" },
-    { title: "Khruangbin", subtitle: "Funk / Psychedelic", meta: "5M listeners" },
-    { title: "Mac DeMarco", subtitle: "Indie / Lo-fi", meta: "8M listeners" },
-    { title: "Hiatus Kaiyote", subtitle: "Neo-Soul / Jazz", meta: "2M listeners" },
-  ],
-  albums: [
-    { title: "In Rainbows", subtitle: "Radiohead", meta: "2007" },
-    { title: "Blonde", subtitle: "Frank Ocean", meta: "2016" },
-    { title: "Currents", subtitle: "Tame Impala", meta: "2015" },
-    { title: "IGOR", subtitle: "Tyler, The Creator", meta: "2019" },
-    { title: "Vespertine", subtitle: "Bjork", meta: "2001" },
-  ],
-  books: [
-    { title: "Dune", subtitle: "Frank Herbert", meta: "⭐ 4.2" },
-    { title: "Project Hail Mary", subtitle: "Andy Weir", meta: "⭐ 4.5" },
-    { title: "Piranesi", subtitle: "Susanna Clarke", meta: "⭐ 4.3" },
-    { title: "Circe", subtitle: "Madeline Miller", meta: "⭐ 4.4" },
-    { title: "The Midnight Library", subtitle: "Matt Haig", meta: "⭐ 3.9" },
-  ],
-  movies: [
-    { title: "Everything Everywhere All at Once", subtitle: "Sci-Fi / Comedy", meta: "⭐ 8.0" },
-    { title: "Parasite", subtitle: "Thriller / Drama", meta: "⭐ 8.5" },
-    { title: "Interstellar", subtitle: "Sci-Fi / Adventure", meta: "⭐ 8.7" },
-    { title: "The Grand Budapest Hotel", subtitle: "Comedy / Drama", meta: "⭐ 8.1" },
-    { title: "Whiplash", subtitle: "Drama / Music", meta: "⭐ 8.5" },
-  ],
-};
-
-// Detailed info for modal (placeholder until APIs)
-const MOCK_DETAILS: Record<string, Record<string, any>> = {
-  artists: {
-    "Arctic Monkeys": { genre: "Indie Rock", listeners: "21M monthly listeners", origin: "Sheffield, UK", active: "2002 – present", topTracks: ["Do I Wanna Know?", "R U Mine?", "505", "Why'd You Only Call Me When You're High?", "I Bet You Look Good on the Dancefloor"] },
-    "Tame Impala": { genre: "Psychedelic Rock", listeners: "18M monthly listeners", origin: "Perth, Australia", active: "2007 – present", topTracks: ["The Less I Know the Better", "Let It Happen", "Borderline", "New Person, Same Old Mistakes", "Feels Like We Only Go Backwards"] },
-    "Khruangbin": { genre: "Funk / Psychedelic", listeners: "5M monthly listeners", origin: "Houston, TX", active: "2010 – present", topTracks: ["Time (You and I)", "Evan Finds the Third Room", "Friday Morning", "People Everywhere", "Two Fish and an Elephant"] },
-    "Mac DeMarco": { genre: "Indie / Lo-fi", listeners: "8M monthly listeners", origin: "Edmonton, Canada", active: "2006 – present", topTracks: ["Chamber of Reflection", "My Old Man", "Freaking Out the Neighborhood", "Still Beating", "Let Her Go"] },
-    "Hiatus Kaiyote": { genre: "Neo-Soul / Jazz", listeners: "2M monthly listeners", origin: "Melbourne, Australia", active: "2011 – present", topTracks: ["Get Sun", "Red Room", "Breathing Underwater", "Nakamarra", "Molasses"] },
-  },
-  albums: {
-    "In Rainbows": { artist: "Radiohead", year: "2007", genre: "Alternative Rock", rating: "9.3", tracks: 10, description: "Radiohead's seventh album, celebrated for its emotional depth, innovative sound design, and the band's pioneering pay-what-you-want release model." },
-    "Blonde": { artist: "Frank Ocean", year: "2016", genre: "R&B / Art Pop", rating: "9.0", tracks: 17, description: "Frank Ocean's acclaimed sophomore album, a deeply personal and experimental exploration of love, identity, and memory." },
-    "Currents": { artist: "Tame Impala", year: "2015", genre: "Psychedelic Pop", rating: "8.8", tracks: 13, description: "A bold shift from guitar-driven psych-rock to lush, synth-heavy pop. Kevin Parker's most accessible and emotionally resonant work." },
-    "IGOR": { artist: "Tyler, The Creator", year: "2019", genre: "Neo-Soul / Synth Pop", rating: "8.5", tracks: 12, description: "A concept album about unrequited love, blending soul, funk, and hip-hop into a cohesive narrative with striking visual identity." },
-    "Vespertine": { artist: "Bjork", year: "2001", genre: "Electronic / Art Pop", rating: "8.7", tracks: 12, description: "An intimate, wintry album built on microbeats, music boxes, and choral arrangements. One of Bjork's most delicate works." },
-  },
-  books: {
-    "Dune": { author: "Frank Herbert", year: "1965", pages: 412, genre: "Sci-Fi", rating: "4.2", description: "Set in a distant future where noble houses control planetary fiefs, Dune tells the story of Paul Atreides as he navigates politics, religion, and ecology on the desert planet Arrakis." },
-    "Project Hail Mary": { author: "Andy Weir", year: "2021", pages: 476, genre: "Sci-Fi", rating: "4.5", description: "A lone astronaut must save Earth from an extinction-level threat. A gripping tale of science, friendship, and survival across the stars." },
-    "Piranesi": { author: "Susanna Clarke", year: "2020", pages: 272, genre: "Fantasy", rating: "4.3", description: "A mysterious, labyrinthine world of endless halls, ocean tides, and living statues. A haunting exploration of memory, identity, and wonder." },
-    "Circe": { author: "Madeline Miller", year: "2018", pages: 393, genre: "Fantasy / Mythology", rating: "4.4", description: "The story of Circe, the witch of Greek mythology, reimagined as a feminist tale of power, transformation, and self-discovery." },
-    "The Midnight Library": { author: "Matt Haig", year: "2020", pages: 304, genre: "Fiction", rating: "3.9", description: "Between life and death lies a library where every book offers a chance to live a different life. A moving exploration of regret, hope, and second chances." },
-  },
-  movies: {
-    "Everything Everywhere All at Once": { director: "Daniel Kwan, Daniel Scheinert", year: "2022", genre: "Sci-Fi / Comedy", rating: "8.0", runtime: "139 min", description: "A Chinese-American woman is swept up in an insane adventure where she alone can save existence by exploring other universes and connecting with the lives she could have led." },
-    "Parasite": { director: "Bong Joon-ho", year: "2019", genre: "Thriller / Drama", rating: "8.5", runtime: "132 min", description: "A poor family schemes to become employed by a wealthy family, infiltrating their household one by one. A masterful blend of dark comedy and social commentary." },
-    "Interstellar": { director: "Christopher Nolan", year: "2014", genre: "Sci-Fi / Adventure", rating: "8.7", runtime: "169 min", description: "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival as Earth becomes uninhabitable." },
-    "The Grand Budapest Hotel": { director: "Wes Anderson", year: "2014", genre: "Comedy / Drama", rating: "8.1", runtime: "99 min", description: "A writer encounters the owner of an aging luxury hotel, who tells of his early years serving as lobby boy and his friendship with a legendary concierge." },
-    "Whiplash": { director: "Damien Chazelle", year: "2014", genre: "Drama / Music", rating: "8.5", runtime: "107 min", description: "A young jazz drummer enrolled at a prestigious music conservatory finds himself under the wing of a terrifying, abusive instructor who will stop at nothing to realize a student's potential." },
-  },
-};
-
-const CATEGORY_ICONS: Record<string, { name: string; family: string }> = {
-  artists: { name: "microphone", family: "FontAwesome" },
-  albums: { name: "music", family: "FontAwesome" },
-  books: { name: "book", family: "FontAwesome" },
-  movies: { name: "film", family: "FontAwesome" },
-};
-
-const CARD_WIDTH = (Dimensions.get("window").width - 48) / 2;
-
-function ResultCard({
-  title,
-  subtitle,
-  meta,
-  isHero,
-  category,
-  imageUrl,
-  onPress,
-}: {
-  title: string;
-  subtitle: string;
-  meta: string;
-  isHero?: boolean;
-  category: string;
-  imageUrl?: string;
-  onPress?: () => void;
-}) {
-  const { styles, palette } = useTheme();
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        isHero ? styles.heroCard : styles.gridCard,
-        pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] },
-      ]}
-      onPress={onPress}
-    >
-      <View style={[styles.cardImagePlaceholder, isHero && styles.heroImagePlaceholder]}>
-        {imageUrl ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={styles.cardImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <FontAwesome
-            name={CATEGORY_ICONS[category]?.name as any ?? "star"}
-            size={isHero ? 40 : 24}
-            color={palette.accentBorder}
-          />
-        )}
-      </View>
-      {/* Card info */}
-      <View style={styles.cardInfo}>
-        <Text style={[styles.cardTitle, isHero && styles.heroCardTitle]} numberOfLines={2}>
-          {title}
-        </Text>
-        <Text style={styles.cardSubtitle} numberOfLines={1}>
-          {subtitle}
-        </Text>
-        <Text style={styles.cardMeta}>{meta}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function ActionButton({
-  label,
-  value,
-  activateAction,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  activateAction: string;
-  onPress: () => void;
-}) {
-  const { styles } = useTheme();
-  const isActive = activateAction === value;
-  const [hovered, setHovered] = useState(false);
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.actionButton,
-        isActive && styles.actionButtonActive,
-        pressed && { opacity: 0.7, transform: [{ scale: 0.97 }] },
-        hovered && !isActive && styles.actionButtonHover,
-      ]}
-      onPress={onPress}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-    >
-      <Text style={[styles.actionButtonText, isActive && styles.actionButtonTextActive]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function ContentButton({
-  label,
-  value,
-  selected,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  selected: string | null;
-  onPress: () => void;
-}) {
-  const { styles } = useTheme();
-  const isSelected = selected === value;
-  const [hovered, setHovered] = useState(false);
-
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.contentButton,
-        isSelected && styles.contentButtonActive,
-        pressed && { opacity: 0.7, transform: [{ scale: 0.97 }] },
-        hovered && !isSelected && styles.contentButtonHover,
-      ]}
-      onPress={onPress}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-    >
-      <Text style={[styles.contentButtonText, isSelected && styles.contentButtonTextActive]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function FilterChip({
-  label,
-  value,
-  selectedFilters,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  selectedFilters: string[];
-  onPress: () => void;
-}) {
-  const { styles } = useTheme();
-  const isSelected = selectedFilters.includes(value);
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.filterChip,
-        isSelected && styles.filterChipActive,
-        pressed && { opacity: 0.7 },
-      ]}
-      onPress={onPress}
-    >
-      <Text
-        style={[styles.filterChipText, isSelected && styles.filterChipTextActive]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function FilterSection({
-  title,
-  sectionKey,
-  options,
-  openSection,
-  onToggle,
-  selectedFilters,
-  onChipPress,
-}: {
-  title: string;
-  sectionKey: string;
-  options: { label: string; value: string }[];
-  openSection: string | null;
-  onToggle: () => void;
-  selectedFilters: string[];
-  onChipPress: (value: string) => void;
-}) {
-  const { styles, palette } = useTheme();
-  const isOpen = openSection === sectionKey;
-  const activeCount = options.filter((o) =>
-    selectedFilters.includes(o.value)
-  ).length;
-
-  return (
-    <View style={styles.filterSection}>
-      <Pressable
-        style={({ pressed }) => [
-          styles.filterSectionHeader,
-          pressed && { opacity: 0.8 },
-        ]}
-        onPress={onToggle}
-      >
-        <Text style={styles.filterSectionTitle}>
-          {title}
-          {activeCount > 0 && (
-            <Text style={styles.filterSectionCount}> ({activeCount})</Text>
-          )}
-        </Text>
-        <AntDesign
-          name={isOpen ? "down" : "right"}
-          size={14}
-          color={palette.textMuted}
-        />
-      </Pressable>
-      {isOpen && (
-        <View style={styles.filterChipContainer}>
-          {options.map((option) => (
-            <FilterChip
-              key={option.value}
-              label={option.label}
-              value={option.value}
-              selectedFilters={selectedFilters}
-              onPress={() => onChipPress(option.value)}
-            />
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
+import { CategoryPicker } from "../components/discovery/CategoryPicker";
+import DiscoveryAnnouncer from "../components/discovery/DiscoveryAnnouncer.native";
+import { DiscoveryControls } from "../components/discovery/DiscoveryControls";
+import { DiscoveryStatusCard } from "../components/discovery/DiscoveryStatusCard";
+import { SwipeDeck } from "../components/discovery/SwipeDeck";
+import { UndoNotice } from "../components/discovery/UndoNotice";
+import { useDiscoveryController } from "../components/discovery/useDiscoveryController";
+import { useReducedMotion } from "../components/discovery/useReducedMotion";
 
 export default function HomeScreen() {
-  const [discovery, dispatchDiscovery] = useReducer(
-    discoveryReducer,
-    initialDiscoveryState
-  );
-  const requestTrackerRef = useRef(createDiscoveryRequestTracker());
+  const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
+  const discoveryController = useDiscoveryController({
+    onSavedItemsChange: setSavedItems,
+  });
   const {
-    selected,
-    activeAction,
-    searchQuery,
-    openSection,
-    selectedFilters,
-    loading,
-  } = discovery;
-  const results =
-    discovery.results?.category === selected ? discovery.results.items : null;
+    state: discovery,
+    session,
+    activeItem,
+    announcement,
+  } = discoveryController;
+  const selected = discovery.selected;
+  const reducedMotion = useReducedMotion();
+  const [categoryPickerExpanded, setCategoryPickerExpanded] = useState(true);
   const [detailItem, setDetailItem] = useState<ResultItem | null>(null);
   const [movieDetail, setMovieDetail] = useState<MovieDetail | null>(null);
   const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
   const [albumDetail, setAlbumDetail] = useState<AlbumDetail | null>(null);
-  const [similarItems, setSimilarItems] = useState<ResultItem[]>([]);
   const [detailError, setDetailError] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [howToOpen, setHowToOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
   const [savedOpen, setSavedOpen] = useState(false);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
-  const [session, setSession] = useState<Session | null>(null);
+  const [authSession, setAuthSession] = useState<Session | null>(null);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -460,13 +132,13 @@ export default function HomeScreen() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+      setAuthSession(data.session);
       if (data.session) {
         listSaved().then(setSavedItems).catch(() => {});
       }
     });
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, s) => {
-      setSession(s);
+      setAuthSession(s);
       if (event === "SIGNED_IN" && s) {
         await syncLocalToCloud();
         const items = await listSaved();
@@ -517,13 +189,13 @@ export default function HomeScreen() {
   };
 
   const currentDisplayName = (): string => {
-    const meta = session?.user?.user_metadata ?? {};
+    const meta = authSession?.user?.user_metadata ?? {};
     return meta.display_name ?? meta.full_name ?? meta.name ?? "";
   };
 
   useEffect(() => {
     setDisplayNameDraft(currentDisplayName());
-  }, [session?.user?.id, session?.user?.user_metadata]);
+  }, [authSession?.user?.id, authSession?.user?.user_metadata]);
 
   const saveDisplayName = async () => {
     const next = displayNameDraft.trim();
@@ -617,109 +289,19 @@ export default function HomeScreen() {
     } catch {}
   };
 
-  const toResultItems = (
-    arr: { title: string; subtitle: string; meta: string }[]
-  ): ResultItem[] =>
-    arr.map((r, i) => ({ id: `${r.title}-${i}`, ...r }));
-
   const handleCategorySelect = (category: ContentCategory) => {
-    requestTrackerRef.current.invalidate();
-    dispatchDiscovery({ type: "selectCategory", category });
+    if (!categoryPickerExpanded && category === selected) {
+      setCategoryPickerExpanded(true);
+      return;
+    }
+    discoveryController.selectCategory(category);
+    setCategoryPickerExpanded(false);
     setDetailItem(null);
   };
 
   const openStoredItem = (category: ContentCategory, item: ResultItem) => {
-    requestTrackerRef.current.invalidate();
-    dispatchDiscovery({ type: "selectCategory", category });
+    discoveryController.selectCategory(category);
     setDetailItem(item);
-  };
-
-  const runAction = async (action: DiscoveryActionMode) => {
-    if (!selected || loading) return;
-    if (action === "search" && !searchQuery.trim()) return;
-
-    const category = selected;
-    const query = searchQuery;
-    const filters = [...selectedFilters];
-    const request = requestTrackerRef.current.start(category);
-    dispatchDiscovery({ type: "requestStarted", request });
-
-    try {
-      const decade = filters.find((filter) => /^\d{2}s$/.test(filter));
-      const range = decade ? decadeToYearRange(decade) : null;
-      const ratingFilter = filters.find((filter) => /^\d(\.\d)?\+$/.test(filter));
-      const minRating = ratingFilter ? parseFloat(ratingFilter) : undefined;
-      let nextResults: ResultItem[];
-
-      if (category === "movies") {
-        if (action === "search") {
-          nextResults = await searchMovies(query);
-        } else if (action === "randomize") {
-          nextResults = await randomMovies();
-        } else {
-          const genreIds = filters
-            .map((filter) => TMDB_GENRES[filter])
-            .filter((value): value is number => typeof value === "number");
-          nextResults = await filterMovies({
-            genreIds: genreIds.length ? genreIds : undefined,
-            yearFrom: range?.yearFrom,
-            yearTo: range?.yearTo,
-            minRating,
-          });
-        }
-      } else if (category === "books") {
-        if (action === "search") {
-          nextResults = await searchBooks(query);
-        } else if (action === "randomize") {
-          nextResults = await randomBooks();
-        } else {
-          const subjects = filters
-            .map((filter) => OL_SUBJECTS[filter])
-            .filter((value): value is string => typeof value === "string");
-          nextResults = await filterBooks({
-            subjects: subjects.length ? subjects : undefined,
-            yearFrom: range?.yearFrom,
-            yearTo: range?.yearTo,
-            minRating,
-          });
-        }
-      } else if (category === "artists" || category === "albums") {
-        if (action === "search") {
-          nextResults =
-            category === "artists"
-              ? await searchArtists(query)
-              : await searchAlbums(query);
-        } else if (action === "randomize") {
-          nextResults =
-            category === "artists"
-              ? await randomArtists()
-              : await randomAlbums();
-        } else {
-          const genres = filters
-            .map((filter) => SPOTIFY_GENRE_MAP[filter])
-            .filter((value): value is string => typeof value === "string");
-          const params = {
-            genres: genres.length ? genres : undefined,
-            yearFrom: range?.yearFrom,
-            yearTo: range?.yearTo,
-          };
-          nextResults =
-            category === "artists"
-              ? await filterArtists(params)
-              : await filterAlbums(params);
-        }
-      } else {
-        nextResults = toResultItems(MOCK_RESULTS[category]);
-      }
-
-      if (!requestTrackerRef.current.isCurrent(request)) return;
-      dispatchDiscovery({ type: "requestSucceeded", request, items: nextResults });
-    } catch (error) {
-      if (!requestTrackerRef.current.isCurrent(request)) return;
-      const message = error instanceof Error ? error.message : "Something went wrong";
-      dispatchDiscovery({ type: "requestFailed", request, message });
-      Alert.alert("Error", message);
-    }
   };
 
   useEffect(() => {
@@ -728,7 +310,6 @@ export default function HomeScreen() {
       setBookDetail(null);
       setArtistDetail(null);
       setAlbumDetail(null);
-      setSimilarItems([]);
       setDetailError(false);
       return;
     }
@@ -740,15 +321,12 @@ export default function HomeScreen() {
     setBookDetail(null);
     setArtistDetail(null);
     setAlbumDetail(null);
-    setSimilarItems([]);
 
     let fetcher: Promise<void>;
-    let similarFetcher: Promise<ResultItem[]> | null = null;
     if (selected === "movies") {
       fetcher = getMovieDetail(detailItem.id).then((d) => {
         if (!cancelled) setMovieDetail(d);
       });
-      similarFetcher = getSimilarMovies(detailItem.id);
     } else if (selected === "books") {
       fetcher = getBookDetail(detailItem.id, {
         title: detailItem.title,
@@ -756,17 +334,14 @@ export default function HomeScreen() {
       }).then((d) => {
         if (!cancelled) setBookDetail(d);
       });
-      similarFetcher = getSimilarBooks(detailItem.id);
     } else if (selected === "artists") {
       fetcher = getArtistDetail(detailItem.id).then((d) => {
         if (!cancelled) setArtistDetail(d);
       });
-      similarFetcher = getSimilarArtists(detailItem.id);
     } else if (selected === "albums") {
       fetcher = getAlbumDetail(detailItem.id).then((d) => {
         if (!cancelled) setAlbumDetail(d);
       });
-      similarFetcher = getSimilarAlbums(detailItem.id);
     } else {
       return;
     }
@@ -779,46 +354,12 @@ export default function HomeScreen() {
         if (!cancelled) setDetailLoading(false);
       });
 
-    if (similarFetcher) {
-      similarFetcher
-        .then((items) => {
-          if (!cancelled) setSimilarItems(items);
-        })
-        .catch(() => {
-          if (!cancelled) setSimilarItems([]);
-        });
-    }
-
     return () => {
       cancelled = true;
     };
   }, [detailItem, selected]);
 
-  const toggleFilter = (value: string) => {
-    dispatchDiscovery({ type: "toggleFilter", value });
-  };
-
-  const genreOptions = selected
-    ? GENRE_FILTERS[selected as keyof typeof GENRE_FILTERS].map((g) => ({
-        label: g,
-        value: g,
-      }))
-    : [];
-  const eraOptions = [
-    { label: "Any", value: "Any" },
-    ...ERA_FILTERS.decades.map((e) => ({ label: e, value: e })),
-  ];
-  const ratingOptions =
-    selected && selected !== "artists" && selected in RATING_FILTERS
-      ? RATING_FILTERS[selected as keyof typeof RATING_FILTERS].map((r) => ({
-          label: r.label,
-          value: r.label,
-        }))
-      : null;
-  const popularityOptions = null;
-
   return (
-    <ThemeContext.Provider value={{ palette, styles }}>
     <View style={styles.container}>
       {/* Top Bar */}
       <View style={styles.topBar}>
@@ -828,7 +369,7 @@ export default function HomeScreen() {
             onPress={() => setAccountOpen(true)}
           >
             <FontAwesome
-              name={session ? "user-circle" : "user-circle-o"}
+              name={authSession ? "user-circle" : "user-circle-o"}
               size={26}
               color={palette.accent}
             />
@@ -860,321 +401,169 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Content Type Selector */}
-        <View style={styles.contentSelector}>
-          <ContentButton
-            label="🎤 Artists"
-            value="artists"
+        <View style={styles.discoveryContent}>
+          <CategoryPicker
             selected={selected}
-            onPress={() => handleCategorySelect("artists")}
+            compact={Boolean(selected) && !categoryPickerExpanded}
+            palette={palette}
+            onSelect={handleCategorySelect}
           />
-          <ContentButton
-            label="🎵 Albums"
-            value="albums"
-            selected={selected}
-            onPress={() => handleCategorySelect("albums")}
-          />
-          <ContentButton
-            label="📚 Books"
-            value="books"
-            selected={selected}
-            onPress={() => handleCategorySelect("books")}
-          />
-          <ContentButton
-            label="🎬 Movies"
-            value="movies"
-            selected={selected}
-            onPress={() => handleCategorySelect("movies")}
-          />
-        </View>
 
-        {/* Action Selector */}
-        <View style={styles.actionSelector}>
-          <ActionButton
-            label="Search"
-            value="search"
-            activateAction={activeAction ?? ""}
-            onPress={() =>
-              dispatchDiscovery({ type: "setActiveAction", action: "search" })
-            }
-          />
-          <ActionButton
-            label="Filter"
-            value="filter"
-            activateAction={activeAction ?? ""}
-            onPress={() =>
-              dispatchDiscovery({ type: "setActiveAction", action: "filter" })
-            }
-          />
-          <ActionButton
-            label="Randomize"
-            value="randomize"
-            activateAction={activeAction ?? ""}
-            onPress={() =>
-              dispatchDiscovery({ type: "setActiveAction", action: "randomize" })
-            }
-          />
-        </View>
-
-        {/* Recently Viewed */}
-        {!activeAction && recentItems.length > 0 && (
-          <View style={styles.recentsSection}>
-            <View style={styles.recentsHeader}>
-              <Text style={styles.recentsTitle}>Recently viewed</Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.recentsRow}
-            >
-              {recentItems.map((item) => (
-                <Pressable
-                  key={`${item.category}:${item.id}`}
-                  style={({ pressed }) => [
-                    styles.recentCard,
-                    pressed && { opacity: 0.75 },
-                  ]}
-                  onPress={() => {
-                    openStoredItem(item.category, item);
-                  }}
-                >
-                  {item.imageUrl ? (
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      style={styles.recentImage}
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.recentImage,
-                        { backgroundColor: palette.accentBgSoft },
-                      ]}
-                    />
-                  )}
-                  <Text style={styles.recentCardTitle} numberOfLines={2}>
-                    {item.title}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Empty States */}
-        {!selected && recentItems.length === 0 && (
-          <View style={styles.emptyState}>
-            <FontAwesome name="hand-pointer-o" size={32} color={palette.textFaint} />
-            <Text style={styles.emptyStateText}>
-              Select a category above to get started
-            </Text>
-          </View>
-        )}
-        {selected && !activeAction && (
-          <View style={styles.emptyState}>
-            <AntDesign name="arrow-up" size={32} color={palette.textFaint} />
-            <Text style={styles.emptyStateText}>
-              Now choose Search, Filter, or Randomize
-            </Text>
-          </View>
-        )}
-
-        {/* Search Panel */}
-        {selected && activeAction === "search" && (
-          <View style={styles.searchState}>
-            <View style={styles.searchInputContainer}>
-              <FontAwesome
-                name="search"
-                size={16}
-                color={palette.textFaint}
-                style={styles.searchIcon}
-              />
-              <TextInput
-                onChangeText={(query) =>
-                  dispatchDiscovery({ type: "setSearchQuery", query })
-                }
-                value={searchQuery}
-                style={styles.searchInput}
-                placeholder={`Describe the ${selected} you're looking for...`}
-                placeholderTextColor={palette.textFaint}
-                multiline={true}
-              />
-            </View>
-            {searchQuery.length > 0 && (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.searchButton,
-                  pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
-                ]}
-                onPress={() => runAction("search")}
+          {categoryPickerExpanded &&
+          recentItems.length > 0 &&
+          (!session ||
+            (session.deck.queue.length === 0 &&
+              session.activeRequest === null)) ? (
+            <View style={styles.recentsSection}>
+              <View style={styles.recentsHeader}>
+                <Text style={styles.recentsTitle}>Recently viewed</Text>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.recentsRow}
               >
-                <Text style={styles.searchButtonText}>Find {selected}</Text>
-                <AntDesign name="arrow-right" size={16} color={palette.onAccent} />
-              </Pressable>
-            )}
-          </View>
-        )}
-
-        {/* Filter Panel */}
-        {selected && activeAction === "filter" && (
-          <View style={styles.filterState}>
-            {selectedFilters.length > 0 && (
-              <Pressable
-                onPress={() => dispatchDiscovery({ type: "clearFilters" })}
-                style={({ pressed }) => pressed && { opacity: 0.6 }}
-              >
-                <Text style={styles.clearFiltersText}>Clear all</Text>
-              </Pressable>
-            )}
-            <FilterSection
-              title="Genre"
-              sectionKey="genre"
-              options={genreOptions}
-              openSection={openSection}
-              onToggle={() =>
-                dispatchDiscovery({
-                  type: "setOpenSection",
-                  section: openSection === "genre" ? null : "genre",
-                })
-              }
-              selectedFilters={selectedFilters}
-              onChipPress={toggleFilter}
-            />
-            <FilterSection
-              title="Era"
-              sectionKey="era"
-              options={eraOptions}
-              openSection={openSection}
-              onToggle={() =>
-                dispatchDiscovery({
-                  type: "setOpenSection",
-                  section: openSection === "era" ? null : "era",
-                })
-              }
-              selectedFilters={selectedFilters}
-              onChipPress={toggleFilter}
-            />
-            {ratingOptions && (
-              <FilterSection
-                title="Rating"
-                sectionKey="rating"
-                options={ratingOptions}
-                openSection={openSection}
-                onToggle={() =>
-                  dispatchDiscovery({
-                    type: "setOpenSection",
-                    section: openSection === "rating" ? null : "rating",
-                  })
-                }
-                selectedFilters={selectedFilters}
-                onChipPress={toggleFilter}
-              />
-            )}
-            {popularityOptions && (
-              <FilterSection
-                title="Popularity"
-                sectionKey="popularity"
-                options={popularityOptions}
-                openSection={openSection}
-                onToggle={() =>
-                  dispatchDiscovery({
-                    type: "setOpenSection",
-                    section:
-                      openSection === "popularity" ? null : "popularity",
-                  })
-                }
-                selectedFilters={selectedFilters}
-                onChipPress={toggleFilter}
-              />
-            )}
-            <Pressable
-              style={({ pressed }) => [
-                styles.searchButton,
-                pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
-              ]}
-              onPress={() => runAction("filter")}
-            >
-              <Text style={styles.searchButtonText}>Find {selected}</Text>
-              <AntDesign name="arrow-right" size={16} color={palette.onAccent} />
-            </Pressable>
-          </View>
-        )}
-
-        {/* Randomize Panel */}
-        {selected && activeAction === "randomize" && (
-          <View style={styles.randomizeState}>
-            <Text style={styles.randomizeHint}>
-              Tap to discover something new
-            </Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.randomizeButton,
-                pressed && { opacity: 0.85, transform: [{ scale: 0.95 }] },
-              ]}
-              onPress={() => runAction("randomize")}
-            >
-              <FontAwesome name="random" size={22} color={palette.onAccent} />
-              <Text style={styles.randomizeButtonText}>Surprise Me!</Text>
-            </Pressable>
-          </View>
-        )}
-        {/* Loading */}
-        {loading && (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={palette.accent} size="large" />
-            <Text style={styles.emptyStateText}>Finding your {selected}...</Text>
-          </View>
-        )}
-
-        {/* No results */}
-        {!loading && results && results.length === 0 && selected && (
-          <View style={styles.emptyState}>
-            <FontAwesome name="search-minus" size={32} color={palette.textFaint} />
-            <Text style={styles.emptyStateText}>
-              No {selected} matched those filters. Try loosening them.
-            </Text>
-          </View>
-        )}
-
-        {/* Results */}
-        {!loading && results && results.length > 0 && selected && (
-          <View style={styles.resultsContainer}>
-            <View style={styles.resultsHeader}>
-              <Text style={styles.resultsTitle}>Results</Text>
-              <Pressable
-                onPress={() => dispatchDiscovery({ type: "clearResults" })}
-                style={({ pressed }) => pressed && { opacity: 0.6 }}
-              >
-                <Text style={styles.clearResultsText}>Clear</Text>
-              </Pressable>
+                {recentItems.map((item) => (
+                  <Pressable
+                    key={`${item.category}:${item.id}`}
+                    style={({ pressed }) => [
+                      styles.recentCard,
+                      pressed && { opacity: 0.75 },
+                    ]}
+                    onPress={() => openStoredItem(item.category, item)}
+                  >
+                    {item.imageUrl ? (
+                      <Image
+                        source={{ uri: item.imageUrl }}
+                        style={styles.recentImage}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.recentImage,
+                          { backgroundColor: palette.accentBgSoft },
+                        ]}
+                      />
+                    )}
+                    <Text style={styles.recentCardTitle} numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
             </View>
+          ) : null}
 
-            {/* Hero Card */}
-            <ResultCard
-              title={results[0].title}
-              subtitle={results[0].subtitle}
-              meta={results[0].meta}
-              isHero
+          {selected && session ? (
+            <DiscoveryControls
               category={selected}
-              imageUrl={results[0].imageUrl}
-              onPress={() => setDetailItem(results[0])}
+              activeAction={session.activeAction}
+              query={session.searchQuery}
+              filters={session.selectedFilters}
+              openSection={session.openSection}
+              loading={session.status === "loading"}
+              palette={palette}
+              onActionChange={discoveryController.setAction}
+              onQueryChange={discoveryController.setQuery}
+              onToggleFilter={discoveryController.toggleFilter}
+              onOpenSection={discoveryController.setOpenSection}
+              onClearFilters={discoveryController.clearFilters}
+              onSubmit={discoveryController.submit}
             />
+          ) : null}
 
-            {/* Grid Cards */}
-            <View style={styles.gridContainer}>
-              {results.slice(1).map((item) => (
-                <ResultCard
-                  key={item.id}
-                  title={item.title}
-                  subtitle={item.subtitle}
-                  meta={item.meta}
-                  category={selected}
-                  imageUrl={item.imageUrl}
-                  onPress={() => setDetailItem(item)}
-                />
-              ))}
+          {session?.deck.similarContext ? (
+            <View style={styles.similarContext}>
+              <Text style={styles.similarContextText}>
+                Similar to {session.deck.similarContext.sourceTitle}
+              </Text>
+              <Pressable
+                accessibilityLabel="Back to unbiased Surprise Me"
+                accessibilityRole="button"
+                onPress={() => void discoveryController.submit("randomize")}
+                style={({ pressed }) => [
+                  styles.backToUnbiasedButton,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.backToUnbiasedText}>
+                  Back to unbiased Surprise Me
+                </Text>
+              </Pressable>
             </View>
-          </View>
-        )}
+          ) : null}
+
+          {selected && session?.status === "loading" ? (
+            <DiscoveryStatusCard
+              kind="loading"
+              label={`Finding your ${selected}...`}
+              palette={palette}
+              reducedMotion={reducedMotion}
+            />
+          ) : null}
+
+          {session?.status === "error" ? (
+            <DiscoveryStatusCard
+              kind="error"
+              message={
+                session.requestError ??
+                "Something went wrong while finding recommendations."
+              }
+              onRetry={() => void discoveryController.retry()}
+              palette={palette}
+            />
+          ) : null}
+
+          {session?.status === "empty" && !activeItem ? (
+            <DiscoveryStatusCard
+              kind="empty"
+              label={`No ${selected} found. Try another approach.`}
+              actionLabel={
+                session.retryInput?.mode === "search" ||
+                session.retryInput?.mode === "filter"
+                  ? "Adjust search or filters"
+                  : "Shuffle again"
+              }
+              onAction={() => {
+                const mode = session.retryInput?.mode;
+                if (mode === "search" || mode === "filter") {
+                  discoveryController.setAction(mode);
+                  return;
+                }
+                void discoveryController.submit("randomize");
+              }}
+              palette={palette}
+            />
+          ) : null}
+
+          {selected && session && session.deck.queue.length > 0 ? (
+            <SwipeDeck
+              category={selected}
+              items={session.deck.queue}
+              palette={palette}
+              reducedMotion={reducedMotion}
+              disabled={session.status === "loading"}
+              onCommit={(item, decision) =>
+                void discoveryController.commit(item, decision)
+              }
+              onOpenDetail={setDetailItem}
+              onSimilar={(item) => void discoveryController.similar(item)}
+            />
+          ) : null}
+
+          <UndoNotice
+            message={
+              discovery.actionError ??
+              (discovery.lastSave
+                ? `Saved ${discovery.lastSave.item.title}`
+                : null)
+            }
+            canUndo={Boolean(discovery.lastSave)}
+            palette={palette}
+            onUndo={() => void discoveryController.undo()}
+          />
+          <DiscoveryAnnouncer message={announcement} />
+        </View>
       </ScrollView>
 
       {/* Detail Modal */}
@@ -1215,7 +604,7 @@ export default function HomeScreen() {
                     ) : (
                       <View style={styles.heroMoviePlaceholder}>
                         <FontAwesome
-                          name={CATEGORY_ICONS[selected]?.name as any ?? "star"}
+                          name="film"
                           size={48}
                           color={palette.accentBorder}
                         />
@@ -1246,7 +635,13 @@ export default function HomeScreen() {
                         return (
                           <View style={[wrapStyle, styles.heroEmptyWrap]}>
                             <FontAwesome
-                              name={CATEGORY_ICONS[selected]?.name as any ?? "star"}
+                              name={
+                                selected === "books"
+                                  ? "book"
+                                  : selected === "artists"
+                                  ? "microphone"
+                                  : "music"
+                              }
                               size={48}
                               color={palette.accentBorder}
                             />
@@ -1594,50 +989,6 @@ export default function HomeScreen() {
                   </Pressable>
                 </View>
 
-                {/* Similar Items */}
-                {similarItems.length > 0 && (
-                  <View style={styles.similarSection}>
-                    <Text style={styles.similarTitle}>You might also like</Text>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.similarRow}
-                    >
-                      {similarItems.map((item) => (
-                        <Pressable
-                          key={item.id}
-                          style={({ pressed }) => [
-                            styles.similarCard,
-                            pressed && { opacity: 0.75 },
-                          ]}
-                          onPress={() => setDetailItem(item)}
-                        >
-                          {item.imageUrl ? (
-                            <Image
-                              source={{ uri: item.imageUrl }}
-                              style={styles.similarImage}
-                            />
-                          ) : (
-                            <View
-                              style={[
-                                styles.similarImage,
-                                { backgroundColor: palette.accentBgSoft },
-                              ]}
-                            />
-                          )}
-                          <Text style={styles.similarCardTitle} numberOfLines={2}>
-                            {item.title}
-                          </Text>
-                          {item.subtitle ? (
-                            <Text style={styles.similarCardSubtitle} numberOfLines={1}>
-                              {item.subtitle}
-                            </Text>
-                          ) : null}
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
               </ScrollView>
             </View>
           </View>
@@ -1739,7 +1090,7 @@ export default function HomeScreen() {
               <AntDesign name="close" size={20} color={palette.onAccent} />
             </Pressable>
             <Text style={styles.savedTitle}>Saved</Text>
-            {!session && (
+            {!authSession && (
               <Pressable
                 onPress={() => {
                   setSavedOpen(false);
@@ -1863,7 +1214,7 @@ export default function HomeScreen() {
               <AntDesign name="close" size={20} color={palette.textMuted} />
             </Pressable>
             <ScrollView showsVerticalScrollIndicator={false}>
-              {session ? (
+              {authSession ? (
                 <>
                   <View style={styles.authHeader}>
                     <View style={styles.howToIconCircle}>
@@ -1873,7 +1224,7 @@ export default function HomeScreen() {
                       {currentDisplayName() || "Signed in"}
                     </Text>
                     <Text style={styles.howToSubtitle}>
-                      {session.user.email}
+                      {authSession.user.email}
                     </Text>
                   </View>
                   <View style={styles.authForm}>
@@ -2060,7 +1411,6 @@ export default function HomeScreen() {
         </View>
       </Modal>
     </View>
-    </ThemeContext.Provider>
   );
 }
 
@@ -2086,204 +1436,49 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   topBarRight: { flexDirection: "row", alignItems: "center", gap: 16, minWidth: 62, justifyContent: "flex-end" },
   logoText: { color: c.accent, fontSize: 20, fontWeight: "700", letterSpacing: 0.5 },
 
-  // ── Content Selector ──
-  contentSelector: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+  // ── Discovery ──
+  discoveryContent: {
+    alignSelf: "center",
+    gap: 20,
+    maxWidth: 992,
     paddingHorizontal: 16,
     paddingTop: 20,
-    gap: 10,
+    width: "100%",
   },
-  contentButton: {
-    width: "47%",
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 28,
-    paddingHorizontal: 16,
-    borderRadius: 16,
+  similarContext: {
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  contentButtonActive: { backgroundColor: c.accentBgMed, borderColor: c.accent },
-  contentButtonHover: { backgroundColor: c.surfaceAltStrong, borderColor: c.borderStrong },
-  contentButtonText: { color: c.textSecondary, fontSize: 16, fontWeight: "600" },
-  contentButtonTextActive: { color: c.text },
-
-  // ── Action Selector ──
-  actionSelector: {
-    flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    gap: 8,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 12,
-    alignItems: "center",
-    borderRadius: 50,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  actionButtonActive: { backgroundColor: c.accentBgMed, borderColor: c.accent },
-  actionButtonHover: { backgroundColor: c.surfaceAltStrong, borderColor: c.borderStrong },
-  actionButtonText: {
-    color: c.textMuted,
-    fontSize: 14,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-  },
-  actionButtonTextActive: { color: c.text },
-
-  // ── Empty State ──
-  emptyState: { alignItems: "center", marginTop: 60, gap: 12 },
-  emptyStateText: { color: c.textFaint, fontSize: 15, fontWeight: "500" },
-
-  // ── Search ──
-  searchState: { paddingHorizontal: 20, marginTop: 20, gap: 16 },
-  searchInputContainer: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: c.surfaceAlt,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: c.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  searchIcon: { marginTop: 3, marginRight: 12 },
-  searchInput: {
-    flex: 1,
-    color: c.text,
-    fontSize: 15,
-    fontWeight: "400",
-    minHeight: 24,
-    textAlignVertical: "top",
-  },
-  searchButton: {
-    flexDirection: "row",
     alignSelf: "center",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: c.accent,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 50,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  searchButtonText: { color: c.onAccent, fontSize: 15, fontWeight: "600" },
-
-  // ── Filter ──
-  filterState: { paddingHorizontal: 16, paddingTop: 16 },
-  clearFiltersText: {
-    color: c.accent,
-    fontSize: 13,
-    fontWeight: "500",
-    textAlign: "right",
-    marginBottom: 8,
-  },
-  filterSection: { marginBottom: 6 },
-  filterSectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    backgroundColor: c.accentBgSoft,
+    borderColor: c.accentBorder,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: c.border,
-  },
-  filterSectionTitle: { color: c.text, fontSize: 15, fontWeight: "600" },
-  filterSectionCount: { color: c.accent, fontSize: 13, fontWeight: "400" },
-  filterChipContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-  },
-  filterChip: {
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  filterChipActive: { backgroundColor: c.accentBgMed, borderColor: c.accent },
-  filterChipText: { color: c.textMuted, fontSize: 13, fontWeight: "500" },
-  filterChipTextActive: { color: c.text },
-
-  // ── Randomize ──
-  randomizeState: { alignItems: "center", marginTop: 50, gap: 16 },
-  randomizeHint: { color: c.textFaint, fontSize: 14, fontWeight: "400" },
-  randomizeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: c.accent,
-    paddingVertical: 20,
-    paddingHorizontal: 48,
-    borderRadius: 50,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  randomizeButtonText: {
-    color: c.onAccent,
-    fontSize: 20,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-  },
-
-  // ── Results ──
-  resultsContainer: { paddingHorizontal: 16, paddingTop: 32 },
-  resultsHeader: {
-    flexDirection: "row",
+    gap: 10,
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
+    maxWidth: 560,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    width: "100%",
   },
-  resultsTitle: { color: c.text, fontSize: 20, fontWeight: "700" },
-  clearResultsText: { color: c.accent, fontSize: 13, fontWeight: "500" },
-  heroCard: {
-    backgroundColor: c.surfaceAlt,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: c.border,
-    overflow: "hidden",
-    marginBottom: 12,
+  similarContextText: {
+    color: c.text,
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: "700",
   },
-  gridCard: {
-    backgroundColor: c.surfaceAlt,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: c.border,
-    overflow: "hidden",
-    width: CARD_WIDTH,
-  },
-  cardImagePlaceholder: {
-    height: 100,
-    backgroundColor: c.accentBgSoft,
+  backToUnbiasedButton: {
     alignItems: "center",
     justifyContent: "center",
+    minHeight: 44,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
   },
-  heroImagePlaceholder: { height: 180 },
-  cardImage: { width: "100%", height: "100%" },
-  cardInfo: { padding: 14, gap: 4 },
-  cardTitle: { color: c.text, fontSize: 15, fontWeight: "600" },
-  heroCardTitle: { fontSize: 20, fontWeight: "700" },
-  cardSubtitle: { color: c.textMuted, fontSize: 13, fontWeight: "400" },
-  cardMeta: { color: c.accent, fontSize: 12, fontWeight: "500", marginTop: 2 },
-  gridContainer: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  backToUnbiasedText: {
+    color: c.accent,
+    fontSize: 13,
+    fontWeight: "800",
+  },
 
   // ── Saved Modal ──
   savedSheet: {
@@ -2369,40 +1564,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     lineHeight: 16,
   },
 
-  // ── Similar Items (in detail modal) ──
-  similarSection: {
-    marginTop: 8,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: c.border,
-  },
-  similarTitle: {
-    color: c.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 12,
-  },
-  similarRow: { gap: 12, paddingRight: 16 },
-  similarCard: { width: 100 },
-  similarImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 10,
-    marginBottom: 6,
-  },
-  similarCardTitle: {
-    color: c.text,
-    fontSize: 12,
-    fontWeight: "600",
-    lineHeight: 16,
-  },
-  similarCardSubtitle: {
-    color: c.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
 
   // ── Detail Modal ──
   modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: "flex-end" },
