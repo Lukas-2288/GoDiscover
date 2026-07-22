@@ -178,6 +178,49 @@ it("gives every header action an explicit name and 44-point target", async () =>
   ].forEach(expectMinimumTarget);
 });
 
+it("keeps saved-item details and removal as separate functional actions", async () => {
+  jest.mocked(listSaved).mockResolvedValue([{
+    ...arrival,
+    category: "movies",
+    savedAt: 1,
+  }]);
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalledTimes(1));
+  fireEvent.press(
+    screen.getByRole("button", { name: "Open saved discoveries" })
+  );
+
+  const openDetails = screen.getByRole("button", {
+    name: "Open Arrival details",
+  });
+  expect(
+    within(openDetails).queryAllByRole("button", {
+      name: "Remove Arrival from saved discoveries",
+    })
+  ).toHaveLength(0);
+  const remove = screen.getByRole("button", {
+    name: "Remove Arrival from saved discoveries",
+  });
+  expect(remove).toBeTruthy();
+
+  fireEvent.press(openDetails);
+  expect(await screen.findByTestId("detail-sheet-surface")).toBeTruthy();
+  fireEvent.press(screen.getByRole("button", { name: "Close details" }));
+
+  fireEvent.press(
+    screen.getByRole("button", { name: "Open saved discoveries" })
+  );
+  fireEvent.press(
+    screen.getByRole("button", {
+      name: "Remove Arrival from saved discoveries",
+    })
+  );
+  await waitFor(() =>
+    expect(removeSaved).toHaveBeenCalledWith("movies", "329865")
+  );
+});
+
 it("keeps all three labeled deck actions available without gesture input", async () => {
   render(<HomeScreen />);
   fireEvent.press(screen.getByRole("button", { name: "Movies" }));

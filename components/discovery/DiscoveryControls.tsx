@@ -172,6 +172,7 @@ export function DiscoveryControls({
     <View style={styles.container}>
       <View style={styles.actionRow}>
         <Pressable
+          accessibilityLabel={`Search ${categoryLabel}`}
           accessibilityRole="button"
           accessibilityState={{ selected: activeAction === "search" }}
           onPress={() => onActionChange("search")}
@@ -200,6 +201,7 @@ export function DiscoveryControls({
         </Pressable>
 
         <Pressable
+          accessibilityLabel={`Filter ${categoryLabel}`}
           accessibilityRole="button"
           accessibilityState={{ selected: activeAction === "filter" }}
           onPress={() => onActionChange("filter")}

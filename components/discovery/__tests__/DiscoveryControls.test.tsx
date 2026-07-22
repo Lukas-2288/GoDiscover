@@ -42,9 +42,17 @@ describe("DiscoveryControls", () => {
     expect(screen.getByRole("button", { name: "Filter movies" })).toBeTruthy();
   });
 
+  it("sets exact labels on the Search and Filter buttons", () => {
+    render(<DiscoveryControls {...baseProps} />);
+    const search = screen.getByRole("button", { name: "Search movies" });
+    const filter = screen.getByRole("button", { name: "Filter movies" });
+    expect(search.props.accessibilityLabel).toBe("Search movies");
+    expect(filter.props.accessibilityLabel).toBe("Filter movies");
+  });
+
   it("submits a labeled search and keeps the input accessible", () => {
     render(<DiscoveryControls {...baseProps} activeAction="search" query="space" />);
-    fireEvent.changeText(screen.getByLabelText("Search movies"), "moon");
+    fireEvent.changeText(screen.getByDisplayValue("space"), "moon");
     expect(baseProps.onQueryChange).toHaveBeenCalledWith("moon");
     fireEvent.press(screen.getByRole("button", { name: "Find movies" }));
     expect(baseProps.onSubmit).toHaveBeenCalledWith("search");
@@ -86,7 +94,7 @@ describe("DiscoveryControls", () => {
   it("uses growable search controls for Dynamic Type", () => {
     render(<DiscoveryControls {...baseProps} activeAction="search" query="space" />);
 
-    const searchInput = screen.getByLabelText("Search movies");
+    const searchInput = screen.getByDisplayValue("space");
     const findButton = screen.getByRole("button", { name: "Find movies" });
 
     [searchInput, findButton].forEach((control) => {

@@ -877,42 +877,46 @@ export default function HomeScreen() {
                       <View key={cat} style={styles.savedGroup}>
                         <Text style={styles.savedGroupLabel}>{label}</Text>
                         {group.map((item) => (
-                          <Pressable
+                          <View
                             key={`${item.category}:${item.id}`}
-                            accessibilityLabel={`Open ${item.title} details`}
-                            accessibilityRole="button"
-                            style={({ pressed }) => [
-                              styles.savedItem,
-                              pressed && { opacity: 0.7 },
-                            ]}
-                            onPress={() => {
-                              openStoredItem(item.category, item);
-                              setSavedOpen(false);
-                            }}
+                            style={styles.savedItem}
                           >
-                            {item.imageUrl ? (
-                              <Image
-                                accessible={false}
-                                source={{ uri: item.imageUrl }}
-                                style={styles.savedItemImage}
-                              />
-                            ) : (
-                              <View
-                                style={[
-                                  styles.savedItemImage,
-                                  { backgroundColor: palette.accentBgSoft },
-                                ]}
-                              />
-                            )}
-                            <View style={styles.savedItemText}>
-                              <Text style={styles.savedItemTitle} numberOfLines={1}>
-                                {item.title}
-                              </Text>
-                              <Text style={styles.savedItemSubtitle} numberOfLines={1}>
-                                {item.subtitle}
-                                {item.meta ? ` · ${item.meta}` : ""}
-                              </Text>
-                            </View>
+                            <Pressable
+                              accessibilityLabel={`Open ${item.title} details`}
+                              accessibilityRole="button"
+                              style={({ pressed }) => [
+                                styles.savedItemOpen,
+                                pressed && { opacity: 0.7 },
+                              ]}
+                              onPress={() => {
+                                openStoredItem(item.category, item);
+                                setSavedOpen(false);
+                              }}
+                            >
+                              {item.imageUrl ? (
+                                <Image
+                                  accessible={false}
+                                  source={{ uri: item.imageUrl }}
+                                  style={styles.savedItemImage}
+                                />
+                              ) : (
+                                <View
+                                  style={[
+                                    styles.savedItemImage,
+                                    { backgroundColor: palette.accentBgSoft },
+                                  ]}
+                                />
+                              )}
+                              <View style={styles.savedItemText}>
+                                <Text style={styles.savedItemTitle} numberOfLines={1}>
+                                  {item.title}
+                                </Text>
+                                <Text style={styles.savedItemSubtitle} numberOfLines={1}>
+                                  {item.subtitle}
+                                  {item.meta ? ` · ${item.meta}` : ""}
+                                </Text>
+                              </View>
+                            </Pressable>
                             <Pressable
                               accessibilityLabel={`Remove ${item.title} from saved discoveries`}
                               accessibilityRole="button"
@@ -933,7 +937,7 @@ export default function HomeScreen() {
                                 color={palette.textMuted}
                               />
                             </Pressable>
-                          </Pressable>
+                          </View>
                         ))}
                       </View>
                     );
@@ -1348,6 +1352,13 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   savedItem: {
     alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 68,
+  },
+  savedItemOpen: {
+    alignItems: "center",
+    flex: 1,
     flexDirection: "row",
     gap: 12,
     minHeight: 68,
