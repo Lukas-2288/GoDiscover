@@ -9,6 +9,12 @@ import {
 
 import { ERA_FILTERS, GENRE_FILTERS, RATING_FILTERS } from "../../constants/Filters";
 import { getCategoryTheme } from "../../lib/discovery/categoryThemes";
+import {
+  ERA_ANY_FILTER,
+  RATING_ANY_FILTER,
+  isEraFilter,
+  isRatingFilter,
+} from "../../lib/discovery/filterSelection";
 import type { DiscoveryActionMode } from "../../lib/discovery/types";
 import type { Palette } from "../../lib/theme";
 import type { ContentCategory } from "../../types/content";
@@ -32,6 +38,8 @@ export type DiscoveryControlsProps = {
 type FilterOption = {
   label: string;
   value: string;
+  accessibilityLabel?: string;
+  isSelected?(filters: readonly string[]): boolean;
 };
 
 type FilterSectionProps = {
@@ -93,11 +101,13 @@ function FilterSection({
       {expanded ? (
         <View style={styles.chipList}>
           {options.map((option) => {
-            const selected = filters.includes(option.value);
+            const selected = option.isSelected
+              ? option.isSelected(filters)
+              : filters.includes(option.value);
             return (
               <Pressable
                 key={option.value}
-                accessibilityLabel={option.label}
+                accessibilityLabel={option.accessibilityLabel ?? option.label}
                 accessibilityRole="button"
                 accessibilityState={{ selected }}
                 onPress={() => onToggleFilter(option.value)}
@@ -151,15 +161,28 @@ export function DiscoveryControls({
     value: genre,
   }));
   const eraOptions = [
-    { label: "Any", value: "Any" },
+    {
+      label: "Any",
+      value: ERA_ANY_FILTER,
+      accessibilityLabel: "Any era",
+      isSelected: (selected: readonly string[]) =>
+        !selected.some(isEraFilter),
+    },
     ...ERA_FILTERS.decades.map((era) => ({ label: era, value: era })),
   ];
   const ratingOptions =
     category === "movies" || category === "books"
-      ? RATING_FILTERS[category].map((rating) => ({
-          label: rating.label,
-          value: rating.label,
-        }))
+      ? RATING_FILTERS[category].map((rating) =>
+          rating.label === "Any"
+            ? {
+                label: "Any",
+                value: RATING_ANY_FILTER,
+                accessibilityLabel: "Any rating",
+                isSelected: (selected: readonly string[]) =>
+                  !selected.some(isRatingFilter),
+              }
+            : { label: rating.label, value: rating.label }
+        )
       : null;
   const searchDisabled = loading || query.trim().length === 0;
   const surpriseArticle = category === "albums" ? "an" : "a";

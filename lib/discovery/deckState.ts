@@ -5,6 +5,7 @@ import type {
   DiscoveryRequestIdentity,
   SimilarContext,
 } from "./types";
+import { toggleDiscoveryFilter } from "./filterSelection";
 
 export type DeckState = {
   queue: ResultItem[];
@@ -59,10 +60,10 @@ export type DiscoveryDeckAction =
   | { type: "requestFailed"; request: DiscoveryRequestIdentity; message: string }
   | { type: "skipCurrent"; category: ContentCategory; itemId: string }
   | { type: "saveStarted"; operation: SaveOperation }
-  | { type: "saveSucceeded"; operationId: number }
+  | { type: "saveSucceeded"; operationId: number; undoable?: boolean }
   | { type: "saveFailed"; operationId: number; message: string }
   | { type: "undoSave"; operation: SaveOperation }
-  | { type: "undoSaveFailed"; operation: SaveOperation }
+  | { type: "undoSaveFailed"; operation: SaveOperation; message?: string }
   | { type: "clearUndo"; operationId: number }
   | { type: "clearActionError" };
 
@@ -172,7 +173,7 @@ export function discoveryDeckReducer(
       if (state.selected === action.category) return state;
 
       const selected = action.category;
-      if (state.selected === null) return { ...state, selected };
+      if (state.selected === null) return { ...state, selected, actionError: null };
 
       const departing = state.selected;
       const departed = updateSession(state, departing, (session) => ({
@@ -180,50 +181,69 @@ export function discoveryDeckReducer(
         activeRequest: null,
         status: session.deck.queue.length > 0 ? "ready" : "idle",
       }));
-      return { ...departed, selected };
+      return { ...departed, selected, actionError: null };
     }
 
     case "setActiveAction":
-      return updateSession(state, action.category, (session) => ({
-        ...session,
-        activeAction: action.action,
-      }));
+      return {
+        ...updateSession(state, action.category, (session) => ({
+          ...session,
+          activeAction: action.action,
+        })),
+        actionError: null,
+      };
 
     case "setSearchQuery":
-      return updateSession(state, action.category, (session) => ({
-        ...session,
-        searchQuery: action.query,
-      }));
+      return {
+        ...updateSession(state, action.category, (session) => ({
+          ...session,
+          searchQuery: action.query,
+        })),
+        actionError: null,
+      };
 
     case "setOpenSection":
-      return updateSession(state, action.category, (session) => ({
-        ...session,
-        openSection: action.section,
-      }));
+      return {
+        ...updateSession(state, action.category, (session) => ({
+          ...session,
+          openSection: action.section,
+        })),
+        actionError: null,
+      };
 
     case "toggleFilter":
-      return updateSession(state, action.category, (session) => ({
-        ...session,
-        selectedFilters: session.selectedFilters.includes(action.value)
-          ? session.selectedFilters.filter((value) => value !== action.value)
-          : [...session.selectedFilters, action.value],
-      }));
+      return {
+        ...updateSession(state, action.category, (session) => ({
+          ...session,
+          selectedFilters: toggleDiscoveryFilter(
+            session.selectedFilters,
+            action.value
+          ),
+        })),
+        actionError: null,
+      };
 
     case "clearFilters":
-      return updateSession(state, action.category, (session) => ({
-        ...session,
-        selectedFilters: [],
-      }));
+      return {
+        ...updateSession(state, action.category, (session) => ({
+          ...session,
+          selectedFilters: [],
+        })),
+        actionError: null,
+      };
 
     case "requestStarted":
       if (action.request.category !== action.input.category) return state;
-      return updateSession(state, action.request.category, (session) => ({
-        ...session,
-        status: "loading",
-        requestError: null,
-        activeRequest: action.request,
-        retryInput: action.input,
-      }));
+      return {
+        ...updateSession(state, action.request.category, (session) => ({
+          ...session,
+          status: "loading",
+          requestError: null,
+          activeRequest: action.request,
+          retryInput: action.input,
+        })),
+        actionError: null,
+      };
 
     case "requestSucceeded": {
       const session = state.sessions[action.request.category];
@@ -259,7 +279,10 @@ export function discoveryDeckReducer(
       const session = state.sessions[action.category];
       const deck = dismiss(session.deck, action.itemId);
       if (deck === session.deck) return state;
-      return updateSession(state, action.category, (current) => ({ ...current, deck }));
+      return {
+        ...updateSession(state, action.category, (current) => ({ ...current, deck })),
+        actionError: null,
+      };
     }
 
     case "saveStarted": {
@@ -287,9 +310,12 @@ export function discoveryDeckReducer(
           (candidate) => candidate.id !== action.operationId
         ),
         lastSave:
-          state.lastSave === null || operation.id > state.lastSave.id
+          action.undoable === false
+            ? null
+            : state.lastSave === null || operation.id > state.lastSave.id
             ? operation
             : state.lastSave,
+        actionError: null,
       };
     }
 
@@ -305,8 +331,7 @@ export function discoveryDeckReducer(
         pendingSaves: updated.pendingSaves.filter(
           (candidate) => candidate.id !== action.operationId
         ),
-        lastSave:
-          updated.lastSave?.id === action.operationId ? null : updated.lastSave,
+        lastSave: null,
         actionError: action.message,
       };
     }
@@ -325,8 +350,11 @@ export function discoveryDeckReducer(
     }
 
     case "undoSaveFailed":
-      if (state.lastSave?.id === action.operation.id) return state;
-      return { ...state, lastSave: action.operation };
+      return {
+        ...state,
+        lastSave: action.operation,
+        actionError: action.message ?? state.actionError,
+      };
 
     case "clearUndo":
       if (state.lastSave?.id !== action.operationId) return state;

@@ -373,10 +373,52 @@ it("keeps deck Save semantics when the discovered item is already stored", async
 
   fireEvent.press(within(sheet).getByRole("button", { name: "Save" }));
 
-  await waitFor(() => expect(addSaved).toHaveBeenCalledWith("movies", arrival));
+  await waitFor(() => expect(addSaved).not.toHaveBeenCalled());
   expect(removeSaved).not.toHaveBeenCalled();
   await waitFor(() => expect(screen.queryByTestId("detail-sheet-surface")).toBeNull());
   await waitFor(() => expect(deckFocusMock()).toHaveBeenCalledTimes(1));
+});
+
+it("does not remove a pre-existing saved discovery after deck Save", async () => {
+  const existing = { ...arrival, category: "movies" as const, savedAt: 1 };
+  jest.mocked(loadDiscovery).mockResolvedValue([arrival, moonlight]);
+  jest.mocked(listSaved).mockResolvedValue([existing]);
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalled());
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull()
+  );
+  expect(removeSaved).not.toHaveBeenCalled();
+});
+
+it("shows stable feedback when a Saved-sheet removal fails", async () => {
+  jest.mocked(listSaved).mockResolvedValue([{
+    ...arrival,
+    category: "movies",
+    savedAt: 1,
+  }]);
+  jest
+    .mocked(removeSaved)
+    .mockRejectedValueOnce(new Error("Supabase delete token expired"));
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalled());
+  fireEvent.press(screen.getByRole("button", { name: "Open saved discoveries" }));
+  fireEvent.press(
+    screen.getByRole("button", {
+      name: "Remove Arrival from saved discoveries",
+    })
+  );
+
+  expect(
+    await screen.findByText("Couldn't update saved discoveries. Try again.")
+  ).toBeTruthy();
+  expect(screen.queryByText(/Supabase|token|expired/i)).toBeNull();
 });
 
 it("does not restore focus from a slow Save behind a newer detail", async () => {

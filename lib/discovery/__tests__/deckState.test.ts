@@ -173,6 +173,33 @@ describe("discoveryDeckReducer", () => {
     expect(state.sessions.books).toBe(originalBooks);
   });
 
+  it("keeps Era and Rating independently single-select", () => {
+    let state = createInitialDiscoveryDeckState();
+    for (const value of ["80s", "90s", "3+", "4+"]) {
+      state = discoveryDeckReducer(state, {
+        type: "toggleFilter",
+        category: "movies",
+        value,
+      });
+    }
+
+    expect(state.sessions.movies.selectedFilters).toEqual(["90s", "4+"]);
+
+    state = discoveryDeckReducer(state, {
+      type: "toggleFilter",
+      category: "movies",
+      value: "era:any",
+    });
+    expect(state.sessions.movies.selectedFilters).toEqual(["4+"]);
+
+    state = discoveryDeckReducer(state, {
+      type: "toggleFilter",
+      category: "movies",
+      value: "rating:any",
+    });
+    expect(state.sessions.movies.selectedFilters).toEqual([]);
+  });
+
   it("collapses the active input panel after success", () => {
     let state = createInitialDiscoveryDeckState();
     state = discoveryDeckReducer(state, {

@@ -63,6 +63,46 @@ describe("DiscoveryControls", () => {
     expect(screen.queryByText("Rating")).toBeNull();
   });
 
+  it("keeps Era and Rating Any choices independent", () => {
+    const { rerender } = render(
+      <DiscoveryControls
+        {...baseProps}
+        activeAction="filter"
+        openSection="era"
+      />
+    );
+
+    const eraAny = screen.getByRole("button", { name: "Any era" });
+    expect(eraAny.props.accessibilityState).toEqual({ selected: true });
+    fireEvent.press(screen.getByRole("button", { name: "80s" }));
+    expect(baseProps.onToggleFilter).toHaveBeenCalledWith("80s");
+
+    rerender(
+      <DiscoveryControls
+        {...baseProps}
+        activeAction="filter"
+        filters={["80s"]}
+        openSection="rating"
+      />
+    );
+    const ratingAny = screen.getByRole("button", { name: "Any rating" });
+    expect(ratingAny.props.accessibilityState).toEqual({ selected: true });
+    fireEvent.press(ratingAny);
+    expect(baseProps.onToggleFilter).toHaveBeenLastCalledWith("rating:any");
+
+    rerender(
+      <DiscoveryControls
+        {...baseProps}
+        activeAction="filter"
+        filters={["4+"]}
+        openSection="era"
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "Any era" }).props.accessibilityState
+    ).toEqual({ selected: true });
+  });
+
   it("uses growable 44-point controls and chips for Dynamic Type", () => {
     render(
       <DiscoveryControls

@@ -5,6 +5,7 @@ import type { SavedItem } from "../../../lib/storage/saved";
 import { useDiscoveryController } from "../useDiscoveryController";
 
 jest.mock("../../../lib/storage/saved", () => ({
+  listSaved: jest.fn(),
   addSaved: jest.fn(),
   removeSaved: jest.fn(),
 }));
@@ -119,6 +120,78 @@ it("advances immediately, completes Save, and restores on Undo", async () => {
   expect(removeSaved).toHaveBeenCalledWith("movies", movie.id);
   expect(result.current.activeItem).toEqual(movie);
   expect(result.current.announcement).toBe("Arrival returned to your deck.");
+});
+
+it("does not offer Undo when Save finds the item was already stored", async () => {
+  const existing = savedItem(movie);
+  const addSaved = jest.fn(async () => [existing]);
+  const removeSaved = jest.fn(async () => [] as SavedItem[]);
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie] },
+      dependencies: {
+        load: jest.fn(),
+        listSaved: jest.fn(async () => [existing]),
+        addSaved,
+        removeSaved,
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+
+  expect(result.current.activeItem).toBeNull();
+  expect(result.current.state.lastSave).toBeNull();
+  expect(addSaved).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await result.current.undo();
+  });
+  expect(removeSaved).not.toHaveBeenCalled();
+});
+
+it("replaces an older Undo notice when a newer Save fails", async () => {
+  const addSaved = jest
+    .fn<Promise<SavedItem[]>, [ContentCategory, ResultItem]>()
+    .mockResolvedValueOnce([savedItem(movie)])
+    .mockRejectedValueOnce(new Error("private provider detail"));
+  const removeSaved = jest.fn(async () => [] as SavedItem[]);
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie, secondMovie] },
+      dependencies: { load: jest.fn(), addSaved, removeSaved },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+  expect(result.current.state.lastSave?.item).toEqual(movie);
+
+  await act(async () => {
+    await result.current.commit(secondMovie, "save");
+  });
+
+  expect(result.current.state.actionError).toBe(
+    "Couldn't save that one. It's back in your deck."
+  );
+  expect(result.current.state.lastSave).toBeNull();
+  expect(result.current.actionErrorAnnouncement).toBe(
+    "Couldn't save that one. It's back in your deck."
+  );
+
+  await act(async () => {
+    await result.current.undo();
+  });
+  expect(removeSaved).not.toHaveBeenCalled();
+
+  act(() => result.current.selectCategory("books"));
+  expect(result.current.state.actionError).toBeNull();
+  expect(result.current.actionErrorAnnouncement).toBeNull();
 });
 
 it("never writes storage for Not for me", async () => {
@@ -244,6 +317,36 @@ it("builds trimmed Search and cloned Filter request snapshots", async () => {
   expect(filterInput.filters).not.toBe(result.current.state.sessions.movies.selectedFilters);
 });
 
+it("routes only the visible Era and Rating choices", async () => {
+  const load = jest.fn(async (_input: DiscoveryLoadInput) => [movie]);
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      dependencies: {
+        load,
+        addSaved: jest.fn(async () => []),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  act(() => {
+    result.current.toggleFilter("80s");
+    result.current.toggleFilter("90s");
+    result.current.toggleFilter("3+");
+    result.current.toggleFilter("4+");
+  });
+  await act(async () => {
+    await result.current.submit("filter");
+  });
+
+  expect(load).toHaveBeenCalledWith({
+    category: "movies",
+    mode: "filter",
+    filters: ["90s", "4+"],
+  });
+});
+
 it("keeps a failed Undo available and shows only safe action copy", async () => {
   const removeSaved = jest.fn(async () => [savedItem(movie)]);
   const { result } = renderHook(() =>
@@ -268,6 +371,9 @@ it("keeps a failed Undo available and shows only safe action copy", async () => 
   expect(result.current.state.lastSave?.item).toEqual(movie);
   expect(result.current.activeItem).toBeNull();
   expect(result.current.state.actionError).toBe("Couldn't undo that save. Try again.");
+  expect(result.current.actionErrorAnnouncement).toBe(
+    "Couldn't undo that save. Try again."
+  );
 });
 
 it("keeps Undo available while its removal is pending past the expiry window", async () => {

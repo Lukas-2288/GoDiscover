@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useReducer,
   useRef,
   useState,
@@ -25,12 +24,20 @@ import type {
 } from "../../lib/discovery/types";
 import {
   addSaved,
+  listSaved,
   removeSaved,
   type SavedItem,
 } from "../../lib/storage/saved";
+import {
+  removeSavedItem,
+  saveSavedItem,
+  type SaveSavedItemResult,
+  type SavedMutationDependencies,
+} from "../../lib/storage/savedMutations";
 
 export type DiscoveryControllerDependencies = {
   load: typeof loadDiscovery;
+  listSaved?: typeof listSaved;
   addSaved: typeof addSaved;
   removeSaved: typeof removeSaved;
 };
@@ -45,6 +52,7 @@ export type DiscoveryDecision = "save" | "skip";
 
 const DEFAULT_DEPENDENCIES: DiscoveryControllerDependencies = {
   load: loadDiscovery,
+  listSaved,
   addSaved,
   removeSaved,
 };
@@ -137,6 +145,16 @@ function containsSavedItem(
   );
 }
 
+function savedMutationDependencies(
+  dependencies: DiscoveryControllerDependencies
+): SavedMutationDependencies {
+  return {
+    listSaved: dependencies.listSaved,
+    addSaved: dependencies.addSaved,
+    removeSaved: dependencies.removeSaved,
+  };
+}
+
 export function useDiscoveryController(
   options: UseDiscoveryControllerOptions = {}
 ) {
@@ -146,7 +164,6 @@ export function useDiscoveryController(
     createInitialDiscoveryDeckState
   );
   const [announcement, setAnnouncement] = useState("");
-  const [undoError, setUndoError] = useState<string | null>(null);
 
   const stateRef = useRef(deckState);
   const dependenciesRef = useRef(options.dependencies ?? DEFAULT_DEPENDENCIES);
@@ -154,7 +171,6 @@ export function useDiscoveryController(
   const requestTrackerRef = useRef(createDiscoveryRequestTracker());
   const saveOperationSequenceRef = useRef(0);
   const undoTimerRef = useRef<UndoTimer | null>(null);
-  const savedMutationTailRef = useRef<Promise<void> | null>(null);
   const undoInFlightRef = useRef(new Set<number>());
   const mountedRef = useRef(true);
 
@@ -169,31 +185,6 @@ export function useDiscoveryController(
     rawDispatch(action);
     return next !== previous;
   }, []);
-
-  const runSavedMutation = useCallback(
-    <T,>(mutation: () => Promise<T>): Promise<T> => {
-      const currentTail = savedMutationTailRef.current;
-      let result: Promise<T>;
-      try {
-        result = currentTail === null ? mutation() : currentTail.then(mutation);
-      } catch (error) {
-        result = Promise.reject(error);
-      }
-
-      const nextTail = result.then(
-        () => undefined,
-        () => undefined
-      );
-      savedMutationTailRef.current = nextTail;
-      void nextTail.then(() => {
-        if (savedMutationTailRef.current === nextTail) {
-          savedMutationTailRef.current = null;
-        }
-      });
-      return result;
-    },
-    []
-  );
 
   const clearUndoTimer = useCallback((operationId?: number) => {
     const timer = undoTimerRef.current;
@@ -221,8 +212,7 @@ export function useDiscoveryController(
   const makeUndoRetryable = useCallback(
     (operation: SaveOperation) => {
       if (!mountedRef.current) return;
-      dispatch({ type: "undoSaveFailed", operation });
-      setUndoError(UNDO_ERROR);
+      dispatch({ type: "undoSaveFailed", operation, message: UNDO_ERROR });
       startUndoTimer(operation.id);
     },
     [dispatch, startUndoTimer]
@@ -353,7 +343,6 @@ export function useDiscoveryController(
       if (activeDeckItem(session.deck)?.id !== item.id) return;
 
       const safeItem = copyItem(item);
-      setUndoError(null);
 
       if (decision === "skip") {
         const nextItem = session.deck.queue[1] ?? null;
@@ -376,36 +365,45 @@ export function useDiscoveryController(
       const dismissed = dispatch({ type: "saveStarted", operation });
       if (!dismissed) return;
 
-      let savedItems: SavedItem[];
+      let saveResult: SaveSavedItemResult;
       try {
-        const addSavedMutation = dependenciesRef.current.addSaved;
-        savedItems = await runSavedMutation(() =>
-          addSavedMutation(category, safeItem)
+        saveResult = await saveSavedItem(
+          category,
+          safeItem,
+          savedMutationDependencies(dependenciesRef.current)
         );
       } catch {
         if (mountedRef.current) {
+          clearUndoTimer();
           dispatch({ type: "saveFailed", operationId: operation.id, message: SAVE_ERROR });
         }
         return;
       }
 
       if (!mountedRef.current) return;
-      if (!containsSavedItem(savedItems, operation)) {
+      if (!saveResult.confirmed) {
+        clearUndoTimer();
         dispatch({ type: "saveFailed", operationId: operation.id, message: SAVE_ERROR });
         return;
       }
 
-      dispatch({ type: "saveSucceeded", operationId: operation.id });
-      onSavedItemsChangeRef.current?.(savedItems);
+      dispatch({
+        type: "saveSucceeded",
+        operationId: operation.id,
+        undoable: saveResult.created,
+      });
+      onSavedItemsChangeRef.current?.(saveResult.items);
       if (stateRef.current.lastSave?.id === operation.id) {
         const nextItem = activeDeckItem(
           stateRef.current.sessions[operation.category].deck
         );
         setAnnouncement(nextCardAnnouncement(`Saved ${safeItem.title}.`, nextItem));
         startUndoTimer(operation.id);
+      } else {
+        clearUndoTimer();
       }
     },
-    [dispatch, runSavedMutation, startUndoTimer]
+    [clearUndoTimer, dispatch, startUndoTimer]
   );
 
   const similar = useCallback(
@@ -426,13 +424,14 @@ export function useDiscoveryController(
     if (!operation || undoInFlightRef.current.has(operation.id)) return;
 
     undoInFlightRef.current.add(operation.id);
-    setUndoError(null);
+    dispatch({ type: "clearActionError" });
     clearUndoTimer(operation.id);
     let savedItems: SavedItem[];
     try {
-      const removeSavedMutation = dependenciesRef.current.removeSaved;
-      savedItems = await runSavedMutation(() =>
-        removeSavedMutation(operation.category, operation.item.id)
+      savedItems = await removeSavedItem(
+        operation.category,
+        operation.item.id,
+        savedMutationDependencies(dependenciesRef.current)
       );
     } catch {
       undoInFlightRef.current.delete(operation.id);
@@ -452,17 +451,13 @@ export function useDiscoveryController(
     clearUndoTimer(operation.id);
     onSavedItemsChangeRef.current?.(savedItems);
     setAnnouncement(`${operation.item.title} returned to your deck.`);
-  }, [clearUndoTimer, dispatch, makeUndoRetryable, runSavedMutation]);
+  }, [clearUndoTimer, dispatch, makeUndoRetryable]);
 
   const clearActionError = useCallback(() => {
-    setUndoError(null);
     dispatch({ type: "clearActionError" });
   }, [dispatch]);
 
-  const state = useMemo(
-    () => (undoError === null ? deckState : { ...deckState, actionError: undoError }),
-    [deckState, undoError]
-  );
+  const state = deckState;
   const session = state.selected ? state.sessions[state.selected] : null;
   const activeItem = session ? activeDeckItem(session.deck) : null;
 
@@ -471,6 +466,7 @@ export function useDiscoveryController(
     session,
     activeItem,
     announcement,
+    actionErrorAnnouncement: state.actionError,
     selectCategory,
     setAction,
     setQuery,

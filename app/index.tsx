@@ -26,12 +26,16 @@ import type {
 } from "../types/content";
 import {
   listSaved,
-  addSaved,
-  removeSaved,
   syncLocalToCloud,
   clearLocalSaved,
   type SavedItem,
 } from "../lib/storage/saved";
+import {
+  removeSavedItem,
+  runSavedMutation,
+  SAVED_MUTATION_ERROR,
+  toggleSavedItem,
+} from "../lib/storage/savedMutations";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/supabase-js";
@@ -67,6 +71,7 @@ import {
 
 export default function HomeScreen() {
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
+  const [savedMutationError, setSavedMutationError] = useState<string | null>(null);
   const discoveryController = useDiscoveryController({
     onSavedItemsChange: setSavedItems,
   });
@@ -140,13 +145,20 @@ export default function HomeScreen() {
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, s) => {
       setAuthSession(s);
       if (event === "SIGNED_IN" && s) {
-        await syncLocalToCloud();
-        const items = await listSaved();
-        setSavedItems(items);
+        await applySavedMutation(() =>
+          runSavedMutation(async () => {
+            await syncLocalToCloud();
+            return listSaved();
+          })
+        );
       }
       if (event === "SIGNED_OUT") {
-        await clearLocalSaved();
-        setSavedItems([]);
+        await applySavedMutation(() =>
+          runSavedMutation(async () => {
+            await clearLocalSaved();
+            return [];
+          })
+        );
       }
     });
     return () => listener.subscription.unsubscribe();
@@ -244,6 +256,19 @@ export default function HomeScreen() {
     return savedItems.some((saved) => saved.category === category && saved.id === item.id);
   };
 
+  const applySavedMutation = async (
+    mutation: () => Promise<SavedItem[]>
+  ): Promise<boolean> => {
+    setSavedMutationError(null);
+    try {
+      setSavedItems(await mutation());
+      return true;
+    } catch {
+      setSavedMutationError(SAVED_MUTATION_ERROR);
+      return false;
+    }
+  };
+
   const clearDetail = () => {
     detailSelectionRef.current = null;
     setDetailSelection(null);
@@ -319,10 +344,9 @@ export default function HomeScreen() {
     if (!selection || selection.item.id !== item.id) return;
 
     if (selection.origin === "stored") {
-      const next = isItemSaved(selection.category, item)
-        ? await removeSaved(selection.category, item.id)
-        : await addSaved(selection.category, item);
-      setSavedItems(next);
+      await applySavedMutation(() =>
+        toggleSavedItem(selection.category, item)
+      );
       return;
     }
 
@@ -356,6 +380,7 @@ export default function HomeScreen() {
 
   const handleCategorySelect = (category: ContentCategory) => {
     invalidateDetailFocusRestoration();
+    setSavedMutationError(null);
     if (!categoryPickerExpanded && category === selected) {
       setCategoryPickerExpanded(true);
       return;
@@ -644,16 +669,26 @@ export default function HomeScreen() {
 
           <UndoNotice
             message={
+              savedMutationError ??
               discovery.actionError ??
               (discovery.lastSave
                 ? `Saved ${discovery.lastSave.item.title}`
                 : null)
             }
-            canUndo={Boolean(discovery.lastSave)}
+            canUndo={Boolean(
+              discovery.lastSave &&
+                discovery.actionError === null &&
+                savedMutationError === null
+            )}
             palette={palette}
             onUndo={() => void discoveryController.undo()}
           />
-          <DiscoveryAnnouncer message={announcement} />
+          <DiscoveryAnnouncer
+            message={announcement}
+            actionErrorMessage={
+              savedMutationError ?? discoveryController.actionErrorAnnouncement
+            }
+          />
         </View>
       </ScrollView>
 
@@ -922,8 +957,9 @@ export default function HomeScreen() {
                               accessibilityRole="button"
                               hitSlop={10}
                               onPress={async () => {
-                                const next = await removeSaved(item.category, item.id);
-                                setSavedItems(next);
+                                await applySavedMutation(() =>
+                                  removeSavedItem(item.category, item.id)
+                                );
                               }}
                               style={({ pressed }) => [
                                 styles.savedRemove,

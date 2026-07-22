@@ -2,6 +2,7 @@ import { StyleSheet, Text } from "react-native";
 
 export type DiscoveryAnnouncerProps = {
   message: string | null;
+  actionErrorMessage?: string | null;
 };
 
 export default function DiscoveryAnnouncer({ message }: DiscoveryAnnouncerProps) {
