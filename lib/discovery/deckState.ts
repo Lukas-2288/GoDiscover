@@ -61,7 +61,7 @@ export type DiscoveryDeckAction =
   | { type: "saveStarted"; operation: SaveOperation }
   | { type: "saveSucceeded"; operationId: number }
   | { type: "saveFailed"; operationId: number; message: string }
-  | { type: "undoSave"; operationId: number }
+  | { type: "undoSave"; operation: SaveOperation }
   | { type: "clearUndo"; operationId: number }
   | { type: "clearActionError" };
 
@@ -311,13 +311,16 @@ export function discoveryDeckReducer(
     }
 
     case "undoSave": {
-      if (state.lastSave?.id !== action.operationId) return state;
-      const operation = state.lastSave;
+      const { operation } = action;
       const updated = updateSession(state, operation.category, (session) => ({
         ...session,
         deck: restore(session.deck, operation.item),
       }));
-      return { ...updated, lastSave: null, actionError: null };
+      return {
+        ...updated,
+        lastSave: updated.lastSave?.id === operation.id ? null : updated.lastSave,
+        actionError: null,
+      };
     }
 
     case "clearUndo":

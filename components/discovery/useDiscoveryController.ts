@@ -154,7 +154,8 @@ export function useDiscoveryController(
   const requestTrackerRef = useRef(createDiscoveryRequestTracker());
   const saveOperationSequenceRef = useRef(0);
   const undoTimerRef = useRef<UndoTimer | null>(null);
-  const undoInFlightRef = useRef<number | null>(null);
+  const savedMutationTailRef = useRef<Promise<void> | null>(null);
+  const undoInFlightRef = useRef(new Set<number>());
   const mountedRef = useRef(true);
 
   stateRef.current = deckState;
@@ -168,6 +169,31 @@ export function useDiscoveryController(
     rawDispatch(action);
     return next !== previous;
   }, []);
+
+  const runSavedMutation = useCallback(
+    <T,>(mutation: () => Promise<T>): Promise<T> => {
+      const currentTail = savedMutationTailRef.current;
+      let result: Promise<T>;
+      try {
+        result = currentTail === null ? mutation() : currentTail.then(mutation);
+      } catch (error) {
+        result = Promise.reject(error);
+      }
+
+      const nextTail = result.then(
+        () => undefined,
+        () => undefined
+      );
+      savedMutationTailRef.current = nextTail;
+      void nextTail.then(() => {
+        if (savedMutationTailRef.current === nextTail) {
+          savedMutationTailRef.current = null;
+        }
+      });
+      return result;
+    },
+    []
+  );
 
   const clearUndoTimer = useCallback((operationId?: number) => {
     const timer = undoTimerRef.current;
@@ -311,7 +337,6 @@ export function useDiscoveryController(
 
   const commit = useCallback(
     async (item: ResultItem, decision: DiscoveryDecision): Promise<void> => {
-      if (undoInFlightRef.current !== null) return;
       const category = stateRef.current.selected;
       if (!category) return;
       const session = stateRef.current.sessions[category];
@@ -343,7 +368,10 @@ export function useDiscoveryController(
 
       let savedItems: SavedItem[];
       try {
-        savedItems = await dependenciesRef.current.addSaved(category, safeItem);
+        const addSavedMutation = dependenciesRef.current.addSaved;
+        savedItems = await runSavedMutation(() =>
+          addSavedMutation(category, safeItem)
+        );
       } catch {
         if (mountedRef.current) {
           dispatch({ type: "saveFailed", operationId: operation.id, message: SAVE_ERROR });
@@ -367,7 +395,7 @@ export function useDiscoveryController(
         startUndoTimer(operation.id);
       }
     },
-    [dispatch, startUndoTimer]
+    [dispatch, runSavedMutation, startUndoTimer]
   );
 
   const similar = useCallback(
@@ -385,40 +413,42 @@ export function useDiscoveryController(
 
   const undo = useCallback(async (): Promise<void> => {
     const operation = stateRef.current.lastSave;
-    if (!operation || undoInFlightRef.current === operation.id) return;
+    if (!operation || undoInFlightRef.current.has(operation.id)) return;
 
-    undoInFlightRef.current = operation.id;
+    undoInFlightRef.current.add(operation.id);
     setUndoError(null);
     clearUndoTimer(operation.id);
     let savedItems: SavedItem[];
     try {
-      savedItems = await dependenciesRef.current.removeSaved(
-        operation.category,
-        operation.item.id
+      const removeSavedMutation = dependenciesRef.current.removeSaved;
+      savedItems = await runSavedMutation(() =>
+        removeSavedMutation(operation.category, operation.item.id)
       );
     } catch {
-      undoInFlightRef.current = null;
+      undoInFlightRef.current.delete(operation.id);
       if (mountedRef.current && stateRef.current.lastSave?.id === operation.id) {
         setUndoError(UNDO_ERROR);
         startUndoTimer(operation.id);
       }
       return;
     }
-    undoInFlightRef.current = null;
+    undoInFlightRef.current.delete(operation.id);
 
-    if (!mountedRef.current || stateRef.current.lastSave?.id !== operation.id) return;
+    if (!mountedRef.current) return;
     if (containsSavedItem(savedItems, operation)) {
-      setUndoError(UNDO_ERROR);
-      startUndoTimer(operation.id);
+      if (stateRef.current.lastSave?.id === operation.id) {
+        setUndoError(UNDO_ERROR);
+        startUndoTimer(operation.id);
+      }
       return;
     }
 
-    const restored = dispatch({ type: "undoSave", operationId: operation.id });
+    const restored = dispatch({ type: "undoSave", operation });
     if (!restored) return;
     clearUndoTimer(operation.id);
     onSavedItemsChangeRef.current?.(savedItems);
     setAnnouncement(`${operation.item.title} returned to your deck.`);
-  }, [clearUndoTimer, dispatch, startUndoTimer]);
+  }, [clearUndoTimer, dispatch, runSavedMutation, startUndoTimer]);
 
   const clearActionError = useCallback(() => {
     setUndoError(null);

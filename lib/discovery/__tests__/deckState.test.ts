@@ -117,7 +117,7 @@ describe("discoveryDeckReducer", () => {
     expect(state.lastSave).toBeNull();
     state = discoveryDeckReducer(state, { type: "saveSucceeded", operationId: 8 });
     expect(state.lastSave).toEqual(operation);
-    state = discoveryDeckReducer(state, { type: "undoSave", operationId: 8 });
+    state = discoveryDeckReducer(state, { type: "undoSave", operation });
     expect(activeDeckItem(state.sessions.books.deck)).toEqual(book);
     expect(state.lastSave).toBeNull();
   });
@@ -281,6 +281,22 @@ describe("discoveryDeckReducer", () => {
     expect(state.pendingSaves).toEqual([]);
   });
 
+  it("restores an exact older Save while keeping a newer Save undoable", () => {
+    const older = { id: 22, category: "movies" as const, item: movie };
+    const newer = { id: 23, category: "movies" as const, item: secondMovie };
+    let state = createInitialDiscoveryDeckState({ movies: [movie, secondMovie] });
+    state = discoveryDeckReducer(state, { type: "saveStarted", operation: older });
+    state = discoveryDeckReducer(state, { type: "saveSucceeded", operationId: older.id });
+    state = discoveryDeckReducer(state, { type: "saveStarted", operation: newer });
+    state = discoveryDeckReducer(state, { type: "saveSucceeded", operationId: newer.id });
+
+    state = discoveryDeckReducer(state, { type: "undoSave", operation: older });
+
+    expect(activeDeckItem(state.sessions.movies.deck)).toEqual(movie);
+    expect(state.sessions.movies.deck.seenCount).toBe(1);
+    expect(state.lastSave).toEqual(newer);
+  });
+
   it("clears only matching undo state and clears action errors independently", () => {
     const saved = { id: 17, category: "movies" as const, item: movie };
     const failed = { id: 18, category: "movies" as const, item: secondMovie };
@@ -345,9 +361,6 @@ describe("discoveryDeckReducer", () => {
         message: "safe",
       })
     ).toBe(state);
-    expect(discoveryDeckReducer(state, { type: "undoSave", operationId: 20 })).toBe(
-      state
-    );
   });
 
   it("creates isolated seeded queues and deduplicates loaded items", () => {
