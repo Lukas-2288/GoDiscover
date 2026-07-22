@@ -60,7 +60,8 @@ import {
   saveThemeMode,
 } from "../lib/theme";
 import { CategoryPicker } from "../components/discovery/CategoryPicker";
-import DiscoveryAnnouncer from "../components/discovery/DiscoveryAnnouncer.native";
+// @ts-expect-error Expo resolves the platform-specific .native/.web module.
+import DiscoveryAnnouncer from "../components/discovery/DiscoveryAnnouncer";
 import { DiscoveryControls } from "../components/discovery/DiscoveryControls";
 import { DiscoveryStatusCard } from "../components/discovery/DiscoveryStatusCard";
 import { SwipeDeck } from "../components/discovery/SwipeDeck";
