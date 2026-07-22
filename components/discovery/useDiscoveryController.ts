@@ -311,6 +311,7 @@ export function useDiscoveryController(
 
   const commit = useCallback(
     async (item: ResultItem, decision: DiscoveryDecision): Promise<void> => {
+      if (undoInFlightRef.current !== null) return;
       const category = stateRef.current.selected;
       if (!category) return;
       const session = stateRef.current.sessions[category];

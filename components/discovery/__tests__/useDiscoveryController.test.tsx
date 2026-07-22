@@ -305,6 +305,58 @@ it("keeps Undo available while its removal is pending past the expiry window", a
   unmount();
 });
 
+it("serializes deck commits until a pending Undo restores its saved card", async () => {
+  let finishRemove: (items: SavedItem[]) => void = () => undefined;
+  const addSaved = jest.fn(async (_category: ContentCategory, item: ResultItem) => [
+    savedItem(item),
+  ]);
+  const removeSaved = jest.fn(
+    () =>
+      new Promise<SavedItem[]>((resolve) => {
+        finishRemove = resolve;
+      })
+  );
+  const onSavedItemsChange = jest.fn();
+  const { result, unmount } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie, secondMovie] },
+      dependencies: { load: jest.fn(), addSaved, removeSaved },
+      onSavedItemsChange,
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+  expect(result.current.activeItem).toEqual(secondMovie);
+
+  let pendingUndo!: Promise<void>;
+  act(() => {
+    pendingUndo = result.current.undo();
+  });
+  await act(async () => {
+    await result.current.commit(secondMovie, "save");
+  });
+  expect(addSaved).toHaveBeenCalledTimes(1);
+  expect(result.current.activeItem).toEqual(secondMovie);
+
+  await act(async () => {
+    finishRemove([]);
+    await pendingUndo;
+  });
+
+  expect(result.current.state.sessions.movies.deck.queue).toEqual([movie, secondMovie]);
+  expect(result.current.state.lastSave).toBeNull();
+  expect(onSavedItemsChange).toHaveBeenLastCalledWith([]);
+
+  await act(async () => {
+    await result.current.commit(movie, "skip");
+  });
+  expect(result.current.activeItem).toEqual(secondMovie);
+  unmount();
+});
+
 it("announces the current deck card after a deferred Save confirms", async () => {
   let finishSave: (items: SavedItem[]) => void = () => undefined;
   const { result } = renderHook(() =>
