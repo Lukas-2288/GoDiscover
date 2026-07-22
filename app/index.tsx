@@ -1,17 +1,15 @@
 import AntDesign from "@expo/vector-icons/AntDesign";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { LinearGradient } from "expo-linear-gradient";
 import React, {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -22,23 +20,9 @@ import {
   TextInput,
   useColorScheme,
 } from "react-native";
-import {
-  getMovieDetail,
-} from "../lib/api/tmdb";
-import {
-  getBookDetail,
-} from "../lib/api/openlibrary";
-import {
-  getArtistDetail,
-  getAlbumDetail,
-} from "../lib/api/discogs";
 import type {
   ContentCategory,
   ResultItem,
-  MovieDetail,
-  BookDetail,
-  ArtistDetail,
-  AlbumDetail,
 } from "../types/content";
 import {
   listSaved,
@@ -63,11 +47,23 @@ import { CategoryPicker } from "../components/discovery/CategoryPicker";
 // @ts-expect-error Expo resolves the platform-specific .native/.web module.
 import DiscoveryAnnouncer from "../components/discovery/DiscoveryAnnouncer";
 import { DiscoveryControls } from "../components/discovery/DiscoveryControls";
+import {
+  DetailSheet,
+  type DetailSelection,
+} from "../components/discovery/DetailSheet";
 import { DiscoveryStatusCard } from "../components/discovery/DiscoveryStatusCard";
-import { SwipeDeck } from "../components/discovery/SwipeDeck";
+import {
+  SwipeDeck,
+  type SwipeDeckHandle,
+} from "../components/discovery/SwipeDeck";
 import { UndoNotice } from "../components/discovery/UndoNotice";
 import { useDiscoveryController } from "../components/discovery/useDiscoveryController";
 import { useReducedMotion } from "../components/discovery/useReducedMotion";
+import {
+  loadDetail,
+  toDetailError,
+  type ContentDetail,
+} from "../lib/discovery/loadDetail";
 
 export default function HomeScreen() {
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
@@ -83,13 +79,15 @@ export default function HomeScreen() {
   const selected = discovery.selected;
   const reducedMotion = useReducedMotion();
   const [categoryPickerExpanded, setCategoryPickerExpanded] = useState(true);
-  const [detailItem, setDetailItem] = useState<ResultItem | null>(null);
-  const [movieDetail, setMovieDetail] = useState<MovieDetail | null>(null);
-  const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
-  const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
-  const [albumDetail, setAlbumDetail] = useState<AlbumDetail | null>(null);
-  const [detailError, setDetailError] = useState(false);
+  const [detailSelection, setDetailSelection] = useState<DetailSelection | null>(null);
+  const [detail, setDetail] = useState<ContentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(null);
+  const [detailRetryKey, setDetailRetryKey] = useState(0);
+  const deckRef = useRef<SwipeDeckHandle>(null);
+  const detailRequestSequenceRef = useRef(0);
+  const detailSelectionRef = useRef<DetailSelection | null>(null);
+  detailSelectionRef.current = detailSelection;
   const [howToOpen, setHowToOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
@@ -125,11 +123,11 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (!detailItem || !selected) return;
-    addRecent(selected as ContentCategory, detailItem)
+    if (!detailSelection) return;
+    addRecent(detailSelection.category, detailSelection.item)
       .then(setRecentItems)
       .catch(() => {});
-  }, [detailItem?.id, selected]);
+  }, [detailSelection?.category, detailSelection?.item.id]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -241,53 +239,99 @@ export default function HomeScreen() {
     }
   };
 
-  const isItemSaved = (item: ResultItem | null): boolean => {
-    if (!item || !selected) return false;
-    return savedItems.some(
-      (s) => s.category === (selected as ContentCategory) && s.id === item.id
-    );
+  const isItemSaved = (category: ContentCategory, item: ResultItem): boolean => {
+    return savedItems.some((saved) => saved.category === category && saved.id === item.id);
   };
 
-  const toggleSaveDetail = async () => {
-    if (!detailItem || !selected) return;
-    const category = selected as ContentCategory;
-    const next = isItemSaved(detailItem)
-      ? await removeSaved(category, detailItem.id)
-      : await addSaved(category, detailItem);
-    setSavedItems(next);
+  const clearDetail = () => {
+    setDetailSelection(null);
+    setDetail(null);
+    setDetailLoading(false);
+    setDetailErrorMessage(null);
   };
 
-  const shareDetail = async () => {
-    if (!detailItem || !selected) return;
+  const focusActiveCardAfterDismissal = () => {
+    setTimeout(() => deckRef.current?.focusActiveCard(), 0);
+  };
+
+  const openDetail = (selection: DetailSelection) => {
+    setDetailRetryKey(0);
+    setDetailSelection(selection);
+  };
+
+  const shareDetail = async (category: ContentCategory, item: ResultItem) => {
     const kind =
-      selected === "movies"
+      category === "movies"
         ? "movie"
-        : selected === "books"
+        : category === "books"
         ? "book"
-        : selected === "albums"
+        : category === "albums"
         ? "album"
         : "artist";
     let sourceUrl: string | null = null;
-    if (selected === "movies") {
-      sourceUrl = `https://www.themoviedb.org/movie/${detailItem.id}`;
-    } else if (selected === "books") {
-      sourceUrl = `https://openlibrary.org/works/${detailItem.id}`;
-    } else if (selected === "artists") {
-      sourceUrl = `https://open.spotify.com/search/${encodeURIComponent(detailItem.title)}`;
-    } else if (selected === "albums") {
-      const query = `${detailItem.title} ${detailItem.subtitle ?? ""}`.trim();
+    if (category === "movies") {
+      sourceUrl = `https://www.themoviedb.org/movie/${item.id}`;
+    } else if (category === "books") {
+      sourceUrl = `https://openlibrary.org/works/${item.id}`;
+    } else if (category === "artists") {
+      sourceUrl = `https://open.spotify.com/search/${encodeURIComponent(item.title)}`;
+    } else if (category === "albums") {
+      const query = `${item.title} ${item.subtitle ?? ""}`.trim();
       sourceUrl = `https://open.spotify.com/search/${encodeURIComponent(query)}`;
     }
     const lines = [
       `Check out this ${kind} I found on GoDiscover:`,
       "",
-      `${detailItem.title}${detailItem.subtitle ? ` — ${detailItem.subtitle}` : ""}`,
+      `${item.title}${item.subtitle ? ` — ${item.subtitle}` : ""}`,
     ];
-    if (detailItem.meta) lines.push(detailItem.meta);
+    if (item.meta) lines.push(item.meta);
     if (sourceUrl) lines.push("", sourceUrl);
     try {
       await Share.share({ message: lines.join("\n") });
     } catch {}
+  };
+
+  const closeDetail = () => {
+    const restoreDeckFocus = detailSelectionRef.current?.origin === "deck";
+    clearDetail();
+    if (restoreDeckFocus) focusActiveCardAfterDismissal();
+  };
+
+  const handleDetailSave = async (item: ResultItem) => {
+    const selection = detailSelectionRef.current;
+    if (!selection || selection.item.id !== item.id) return;
+
+    if (selection.origin === "stored") {
+      const next = isItemSaved(selection.category, item)
+        ? await removeSaved(selection.category, item.id)
+        : await addSaved(selection.category, item);
+      setSavedItems(next);
+      return;
+    }
+
+    clearDetail();
+    await discoveryController.commit(item, "save");
+    focusActiveCardAfterDismissal();
+  };
+
+  const handleDetailSkip = async (item: ResultItem) => {
+    const selection = detailSelectionRef.current;
+    if (!selection || selection.origin !== "deck" || selection.item.id !== item.id) {
+      return;
+    }
+
+    clearDetail();
+    await discoveryController.commit(item, "skip");
+    focusActiveCardAfterDismissal();
+  };
+
+  const handleDetailSimilar = async (item: ResultItem) => {
+    const selection = detailSelectionRef.current;
+    if (!selection || selection.item.id !== item.id) return;
+
+    clearDetail();
+    await discoveryController.similar(item);
+    focusActiveCardAfterDismissal();
   };
 
   const handleCategorySelect = (category: ContentCategory) => {
@@ -297,68 +341,56 @@ export default function HomeScreen() {
     }
     discoveryController.selectCategory(category);
     setCategoryPickerExpanded(false);
-    setDetailItem(null);
+    clearDetail();
   };
 
   const openStoredItem = (category: ContentCategory, item: ResultItem) => {
     discoveryController.selectCategory(category);
-    setDetailItem(item);
+    openDetail({ category, item, origin: "stored" });
   };
 
   useEffect(() => {
-    if (!detailItem) {
-      setMovieDetail(null);
-      setBookDetail(null);
-      setArtistDetail(null);
-      setAlbumDetail(null);
-      setDetailError(false);
-      return;
-    }
+    const selection = detailSelection;
+    if (!selection) return;
 
-    let cancelled = false;
+    const requestSequence = ++detailRequestSequenceRef.current;
+    const { category, item } = selection;
     setDetailLoading(true);
-    setDetailError(false);
-    setMovieDetail(null);
-    setBookDetail(null);
-    setArtistDetail(null);
-    setAlbumDetail(null);
+    setDetailErrorMessage(null);
+    setDetail(null);
 
-    let fetcher: Promise<void>;
-    if (selected === "movies") {
-      fetcher = getMovieDetail(detailItem.id).then((d) => {
-        if (!cancelled) setMovieDetail(d);
-      });
-    } else if (selected === "books") {
-      fetcher = getBookDetail(detailItem.id, {
-        title: detailItem.title,
-        imageUrl: detailItem.imageUrl,
-      }).then((d) => {
-        if (!cancelled) setBookDetail(d);
-      });
-    } else if (selected === "artists") {
-      fetcher = getArtistDetail(detailItem.id).then((d) => {
-        if (!cancelled) setArtistDetail(d);
-      });
-    } else if (selected === "albums") {
-      fetcher = getAlbumDetail(detailItem.id).then((d) => {
-        if (!cancelled) setAlbumDetail(d);
-      });
-    } else {
-      return;
-    }
+    const isCurrentSelection = () => {
+      const current = detailSelectionRef.current;
+      return (
+        detailRequestSequenceRef.current === requestSequence &&
+        current?.category === category &&
+        current.item.id === item.id
+      );
+    };
 
-    fetcher
-      .catch(() => {
-        if (!cancelled) setDetailError(true);
+    void loadDetail(category, item)
+      .then((nextDetail) => {
+        if (isCurrentSelection()) setDetail(nextDetail);
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentSelection()) return;
+        console.warn({
+          category,
+          itemId: item.id,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        setDetailErrorMessage(toDetailError());
       })
       .finally(() => {
-        if (!cancelled) setDetailLoading(false);
+        if (isCurrentSelection()) setDetailLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      if (detailRequestSequenceRef.current === requestSequence) {
+        detailRequestSequenceRef.current += 1;
+      }
     };
-  }, [detailItem, selected]);
+  }, [detailSelection?.category, detailSelection?.item.id, detailRetryKey]);
 
   return (
     <View style={styles.container}>
@@ -539,6 +571,7 @@ export default function HomeScreen() {
 
           {selected && session && session.deck.queue.length > 0 ? (
             <SwipeDeck
+              ref={deckRef}
               category={selected}
               items={session.deck.queue}
               palette={palette}
@@ -547,7 +580,9 @@ export default function HomeScreen() {
               onCommit={(item, decision) =>
                 void discoveryController.commit(item, decision)
               }
-              onOpenDetail={setDetailItem}
+              onOpenDetail={(item) =>
+                openDetail({ category: selected, item, origin: "deck" })
+              }
               onSimilar={(item) => void discoveryController.similar(item)}
             />
           ) : null}
@@ -567,434 +602,31 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Detail Modal */}
-      {selected && detailItem && (
-        <Modal
-          visible={true}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setDetailItem(null)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              {/* Grabber bar */}
-              <View style={styles.modalGrabber} />
-
-              {/* Close button */}
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalClose,
-                  pressed && { opacity: 0.7 },
-                ]}
-                onPress={() => setDetailItem(null)}
-                hitSlop={8}
-              >
-                <AntDesign name="close" size={18} color={palette.onAccent} />
-              </Pressable>
-
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Per-category hero */}
-                {selected === "movies" ? (
-                  <View style={styles.heroMovie}>
-                    {movieDetail?.backdropUrl || detailItem.imageUrl ? (
-                      <Image
-                        source={{ uri: movieDetail?.backdropUrl ?? detailItem.imageUrl }}
-                        style={styles.heroMovieImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.heroMoviePlaceholder}>
-                        <FontAwesome
-                          name="film"
-                          size={48}
-                          color={palette.accentBorder}
-                        />
-                      </View>
-                    )}
-                    <LinearGradient
-                      colors={["transparent", palette.gradientMid, palette.surface]}
-                      style={styles.heroMovieGradient}
-                      pointerEvents="none"
-                    />
-                  </View>
-                ) : (
-                  <View style={styles.heroCentered}>
-                    {(() => {
-                      const uri =
-                        selected === "books"
-                          ? bookDetail?.coverUrl ?? detailItem.imageUrl
-                          : selected === "artists"
-                          ? artistDetail?.imageUrl ?? detailItem.imageUrl
-                          : selected === "albums"
-                          ? albumDetail?.imageUrl ?? detailItem.imageUrl
-                          : detailItem.imageUrl;
-                      const wrapStyle =
-                        selected === "books"
-                          ? styles.heroBookWrap
-                          : styles.heroSquareWrap;
-                      if (!uri) {
-                        return (
-                          <View style={[wrapStyle, styles.heroEmptyWrap]}>
-                            <FontAwesome
-                              name={
-                                selected === "books"
-                                  ? "book"
-                                  : selected === "artists"
-                                  ? "microphone"
-                                  : "music"
-                              }
-                              size={48}
-                              color={palette.accentBorder}
-                            />
-                          </View>
-                        );
-                      }
-                      return (
-                        <Image
-                          source={{ uri }}
-                          style={wrapStyle}
-                          resizeMode="cover"
-                        />
-                      );
-                    })()}
-                  </View>
-                )}
-
-                {/* Title */}
-                <Text style={styles.modalTitle} numberOfLines={2}>{detailItem.title}</Text>
-
-                {/* Content-specific details */}
-                {selected === "movies" && (() => {
-                  if (detailLoading && !movieDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = movieDetail;
-                  if (!d) return null;
-                  return (
-                    <View style={styles.modalDetails}>
-                      <View style={styles.modalMetaRow}>
-                        <Text style={styles.modalMetaPill}>{d.releaseYear}</Text>
-                        {d.runtime ? (
-                          <Text style={styles.modalMetaPill}>{d.runtime} min</Text>
-                        ) : null}
-                        <Text style={styles.modalMetaPill}>⭐ {d.rating.toFixed(1)}</Text>
-                      </View>
-                      <Text style={styles.modalSubtitle}>{d.genres.join(" / ") || "—"}</Text>
-                      <Text style={styles.modalLabel}>Language</Text>
-                      <Text style={styles.modalValue}>{d.language.toUpperCase()}</Text>
-                      <Text style={styles.modalLabel}>Synopsis</Text>
-                      <Text style={styles.modalDescription}>{d.overview || "No synopsis available."}</Text>
-                    </View>
-                  );
-                })()}
-
-                {selected === "books" && (() => {
-                  if (detailLoading && !bookDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = bookDetail;
-                  if (!d) return null;
-                  const fallbackAuthor = detailItem.subtitle;
-                  const authorLine = d.authors.length ? d.authors.join(", ") : fallbackAuthor;
-                  return (
-                    <View style={styles.modalDetails}>
-                      <View style={styles.modalMetaRow}>
-                        {d.firstPublishYear ? (
-                          <Text style={styles.modalMetaPill}>{d.firstPublishYear}</Text>
-                        ) : null}
-                        {d.rating ? (
-                          <Text style={styles.modalMetaPill}>⭐ {d.rating.toFixed(1)}</Text>
-                        ) : null}
-                      </View>
-                      {d.subjects.length ? (
-                        <Text style={styles.modalSubtitle}>{d.subjects.slice(0, 3).join(" / ")}</Text>
-                      ) : null}
-                      <Text style={styles.modalLabel}>Author</Text>
-                      <Text style={styles.modalValue}>{authorLine}</Text>
-                      <Text style={styles.modalLabel}>Description</Text>
-                      <Text style={styles.modalDescription}>
-                        {d.description || "No description available."}
-                      </Text>
-                    </View>
-                  );
-                })()}
-
-                {selected === "artists" && (() => {
-                  if (detailLoading && !artistDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = artistDetail;
-                  if (!d) return null;
-                  return (
-                    <View style={styles.modalDetails}>
-                      <Text style={styles.modalLabel}>Discography</Text>
-                      {d.albums.length ? (
-                        d.albums.map((album, i) => {
-                          const year = album.releaseDate ? album.releaseDate.slice(0, 4) : "";
-                          return (
-                            <View key={album.id} style={styles.trackRow}>
-                              <Text style={styles.trackNumber}>{i + 1}</Text>
-                              <Text style={styles.trackName} numberOfLines={1}>
-                                {album.name}
-                              </Text>
-                              {year ? <Text style={styles.trackYear}>{year}</Text> : null}
-                            </View>
-                          );
-                        })
-                      ) : (
-                        <Text style={styles.modalValue}>No albums found.</Text>
-                      )}
-                    </View>
-                  );
-                })()}
-
-                {selected === "albums" && (() => {
-                  if (detailLoading && !albumDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = albumDetail;
-                  if (!d) return null;
-                  const year = d.releaseDate ? d.releaseDate.slice(0, 4) : "—";
-                  return (
-                    <View style={styles.modalDetails}>
-                      <View style={styles.modalMetaRow}>
-                        <Text style={styles.modalMetaPill}>{year}</Text>
-                        <Text style={styles.modalMetaPill}>{d.totalTracks} tracks</Text>
-                        <Text style={styles.modalMetaPill}>
-                          {d.albumType.charAt(0).toUpperCase() + d.albumType.slice(1)}
-                        </Text>
-                      </View>
-                      <Text style={styles.modalSubtitle}>{d.artists.join(", ")}</Text>
-                      <Text style={styles.modalLabel}>Tracks</Text>
-                      {d.tracks.slice(0, 8).map((track, i) => (
-                        <View key={track.id} style={styles.trackRow}>
-                          <Text style={styles.trackNumber}>{i + 1}</Text>
-                          <Text style={styles.trackName}>{track.name}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  );
-                })()}
-
-                {/* External Links */}
-                <View style={styles.externalLinks}>
-                  <Text style={styles.modalLabel}>
-                    {selected === "artists" || selected === "albums"
-                      ? "Listen"
-                      : selected === "movies"
-                      ? "Watch"
-                      : selected === "books"
-                      ? "Read"
-                      : "Links"}
-                  </Text>
-
-                  {(selected === "artists" || selected === "albums") && (() => {
-                    const searchTerm =
-                      selected === "artists"
-                        ? detailItem.title
-                        : `${detailItem.title} ${detailItem.subtitle}`;
-                    return (
-                      <View style={styles.linkRow}>
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.linkButton,
-                            styles.linkSpotify,
-                            pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                          ]}
-                          onPress={() =>
-                            Linking.openURL(
-                              `https://open.spotify.com/search/${encodeURIComponent(searchTerm)}`
-                            )
-                          }
-                        >
-                          <FontAwesome name="spotify" size={18} color={palette.onAccent} />
-                          <Text style={styles.linkButtonText}>Spotify</Text>
-                        </Pressable>
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.linkButton,
-                            styles.linkAppleMusic,
-                            pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                          ]}
-                          onPress={() =>
-                            Linking.openURL(
-                              `https://music.apple.com/us/search?term=${encodeURIComponent(searchTerm)}`
-                            )
-                          }
-                        >
-                          <FontAwesome name="apple" size={18} color={palette.onAccent} />
-                          <Text style={styles.linkButtonText}>Apple Music</Text>
-                        </Pressable>
-                      </View>
-                    );
-                  })()}
-
-                  {selected === "movies" && (
-                    <View style={styles.linkRow}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkJustWatch,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(
-                            `https://www.justwatch.com/us/search?q=${encodeURIComponent(detailItem.title)}`
-                          )
-                        }
-                      >
-                        <MaterialIcons name="live-tv" size={18} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>JustWatch</Text>
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkTMDB,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(`https://www.themoviedb.org/movie/${detailItem.id}`)
-                        }
-                      >
-                        <FontAwesome name="film" size={16} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>TMDB</Text>
-                      </Pressable>
-                    </View>
-                  )}
-
-                  {selected === "books" && (
-                    <View style={styles.linkRow}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkAmazon,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(
-                            `https://openlibrary.org/works/${detailItem.id}`
-                          )
-                        }
-                      >
-                        <FontAwesome name="book" size={16} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>Open Library</Text>
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkGoodreads,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(
-                            `https://www.goodreads.com/search?q=${encodeURIComponent(detailItem.title)}`
-                          )
-                        }
-                      >
-                        <FontAwesome name="star" size={16} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>Goodreads</Text>
-                      </Pressable>
-                    </View>
-                  )}
-                </View>
-
-                {/* Save + Share */}
-                <View style={styles.detailActionsRow}>
-                  {(() => {
-                    const saved = isItemSaved(detailItem);
-                    return (
-                      <Pressable
-                        onPress={toggleSaveDetail}
-                        style={({ pressed }) => [
-                          styles.saveButton,
-                          saved && styles.saveButtonActive,
-                          pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
-                        ]}
-                      >
-                        <FontAwesome
-                          name={saved ? "bookmark" : "bookmark-o"}
-                          size={16}
-                          color={palette.onAccent}
-                        />
-                        <Text style={styles.saveButtonText}>
-                          {saved ? "Saved" : "Save"}
-                        </Text>
-                      </Pressable>
-                    );
-                  })()}
-                  <Pressable
-                    onPress={shareDetail}
-                    style={({ pressed }) => [
-                      styles.shareButton,
-                      pressed && { opacity: 0.75, transform: [{ scale: 0.97 }] },
-                    ]}
-                  >
-                    <FontAwesome
-                      name="share-alt"
-                      size={16}
-                      color={palette.text}
-                    />
-                    <Text style={styles.shareButtonText}>Share</Text>
-                  </Pressable>
-                </View>
-
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-      )}
+      <DetailSheet
+        visible={Boolean(detailSelection)}
+        selection={detailSelection}
+        detail={detail}
+        loading={detailLoading}
+        errorMessage={detailErrorMessage}
+        saved={
+          detailSelection
+            ? isItemSaved(detailSelection.category, detailSelection.item)
+            : false
+        }
+        palette={palette}
+        reducedMotion={reducedMotion}
+        onClose={closeDetail}
+        onRetry={() => setDetailRetryKey((key) => key + 1)}
+        onSave={(item) => void handleDetailSave(item)}
+        onSkip={(item) => void handleDetailSkip(item)}
+        onSimilar={(item) => void handleDetailSimilar(item)}
+        onShare={(item) => {
+          const selection = detailSelectionRef.current;
+          if (selection && selection.item.id === item.id) {
+            void shareDetail(selection.category, item);
+          }
+        }}
+      />
 
       {/* How To Use Modal */}
       <Modal
@@ -1566,7 +1198,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
 
 
-  // ── Detail Modal ──
+  // ── Shared Overlay Modals ──
   modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: "flex-end" },
   modalContent: {
     backgroundColor: c.surface,
@@ -1591,178 +1223,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  modalGrabber: {
-    alignSelf: "center",
-    width: 40,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: c.borderStrong,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  modalImagePlaceholder: {
-    height: 160,
-    backgroundColor: c.accentBgSoft,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroMovie: { width: "100%", height: 220, position: "relative", overflow: "hidden" },
-  heroMovieImage: { width: "100%", height: "100%" },
-  heroMoviePlaceholder: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: c.accentBgSoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroMovieGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: 120 },
-  heroCentered: { alignItems: "center", paddingTop: 24, paddingBottom: 8 },
-  heroSquareWrap: {
-    width: 220,
-    height: 220,
-    borderRadius: 16,
-    backgroundColor: c.accentBgSoft,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  heroBookWrap: {
-    width: 160,
-    height: 240,
-    borderRadius: 10,
-    backgroundColor: c.accentBgSoft,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  heroEmptyWrap: { alignItems: "center", justifyContent: "center" },
-  modalTitle: {
-    color: c.text,
-    fontSize: 24,
-    fontWeight: "700",
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-  modalDetails: { paddingHorizontal: 20, gap: 8 },
-  modalMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 4 },
-  modalMetaPill: {
-    color: c.textSecondary,
-    fontSize: 12,
-    fontWeight: "500",
-    backgroundColor: c.surfaceAltStrong,
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    overflow: "hidden",
-  },
-  modalSubtitle: { color: c.accent, fontSize: 14, fontWeight: "600", marginBottom: 4 },
-  modalLabel: {
-    color: c.textFaint,
-    fontSize: 12,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginTop: 8,
-  },
-  modalValue: { color: c.text, fontSize: 15, fontWeight: "500" },
-  modalDescription: {
-    color: c.textSecondary,
-    fontSize: 14,
-    fontWeight: "400",
-    lineHeight: 22,
-  },
-  trackRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 },
-  trackNumber: {
-    color: c.textFaint,
-    fontSize: 13,
-    fontWeight: "600",
-    width: 20,
-    textAlign: "right",
-  },
-  trackName: { color: c.textSecondary, fontSize: 14, fontWeight: "500", flex: 1 },
-  trackYear: { color: c.textMuted, fontSize: 13, fontWeight: "600", marginLeft: 8 },
-  saveButtonActive: { backgroundColor: c.accentDeep },
-  saveButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: c.accent,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 50,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  saveButtonText: { color: c.onAccent, fontSize: 15, fontWeight: "600" },
-  detailActionsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 12,
-    marginTop: 28,
-    marginBottom: 20,
-  },
-  shareButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: c.surfaceAlt,
-    borderWidth: 1,
-    borderColor: c.border,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 50,
-  },
-  shareButtonText: { color: c.text, fontSize: 15, fontWeight: "600" },
-
-  // ── External Links ──
-  externalLinks: { paddingHorizontal: 20, marginTop: 16 },
-  linkRow: { flexDirection: "row", gap: 10, marginTop: 10 },
-  linkButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  linkButtonText: { color: c.text, fontSize: 13, fontWeight: "600" },
-  linkSpotify: {
-    backgroundColor: "rgba(30,215,96,0.15)",
-    borderColor: "rgba(30,215,96,0.3)",
-  },
-  linkAppleMusic: {
-    backgroundColor: "rgba(252,60,68,0.15)",
-    borderColor: "rgba(252,60,68,0.3)",
-  },
-  linkJustWatch: {
-    backgroundColor: "rgba(253,209,0,0.12)",
-    borderColor: "rgba(253,209,0,0.25)",
-  },
-  linkTMDB: {
-    backgroundColor: "rgba(1,180,228,0.15)",
-    borderColor: "rgba(1,180,228,0.3)",
-  },
-  linkAmazon: {
-    backgroundColor: "rgba(255,153,0,0.15)",
-    borderColor: "rgba(255,153,0,0.3)",
-  },
-  linkGoodreads: {
-    backgroundColor: "rgba(135,113,90,0.2)",
-    borderColor: "rgba(135,113,90,0.35)",
   },
 
   // ── How To Use / Account Modals ──

@@ -1,4 +1,11 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   PanResponder,
@@ -18,7 +25,11 @@ import {
 import type { Palette } from "../../lib/theme";
 import type { ContentCategory, ResultItem } from "../../types/content";
 import { DiscoveryActions } from "./DiscoveryActions";
-import { DiscoveryCard } from "./DiscoveryCard";
+import { DiscoveryCard, type DiscoveryCardHandle } from "./DiscoveryCard";
+
+export type SwipeDeckHandle = {
+  focusActiveCard(): void;
+};
 
 export type SwipeDeckProps = {
   category: ContentCategory;
@@ -31,25 +42,39 @@ export type SwipeDeckProps = {
   onSimilar(item: ResultItem): void;
 };
 
-export function SwipeDeck({
-  category,
-  items,
-  palette,
-  reducedMotion,
-  disabled = false,
-  onCommit,
-  onOpenDetail,
-  onSimilar,
-}: SwipeDeckProps) {
+export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function SwipeDeck(
+  {
+    category,
+    items,
+    palette,
+    reducedMotion,
+    disabled = false,
+    onCommit,
+    onOpenDetail,
+    onSimilar,
+  },
+  forwardedRef
+) {
   const { width: windowWidth } = useWindowDimensions();
   const deckWidth = Math.min(Math.max(windowWidth - 32, 0), 440);
   const visibleItems = items.slice(0, 3);
   const activeItem = visibleItems[0];
   const theme = getCategoryTheme(category);
   const pan = useRef(new Animated.ValueXY()).current;
+  const activeCardRef = useRef<DiscoveryCardHandle>(null);
   const commitLocked = useRef(false);
   const [committing, setCommitting] = useState(false);
   const motion = getMotionSpec(reducedMotion);
+
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      focusActiveCard() {
+        activeCardRef.current?.focus();
+      },
+    }),
+    []
+  );
 
   const resetPan = useCallback(() => {
     if (reducedMotion) {
@@ -179,6 +204,7 @@ export function SwipeDeck({
             testID="active-swipe-card"
           >
             <DiscoveryCard
+              ref={activeCardRef}
               category={category}
               item={activeItem}
               palette={palette}
@@ -263,7 +289,7 @@ export function SwipeDeck({
       />
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   layout: {

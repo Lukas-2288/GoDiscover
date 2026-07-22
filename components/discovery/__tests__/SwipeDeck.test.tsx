@@ -1,14 +1,29 @@
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
+import { createRef } from "react";
 import { Animated, PanResponder, StyleSheet } from "react-native";
 
 import { darkPalette } from "../../../lib/theme";
 import type { ResultItem } from "../../../types/content";
-import { SwipeDeck } from "../SwipeDeck";
+import { SwipeDeck, type SwipeDeckHandle } from "../SwipeDeck";
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
 );
 jest.mock("@expo/vector-icons/FontAwesome", () => "FontAwesome");
+jest.mock("../DiscoveryCard", () => {
+  const React = jest.requireActual<typeof import("react")>("react");
+  const actual = jest.requireActual<typeof import("../DiscoveryCard")>("../DiscoveryCard");
+  const activeCardFocus = jest.fn();
+
+  return {
+    ...actual,
+    activeCardFocus,
+    DiscoveryCard: React.forwardRef((props: any, ref: any) => {
+      React.useImperativeHandle(ref, () => ({ focus: activeCardFocus }));
+      return React.createElement(actual.DiscoveryCard, props);
+    }),
+  };
+});
 
 const movie: ResultItem = {
   id: "movie-1",
@@ -59,6 +74,32 @@ it("keeps similar and detail as explicit actions", () => {
 
   expect(onSimilar).toHaveBeenCalledWith(movie);
   expect(onOpenDetail).toHaveBeenCalledWith(movie);
+});
+
+it("focuses the active card through its imperative handle", () => {
+  const ref = createRef<SwipeDeckHandle>();
+  const { activeCardFocus } = jest.requireMock("../DiscoveryCard") as {
+    activeCardFocus: jest.Mock;
+  };
+  activeCardFocus.mockClear();
+
+  render(
+    <SwipeDeck
+      ref={ref}
+      category="movies"
+      items={[movie]}
+      palette={darkPalette}
+      reducedMotion
+      onCommit={jest.fn()}
+      onOpenDetail={jest.fn()}
+      onSimilar={jest.fn()}
+    />
+  );
+
+  expect(ref.current).not.toBeNull();
+  act(() => ref.current?.focusActiveCard());
+
+  expect(activeCardFocus).toHaveBeenCalledTimes(1);
 });
 
 it("guards against two decisions before the exit animation completes", () => {
