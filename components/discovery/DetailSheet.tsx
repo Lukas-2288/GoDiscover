@@ -32,6 +32,7 @@ export type DetailSheetProps = {
   detail: ContentDetail | null;
   loading: boolean;
   errorMessage: string | null;
+  savedMutationErrorMessage?: string | null;
   saved: boolean;
   palette: Palette;
   reducedMotion: boolean;
@@ -352,6 +353,7 @@ export function DetailSheet({
   detail,
   loading,
   errorMessage,
+  savedMutationErrorMessage = null,
   saved,
   palette,
   reducedMotion,
@@ -592,6 +594,24 @@ export function DetailSheet({
               detail={matchingDetail}
               palette={palette}
             />
+
+            {savedMutationErrorMessage ? (
+              <Text
+                accessibilityLabel={savedMutationErrorMessage}
+                accessibilityLiveRegion="polite"
+                accessibilityRole="alert"
+                style={[
+                  styles.savedMutationError,
+                  {
+                    backgroundColor: palette.surfaceAlt,
+                    borderColor: palette.danger,
+                    color: palette.text,
+                  },
+                ]}
+              >
+                {savedMutationErrorMessage}
+              </Text>
+            ) : null}
 
             <View style={styles.actions}>
               <ActionButton
@@ -849,6 +869,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     gap: 10,
+    marginTop: 4,
+    padding: 14,
+  },
+  savedMutationError: {
+    borderRadius: 14,
+    borderWidth: 1,
+    fontSize: 14,
+    lineHeight: 21,
     marginTop: 4,
     padding: 14,
   },

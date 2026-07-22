@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { fireEvent, render, screen, within } from "@testing-library/react-native";
 import { Linking, StyleSheet } from "react-native";
 
 import { darkPalette } from "../../../lib/theme";
@@ -100,6 +100,35 @@ it("does not let a stored item skip an unrelated active deck", () => {
   );
   expect(screen.queryByRole("button", { name: "Not for me" })).toBeNull();
   expect(screen.getByRole("button", { name: "Remove from saved" })).toBeTruthy();
+});
+
+it("renders saved-mutation feedback inside the modal accessibility tree", () => {
+  render(
+    <DetailSheet
+      visible
+      selection={{ category: "movies", item, origin: "stored" }}
+      detail={null}
+      loading={false}
+      errorMessage={null}
+      savedMutationErrorMessage="Couldn't update saved discoveries. Try again."
+      saved
+      palette={darkPalette}
+      reducedMotion
+      onClose={jest.fn()}
+      onRetry={jest.fn()}
+      onSave={jest.fn()}
+      onSkip={jest.fn()}
+      onSimilar={jest.fn()}
+      onShare={jest.fn()}
+    />
+  );
+
+  const surface = screen.getByTestId("detail-sheet-surface");
+  expect(
+    within(surface).getByRole("alert", {
+      name: "Couldn't update saved discoveries. Try again.",
+    })
+  ).toBeTruthy();
 });
 
 it("keeps the base item visible on detail failure and offers retry", () => {

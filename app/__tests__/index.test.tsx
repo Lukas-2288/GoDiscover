@@ -127,10 +127,12 @@ import HomeScreen from "../index";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 function deckFocusMock(): jest.Mock {
@@ -409,16 +411,137 @@ it("shows stable feedback when a Saved-sheet removal fails", async () => {
   render(<HomeScreen />);
   await waitFor(() => expect(listSaved).toHaveBeenCalled());
   fireEvent.press(screen.getByRole("button", { name: "Open saved discoveries" }));
+  const savedDialog = screen.getByLabelText("Saved discoveries");
   fireEvent.press(
-    screen.getByRole("button", {
+    within(savedDialog).getByRole("button", {
       name: "Remove Arrival from saved discoveries",
     })
   );
 
   expect(
-    await screen.findByText("Couldn't update saved discoveries. Try again.")
+    await within(savedDialog).findByRole("alert", {
+      name: "Couldn't update saved discoveries. Try again.",
+    })
   ).toBeTruthy();
   expect(screen.queryByText(/Supabase|token|expired/i)).toBeNull();
+
+  fireEvent.press(
+    within(savedDialog).getByRole("button", { name: "Close saved discoveries" })
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByText("Couldn't update saved discoveries. Try again.")
+    ).toBeNull()
+  );
+});
+
+it("shows stored-detail mutation failures inside the active detail sheet", async () => {
+  jest.mocked(listSaved).mockResolvedValue([{
+    ...arrival,
+    category: "movies",
+    savedAt: 1,
+  }]);
+  jest.mocked(removeSaved).mockRejectedValueOnce(new Error("private delete detail"));
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalled());
+  fireEvent.press(screen.getByRole("button", { name: "Open saved discoveries" }));
+  fireEvent.press(screen.getByRole("button", { name: "Open Arrival details" }));
+  const detailSheet = await screen.findByTestId("detail-sheet-surface");
+  fireEvent.press(
+    within(detailSheet).getByRole("button", { name: "Remove from saved" })
+  );
+
+  expect(
+    await within(detailSheet).findByRole("alert", {
+      name: "Couldn't update saved discoveries. Try again.",
+    })
+  ).toBeTruthy();
+
+  fireEvent.press(within(detailSheet).getByRole("button", { name: "Close details" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByText("Couldn't update saved discoveries. Try again.")
+    ).toBeNull()
+  );
+});
+
+it("does not let a dismissed Saved-sheet failure suppress a later deck Undo", async () => {
+  jest.mocked(loadDiscovery).mockResolvedValue([moonlight]);
+  jest.mocked(listSaved).mockResolvedValue([{
+    ...arrival,
+    category: "movies",
+    savedAt: 1,
+  }]);
+  jest.mocked(removeSaved).mockRejectedValueOnce(new Error("private delete detail"));
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalled());
+  fireEvent.press(screen.getByRole("button", { name: "Open saved discoveries" }));
+  const savedDialog = screen.getByLabelText("Saved discoveries");
+  fireEvent.press(
+    within(savedDialog).getByRole("button", {
+      name: "Remove Arrival from saved discoveries",
+    })
+  );
+  await within(savedDialog).findByText(
+    "Couldn't update saved discoveries. Try again."
+  );
+  fireEvent.press(
+    within(savedDialog).getByRole("button", { name: "Close saved discoveries" })
+  );
+
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: "Save" }));
+
+  expect(await screen.findByRole("button", { name: "Undo" })).toBeTruthy();
+  expect(screen.getByText("Saved Moonlight")).toBeTruthy();
+});
+
+it("keeps a newer Saved-sheet success from being overwritten by an older failure", async () => {
+  const firstRemoval = deferred<Awaited<ReturnType<typeof removeSaved>>>();
+  const secondRemoval = deferred<Awaited<ReturnType<typeof removeSaved>>>();
+  jest.mocked(listSaved).mockResolvedValue([{
+    ...arrival,
+    category: "movies",
+    savedAt: 1,
+  }]);
+  jest
+    .mocked(removeSaved)
+    .mockReturnValueOnce(firstRemoval.promise)
+    .mockReturnValueOnce(secondRemoval.promise);
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalled());
+  fireEvent.press(screen.getByRole("button", { name: "Open saved discoveries" }));
+  const savedDialog = screen.getByLabelText("Saved discoveries");
+  const remove = within(savedDialog).getByRole("button", {
+    name: "Remove Arrival from saved discoveries",
+  });
+  fireEvent.press(remove);
+  fireEvent.press(remove);
+
+  await act(async () => {
+    firstRemoval.reject(new Error("older private failure"));
+    await firstRemoval.promise.catch(() => undefined);
+  });
+  await waitFor(() => expect(removeSaved).toHaveBeenCalledTimes(2));
+  expect(
+    within(savedDialog).queryByText(
+      "Couldn't update saved discoveries. Try again."
+    )
+  ).toBeNull();
+
+  await act(async () => {
+    secondRemoval.resolve([]);
+    await secondRemoval.promise;
+  });
+  await waitFor(() =>
+    expect(
+      screen.queryByText("Couldn't update saved discoveries. Try again.")
+    ).toBeNull()
+  );
 });
 
 it("does not restore focus from a slow Save behind a newer detail", async () => {

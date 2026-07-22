@@ -71,7 +71,12 @@ import {
 
 export default function HomeScreen() {
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
-  const [savedMutationError, setSavedMutationError] = useState<string | null>(null);
+  const [detailSavedMutationError, setDetailSavedMutationError] = useState<
+    string | null
+  >(null);
+  const [savedSheetMutationError, setSavedSheetMutationError] = useState<
+    string | null
+  >(null);
   const discoveryController = useDiscoveryController({
     onSavedItemsChange: setSavedItems,
   });
@@ -92,6 +97,8 @@ export default function HomeScreen() {
   const deckRef = useRef<SwipeDeckHandle>(null);
   const detailFocusGenerationRef = useRef(0);
   const detailRequestSequenceRef = useRef(0);
+  const detailSavedMutationSequenceRef = useRef(0);
+  const savedSheetMutationSequenceRef = useRef(0);
   const detailSelectionRef = useRef<DetailSelection | null>(null);
   detailSelectionRef.current = detailSelection;
   const [howToOpen, setHowToOpen] = useState(false);
@@ -257,19 +264,38 @@ export default function HomeScreen() {
   };
 
   const applySavedMutation = async (
-    mutation: () => Promise<SavedItem[]>
+    mutation: () => Promise<SavedItem[]>,
+    scope?: "detail" | "savedSheet"
   ): Promise<boolean> => {
-    setSavedMutationError(null);
+    const sequenceRef =
+      scope === "detail"
+        ? detailSavedMutationSequenceRef
+        : scope === "savedSheet"
+        ? savedSheetMutationSequenceRef
+        : null;
+    const setError =
+      scope === "detail"
+        ? setDetailSavedMutationError
+        : scope === "savedSheet"
+        ? setSavedSheetMutationError
+        : null;
+    const operationId = sequenceRef ? ++sequenceRef.current : 0;
+    setError?.(null);
     try {
       setSavedItems(await mutation());
+      if (sequenceRef?.current === operationId) setError?.(null);
       return true;
     } catch {
-      setSavedMutationError(SAVED_MUTATION_ERROR);
+      if (sequenceRef?.current === operationId) {
+        setError?.(SAVED_MUTATION_ERROR);
+      }
       return false;
     }
   };
 
   const clearDetail = () => {
+    detailSavedMutationSequenceRef.current += 1;
+    setDetailSavedMutationError(null);
     detailSelectionRef.current = null;
     setDetailSelection(null);
     setDetail(null);
@@ -295,6 +321,8 @@ export default function HomeScreen() {
 
   const openDetail = (selection: DetailSelection) => {
     invalidateDetailFocusRestoration();
+    detailSavedMutationSequenceRef.current += 1;
+    setDetailSavedMutationError(null);
     detailSelectionRef.current = selection;
     setDetailRetryKey(0);
     setDetailSelection(selection);
@@ -344,8 +372,9 @@ export default function HomeScreen() {
     if (!selection || selection.item.id !== item.id) return;
 
     if (selection.origin === "stored") {
-      await applySavedMutation(() =>
-        toggleSavedItem(selection.category, item)
+      await applySavedMutation(
+        () => toggleSavedItem(selection.category, item),
+        "detail"
       );
       return;
     }
@@ -380,7 +409,6 @@ export default function HomeScreen() {
 
   const handleCategorySelect = (category: ContentCategory) => {
     invalidateDetailFocusRestoration();
-    setSavedMutationError(null);
     if (!categoryPickerExpanded && category === selected) {
       setCategoryPickerExpanded(true);
       return;
@@ -393,6 +421,18 @@ export default function HomeScreen() {
   const openStoredItem = (category: ContentCategory, item: ResultItem) => {
     discoveryController.selectCategory(category);
     openDetail({ category, item, origin: "stored" });
+  };
+
+  const openSavedSheet = () => {
+    savedSheetMutationSequenceRef.current += 1;
+    setSavedSheetMutationError(null);
+    setSavedOpen(true);
+  };
+
+  const closeSavedSheet = () => {
+    savedSheetMutationSequenceRef.current += 1;
+    setSavedSheetMutationError(null);
+    setSavedOpen(false);
   };
 
   useEffect(() => {
@@ -474,7 +514,7 @@ export default function HomeScreen() {
             ]}
             onPress={() => {
               invalidateDetailFocusRestoration();
-              setSavedOpen(true);
+              openSavedSheet();
             }}
           >
             <FontAwesome
@@ -669,7 +709,6 @@ export default function HomeScreen() {
 
           <UndoNotice
             message={
-              savedMutationError ??
               discovery.actionError ??
               (discovery.lastSave
                 ? `Saved ${discovery.lastSave.item.title}`
@@ -677,8 +716,7 @@ export default function HomeScreen() {
             }
             canUndo={Boolean(
               discovery.lastSave &&
-                discovery.actionError === null &&
-                savedMutationError === null
+                discovery.actionError === null
             )}
             palette={palette}
             onUndo={() => void discoveryController.undo()}
@@ -686,7 +724,7 @@ export default function HomeScreen() {
           <DiscoveryAnnouncer
             message={announcement}
             actionErrorMessage={
-              savedMutationError ?? discoveryController.actionErrorAnnouncement
+              discoveryController.actionErrorAnnouncement
             }
           />
         </View>
@@ -698,6 +736,7 @@ export default function HomeScreen() {
         detail={detail}
         loading={detailLoading}
         errorMessage={detailErrorMessage}
+        savedMutationErrorMessage={detailSavedMutationError}
         saved={
           detailSelection?.origin === "stored"
             ? isItemSaved(detailSelection.category, detailSelection.item)
@@ -829,14 +868,14 @@ export default function HomeScreen() {
         visible={savedOpen}
         animationType="slide"
         transparent={true}
-        onRequestClose={() => setSavedOpen(false)}
+        onRequestClose={closeSavedSheet}
       >
         <View style={styles.modalOverlay}>
           <View
             accessibilityLabel="Saved discoveries"
             accessibilityViewIsModal
             aria-modal
-            onAccessibilityEscape={() => setSavedOpen(false)}
+            onAccessibilityEscape={closeSavedSheet}
             role="dialog"
             style={styles.savedSheet}
           >
@@ -844,7 +883,7 @@ export default function HomeScreen() {
               accessibilityLabel="Close saved discoveries"
               accessibilityRole="button"
               style={styles.modalClose}
-              onPress={() => setSavedOpen(false)}
+              onPress={closeSavedSheet}
             >
               <AntDesign
                 accessible={false}
@@ -854,12 +893,22 @@ export default function HomeScreen() {
               />
             </Pressable>
             <Text style={styles.savedTitle}>Saved</Text>
+            {savedSheetMutationError ? (
+              <Text
+                accessibilityLabel={savedSheetMutationError}
+                accessibilityLiveRegion="polite"
+                accessibilityRole="alert"
+                style={styles.savedMutationError}
+              >
+                {savedSheetMutationError}
+              </Text>
+            ) : null}
             {!authSession && (
               <Pressable
                 accessibilityLabel="Sign in to sync saved discoveries"
                 accessibilityRole="button"
                 onPress={() => {
-                  setSavedOpen(false);
+                  closeSavedSheet();
                   setAccountOpen(true);
                 }}
                 style={({ pressed }) => [
@@ -925,7 +974,7 @@ export default function HomeScreen() {
                               ]}
                               onPress={() => {
                                 openStoredItem(item.category, item);
-                                setSavedOpen(false);
+                                closeSavedSheet();
                               }}
                             >
                               {item.imageUrl ? (
@@ -957,8 +1006,9 @@ export default function HomeScreen() {
                               accessibilityRole="button"
                               hitSlop={10}
                               onPress={async () => {
-                                await applySavedMutation(() =>
-                                  removeSavedItem(item.category, item.id)
+                                await applySavedMutation(
+                                  () => removeSavedItem(item.category, item.id),
+                                  "savedSheet"
                                 );
                               }}
                               style={({ pressed }) => [
@@ -1350,6 +1400,17 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     minHeight: "55%",
   },
   savedTitle: { color: c.text, fontSize: 22, fontWeight: "700", marginBottom: 16 },
+  savedMutationError: {
+    backgroundColor: c.surfaceAlt,
+    borderColor: c.danger,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: c.text,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+    padding: 12,
+  },
   savedEmpty: {
     alignItems: "center",
     gap: 12,
