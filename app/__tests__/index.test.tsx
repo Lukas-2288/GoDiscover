@@ -138,6 +138,7 @@ import {
 import HomeScreen from "../index";
 
 const SAVED_MUTATION_ERROR = "Couldn't update saved discoveries. Try again.";
+const DECK_SAVE_ERROR = "Couldn't save that one. It's back in your deck.";
 const originalPlatform = Platform.OS;
 
 function deferred<T>() {
@@ -474,6 +475,49 @@ it("shows stable feedback when a Saved-sheet removal fails", async () => {
       screen.queryByText("Couldn't update saved discoveries. Try again.")
     ).toBeNull()
   );
+});
+
+it("keeps deck and Saved-sheet iOS error announcements independent", async () => {
+  const announce = spyOnIOSAnnouncements();
+  jest.mocked(loadDiscovery).mockResolvedValue([moonlight]);
+  jest.mocked(listSaved).mockResolvedValue([{
+    ...arrival,
+    category: "movies",
+    savedAt: 1,
+  }]);
+  jest.mocked(addSaved).mockRejectedValueOnce(new Error("private save detail"));
+  jest.mocked(removeSaved).mockRejectedValueOnce(new Error("private delete detail"));
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(announce).toHaveBeenCalledWith(DECK_SAVE_ERROR)
+  );
+  expect(
+    announce.mock.calls.filter(([message]) => message === DECK_SAVE_ERROR)
+  ).toHaveLength(1);
+
+  fireEvent.press(screen.getByRole("button", { name: "Open saved discoveries" }));
+  const savedDialog = screen.getByLabelText("Saved discoveries");
+  fireEvent.press(
+    within(savedDialog).getByRole("button", {
+      name: "Remove Arrival from saved discoveries",
+    })
+  );
+  await within(savedDialog).findByRole("alert", { name: SAVED_MUTATION_ERROR });
+  fireEvent.press(
+    within(savedDialog).getByRole("button", { name: "Close saved discoveries" })
+  );
+
+  await waitFor(() => {
+    expect(
+      announce.mock.calls.filter(([message]) => message === DECK_SAVE_ERROR)
+    ).toHaveLength(1);
+    expect(countSavedMutationAnnouncements(announce)).toBe(1);
+  });
 });
 
 it("shows stored-detail mutation failures inside the active detail sheet", async () => {

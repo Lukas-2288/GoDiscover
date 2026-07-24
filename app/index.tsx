@@ -744,14 +744,18 @@ export default function HomeScreen() {
           />
           <DiscoveryAnnouncer
             message={announcement}
+            actionErrorMessage={discoveryController.actionErrorAnnouncement}
+          />
+          <DiscoveryAnnouncer
+            message={null}
             actionErrorMessage={
-              (accountOpen
+              accountOpen
                 ? accountSavedMutationError
                 : detailSelection
                 ? detailSavedMutationError
                 : savedOpen
                 ? savedSheetMutationError
-                : null) ?? discoveryController.actionErrorAnnouncement
+                : null
             }
           />
         </View>
