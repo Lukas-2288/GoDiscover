@@ -6,14 +6,18 @@ Make left and right card swipes register reliably when a thumb moves on a
 natural diagonal, without turning mostly vertical page movement into a card
 decision.
 
-## Current behavior and root cause
+## Current behavior and root causes
 
 `SwipeDeck` asks `shouldClaimSwipe` whether the card should take ownership of a
 touch gesture. The current rule requires at least eight points of horizontal
 movement and requires that movement to be 20 percent greater than the vertical
 movement. A moderate diagonal therefore never reaches the card's release
-handler, even when the user's final horizontal distance or velocity clearly
-means Save or Skip.
+handler.
+
+Once claimed, the release rule requires 24 percent of the card width or a
+horizontal velocity of 0.75. Device testing showed that ordinary deliberate
+swipes can move the card but still miss both thresholds, causing it to spring
+back to the center.
 
 ## Considered approaches
 
@@ -34,26 +38,29 @@ horizontal component is at least 80 percent of the vertical component. This
 accepts moderate diagonals such as 12 horizontal points by 14 vertical points,
 while rejecting strongly vertical movement such as 12 by 20.
 
-Once the gesture is claimed, keep the existing decision rules:
+Once the gesture is claimed, make the release decision more forgiving:
 
-- Commit by horizontal distance at 24 percent of card width.
-- Commit by horizontal velocity at 0.75.
+- Commit by horizontal distance at 18 percent of card width.
+- Commit by horizontal velocity at 0.5.
 - Use the final horizontal translation, or velocity for a short flick, to
   choose Save versus Skip.
-- Reset below-threshold drags to the center.
+- Continue to reset a 10-percent-width drag with velocity 0.2 to the center.
 
 No API, data, accessibility, animation, or saved-item semantics change.
 
 ## Testing
 
 Add focused unit cases proving that `12, 14` and `-12, 14` movement are claimed
-and that `12, 20` remains unclaimed. Keep the existing boundary, distance,
-velocity, component, route, and full-suite tests. Perform a focused gesture
-test followed by full branch verification.
+and that `12, 20` remains unclaimed. Prove that a 20-percent-width drag and a
+velocity-0.6 flick commit, while a 10-percent-width drag at velocity 0.2 still
+resets. Keep the existing component, route, and full-suite tests. Perform a
+focused gesture test followed by full branch verification.
 
 ## Success criteria
 
 - Moderate diagonal swipes can reach the existing left/right release decision.
+- A deliberate 20-percent drag or velocity-0.6 flick commits rather than
+  resetting.
 - Clearly vertical movement does not claim the deck gesture.
 - Buttons remain a complete non-gesture alternative.
 - Existing Save, Skip, Undo, animation, and accessibility behavior remains
