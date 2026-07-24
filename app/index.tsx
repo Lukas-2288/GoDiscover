@@ -147,7 +147,7 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    listSaved().then(setSavedItems).catch(() => {});
+    runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => {});
     listRecents().then(setRecentItems).catch(() => {});
   }, []);
 
@@ -162,7 +162,7 @@ export default function HomeScreen() {
     supabase.auth.getSession().then(({ data }) => {
       setAuthSession(data.session);
       if (data.session) {
-        listSaved().then(setSavedItems).catch(() => {});
+        runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => {});
       }
     });
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, s) => {
@@ -220,8 +220,11 @@ export default function HomeScreen() {
         setAuthMode("signin");
         setAuthPassword("");
       }
-    } catch (e: any) {
-      Alert.alert("Auth error", e.message ?? "Something went wrong");
+    } catch {
+      Alert.alert(
+        authMode === "signin" ? "Couldn't sign in" : "Couldn't create account",
+        "Check your details and try again."
+      );
     } finally {
       setAuthLoading(false);
     }
@@ -243,8 +246,8 @@ export default function HomeScreen() {
     try {
       const { error } = await supabase.auth.updateUser({ data: { display_name: next } });
       if (error) throw error;
-    } catch (e: any) {
-      Alert.alert("Couldn't save name", e?.message ?? "Something went wrong");
+    } catch {
+      Alert.alert("Couldn't save name", "Try again in a moment.");
     } finally {
       setSavingName(false);
     }
@@ -272,7 +275,7 @@ export default function HomeScreen() {
       setAccountOpen(false);
     } catch (e: any) {
       if (e?.message !== "Sign-in cancelled") {
-        Alert.alert("Google sign-in failed", e?.message ?? "Something went wrong");
+        Alert.alert("Google sign-in failed", "Try again in a moment.");
       }
     } finally {
       setAuthLoading(false);
@@ -791,7 +794,7 @@ export default function HomeScreen() {
       {/* How To Use Modal */}
       <Modal
         visible={howToOpen}
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         transparent={true}
         onRequestClose={() => setHowToOpen(false)}
       >
@@ -897,7 +900,7 @@ export default function HomeScreen() {
       {/* Saved Modal */}
       <Modal
         visible={savedOpen}
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         transparent={true}
         onRequestClose={closeSavedSheet}
       >
@@ -1069,7 +1072,7 @@ export default function HomeScreen() {
       {/* Account Modal */}
       <Modal
         visible={accountOpen}
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         transparent={true}
         onRequestClose={closeAccount}
       >

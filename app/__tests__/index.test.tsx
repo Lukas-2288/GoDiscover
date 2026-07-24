@@ -6,7 +6,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react-native";
-import { AccessibilityInfo, Platform, StyleSheet } from "react-native";
+import {
+  AccessibilityInfo,
+  Alert,
+  Modal,
+  Platform,
+  StyleSheet,
+} from "react-native";
 
 import type { MovieDetail, ResultItem } from "../../types/content";
 
@@ -127,6 +133,7 @@ jest.mock("../../components/discovery/SwipeDeck", () => {
 });
 
 import { getSimilarMovies } from "../../lib/api/tmdb";
+import { signInWithGoogle } from "../../lib/auth/oauth";
 import { loadDetail } from "../../lib/discovery/loadDetail";
 import { loadDiscovery } from "../../lib/discovery/loadDiscovery";
 import {
@@ -135,6 +142,7 @@ import {
   removeSaved,
   syncLocalToCloud,
 } from "../../lib/storage/saved";
+import { supabase } from "../../lib/supabase";
 import HomeScreen from "../index";
 
 const SAVED_MUTATION_ERROR = "Couldn't update saved discoveries. Try again.";
@@ -218,6 +226,205 @@ it("gives every header action an explicit name and 44-point target", async () =>
     screen.getByRole("button", { name: "Open saved discoveries" }),
     screen.getByRole("button", { name: "How to use GoDiscover" }),
   ].forEach(expectMinimumTarget);
+});
+
+it("serializes initial saved hydration before a later deck Save", async () => {
+  const pendingHydration = deferred<Awaited<ReturnType<typeof listSaved>>>();
+  jest
+    .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+    .mockResolvedValue(true);
+  jest
+    .mocked(listSaved)
+    .mockReturnValueOnce(pendingHydration.promise)
+    .mockResolvedValueOnce([]);
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalledTimes(1));
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: "Save" }));
+
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const saveStartedBeforeHydration = jest.mocked(addSaved).mock.calls.length > 0;
+
+  await act(async () => {
+    pendingHydration.resolve([]);
+    await pendingHydration.promise;
+  });
+  await waitFor(() => expect(addSaved).toHaveBeenCalledTimes(1));
+
+  expect(saveStartedBeforeHydration).toBe(false);
+  fireEvent.press(
+    screen.getByRole("button", { name: "Open saved discoveries" })
+  );
+  expect(screen.getByRole("button", { name: "Open Arrival details" })).toBeTruthy();
+});
+
+it("serializes authenticated saved refresh before a later deck Save", async () => {
+  const pendingAuthRefresh = deferred<Awaited<ReturnType<typeof listSaved>>>();
+  jest
+    .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+    .mockResolvedValue(true);
+  jest.mocked(supabase.auth.getSession).mockResolvedValueOnce({
+    data: {
+      session: {
+        user: {
+          id: "account-1",
+          email: "reader@example.com",
+          user_metadata: {},
+        },
+      },
+    },
+  } as any);
+  jest
+    .mocked(listSaved)
+    .mockResolvedValueOnce([])
+    .mockReturnValueOnce(pendingAuthRefresh.promise)
+    .mockResolvedValueOnce([]);
+
+  render(<HomeScreen />);
+  await waitFor(() => expect(listSaved).toHaveBeenCalledTimes(2));
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: "Save" }));
+
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+  const saveStartedBeforeRefresh = jest.mocked(addSaved).mock.calls.length > 0;
+
+  await act(async () => {
+    pendingAuthRefresh.resolve([]);
+    await pendingAuthRefresh.promise;
+  });
+  await waitFor(() => expect(addSaved).toHaveBeenCalledTimes(1));
+
+  expect(saveStartedBeforeRefresh).toBe(false);
+  fireEvent.press(
+    screen.getByRole("button", { name: "Open saved discoveries" })
+  );
+  expect(screen.getByRole("button", { name: "Open Arrival details" })).toBeTruthy();
+});
+
+it.each([
+  ["How to Use", "How to use GoDiscover"],
+  ["Saved", "Open saved discoveries"],
+  ["Account", "Open account"],
+])(
+  "disables the %s modal transition when reduced motion is enabled",
+  async (_modalName, buttonName) => {
+    jest
+      .spyOn(AccessibilityInfo, "isReduceMotionEnabled")
+      .mockResolvedValue(true);
+    const rendered = render(<HomeScreen />);
+    await waitFor(() =>
+      expect(AccessibilityInfo.isReduceMotionEnabled).toHaveBeenCalled()
+    );
+
+    fireEvent.press(screen.getByRole("button", { name: buttonName }));
+
+    await waitFor(() => {
+      const visibleModal = rendered
+        .UNSAFE_getAllByType(Modal)
+        .find((modal) => modal.props.visible);
+      expect(visibleModal?.props.animationType).toBe("none");
+    });
+  }
+);
+
+it("shows stable auth-submit feedback without raw provider details", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  jest.mocked(supabase.auth.signInWithPassword).mockResolvedValueOnce({
+    error: new Error("Supabase service_role=private-auth-secret"),
+  } as any);
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Open account" }));
+  fireEvent.changeText(screen.getByLabelText("Email"), "reader@example.com");
+  fireEvent.changeText(screen.getByLabelText("Password"), "password");
+  fireEvent.press(screen.getByRole("button", { name: "Sign in" }));
+
+  await waitFor(() =>
+    expect(alert).toHaveBeenCalledWith(
+      "Couldn't sign in",
+      "Check your details and try again."
+    )
+  );
+  expect(JSON.stringify(alert.mock.calls)).not.toMatch(
+    /Supabase|service_role|private-auth-secret/i
+  );
+});
+
+it("shows stable display-name feedback without raw provider details", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  jest.mocked(supabase.auth.getSession).mockResolvedValueOnce({
+    data: {
+      session: {
+        user: {
+          id: "account-1",
+          email: "reader@example.com",
+          user_metadata: { display_name: "Reader" },
+        },
+      },
+    },
+  } as any);
+  jest.mocked(supabase.auth.updateUser).mockResolvedValueOnce({
+    error: new Error("PostgREST bearer private-profile-token"),
+  } as any);
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Open account" }));
+  const displayName = await screen.findByLabelText("Display name");
+  fireEvent.changeText(displayName, "New Reader");
+  fireEvent.press(screen.getByRole("button", { name: "Save display name" }));
+
+  await waitFor(() =>
+    expect(alert).toHaveBeenCalledWith(
+      "Couldn't save name",
+      "Try again in a moment."
+    )
+  );
+  expect(JSON.stringify(alert.mock.calls)).not.toMatch(
+    /PostgREST|bearer|private-profile-token/i
+  );
+});
+
+it("shows stable Google feedback without raw provider details", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  jest
+    .mocked(signInWithGoogle)
+    .mockRejectedValueOnce(new Error("Google OAuth client_secret=private-google"));
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Open account" }));
+  fireEvent.press(screen.getByRole("button", { name: "Continue with Google" }));
+
+  await waitFor(() =>
+    expect(alert).toHaveBeenCalledWith(
+      "Google sign-in failed",
+      "Try again in a moment."
+    )
+  );
+  expect(JSON.stringify(alert.mock.calls)).not.toMatch(
+    /Google OAuth|client_secret|private-google/i
+  );
+});
+
+it("keeps cancelled Google sign-in silent", async () => {
+  const alert = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+  jest
+    .mocked(signInWithGoogle)
+    .mockRejectedValueOnce(new Error("Sign-in cancelled"));
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Open account" }));
+  fireEvent.press(screen.getByRole("button", { name: "Continue with Google" }));
+
+  await waitFor(() => expect(signInWithGoogle).toHaveBeenCalledTimes(1));
+  await act(async () => undefined);
+  expect(alert).not.toHaveBeenCalled();
 });
 
 it("keeps saved-item details and removal as separate functional actions", async () => {
