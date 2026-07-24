@@ -155,6 +155,12 @@ it("does not commit an interrupted exit and unlocks for a retry", () => {
 
 it("uses horizontal intent and maps a swipe through the guarded gesture path", () => {
   let responderConfig: Parameters<typeof PanResponder.create>[0] | undefined;
+  jest.spyOn(require("react-native"), "useWindowDimensions").mockReturnValue({
+    fontScale: 1,
+    height: 844,
+    scale: 3,
+    width: 390,
+  });
   jest.spyOn(PanResponder, "create").mockImplementation((config) => {
     responderConfig = config;
     return { panHandlers: {} } as ReturnType<typeof PanResponder.create>;
@@ -167,11 +173,14 @@ it("uses horizontal intent and maps a swipe through the guarded gesture path", (
   ).toBe(true);
   expect(
     responderConfig?.onMoveShouldSetPanResponder?.({} as never, { dx: 12, dy: 14 } as never)
+  ).toBe(true);
+  expect(
+    responderConfig?.onMoveShouldSetPanResponder?.({} as never, { dx: 12, dy: 20 } as never)
   ).toBe(false);
   act(() => {
     responderConfig?.onPanResponderRelease?.(
       {} as never,
-      { dx: -110, dy: 4, vx: -0.2 } as never
+      { dx: -70, dy: 35, vx: -0.2 } as never
     );
   });
 
