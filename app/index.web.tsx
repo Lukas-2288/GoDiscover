@@ -20,7 +20,9 @@ export default function WebHomeScreen() {
   const reducedMotion = useReducedMotion();
   const [section, setSection] = useState<WebSection>("archive");
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
-  const [savedHydrated, setSavedHydrated] = useState(false);
+  const [savedOwnerId, setSavedOwnerId] = useState<string | null | undefined>(
+    undefined
+  );
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>({ version: 1, nodes: [], edges: [] });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -33,6 +35,7 @@ export default function WebHomeScreen() {
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const detailRequest = useRef(0);
+  const savedRefreshSequence = useRef(0);
   const trailSeed = useRef<{ category: ContentCategory; id: string } | null>(null);
   const discovery = useDiscoveryController({ onSavedItemsChange: setSavedItems });
   const { selected } = discovery.state;
@@ -41,27 +44,44 @@ export default function WebHomeScreen() {
   const nextItem = activeSession?.deck.queue[1] ?? null;
 
   useEffect(() => {
-    void runSavedMutation(() => listSaved())
-      .then((items) => {
-        setSavedItems(items);
-        setSavedHydrated(true);
+    let authEventObserved = false;
+    const refreshSavedForSession = (next: Session | null) => {
+      const ownerId = next?.user.id ?? null;
+      const refreshSequence = ++savedRefreshSequence.current;
+      setAuthSession(next);
+      setSavedOwnerId((hydratedOwnerId) =>
+        hydratedOwnerId === ownerId ? hydratedOwnerId : undefined
+      );
+      void runSavedMutation(() => listSaved())
+        .then((items) => {
+          if (savedRefreshSequence.current !== refreshSequence) return;
+          setSavedItems(items);
+          setSavedOwnerId(ownerId);
+        })
+        .catch(() => undefined);
+    };
+
+    void listRecents().then(setRecentItems).catch(() => undefined);
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!authEventObserved) refreshSavedForSession(data.session);
       })
       .catch(() => undefined);
-    void listRecents().then(setRecentItems).catch(() => undefined);
-    supabase.auth.getSession().then(({ data }) => setAuthSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
-      setAuthSession(next);
-      void runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => undefined);
+      authEventObserved = true;
+      refreshSavedForSession(next);
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!savedHydrated) return;
+    const ownerId = authSession?.user.id ?? null;
+    if (savedOwnerId !== ownerId) return;
     void loadMapSnapshot(savedItems, authSession?.user.id)
       .then(setMapSnapshot)
       .catch(() => undefined);
-  }, [authSession?.user.id, savedHydrated, savedItems]);
+  }, [authSession?.user.id, savedItems, savedOwnerId]);
 
   useEffect(() => {
     if (!detailSelection) {
