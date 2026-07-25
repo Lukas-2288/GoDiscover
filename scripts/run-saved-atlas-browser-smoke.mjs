@@ -1,10 +1,13 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const targetUrl = process.argv[2] ?? "http://127.0.0.1:4179/";
+const viewportWidth = Number(process.argv[3] ?? "390");
+const viewportHeight = Number(process.argv[4] ?? "844");
+const screenshotPath = process.argv[5];
 const chromeBinary =
   process.env.CHROME_BIN ??
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -115,11 +118,11 @@ try {
   await send("Page.enable");
   await send("Emulation.setDeviceMetricsOverride", {
     deviceScaleFactor: 1,
-    height: 844,
-    mobile: true,
-    screenHeight: 844,
-    screenWidth: 390,
-    width: 390,
+    height: viewportHeight,
+    mobile: viewportWidth <= 768,
+    screenHeight: viewportHeight,
+    screenWidth: viewportWidth,
+    width: viewportWidth,
   });
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `
@@ -157,10 +160,22 @@ try {
     );
   }
   const result = smoke.result.value;
+  result.interactions = await runInputSmoke(send, viewportWidth <= 768);
+  result.checks.mousePan = result.interactions.mousePan;
+  result.checks.mouseOrbitAndRestore = result.interactions.mouseOrbitAndRestore;
+  result.checks.keyboardOrbitAndRestore = result.interactions.keyboardOrbitAndRestore;
+  result.checks.touchOrbitAndRestore = result.interactions.touchOrbitAndRestore;
   const fatalRuntimeExceptions = runtimeExceptions.filter(
     (error) => !error.includes("Minified React error #418")
   );
   result.checks.noFatalRuntimeErrors = fatalRuntimeExceptions.length === 0;
+  if (screenshotPath) {
+    const screenshot = await send("Page.captureScreenshot", {
+      captureBeyondViewport: false,
+      format: "png",
+    });
+    await writeFile(screenshotPath, screenshot.data, "base64");
+  }
   const passed = Object.values(result.checks).every(Boolean);
   if (!passed) {
     throw new Error(
@@ -190,6 +205,93 @@ try {
   ]);
   if (chrome.exitCode === null) chrome.kill("SIGKILL");
   await rm(profileDirectory, { force: true, recursive: true });
+}
+
+async function runInputSmoke(send, useTouch) {
+  const diagnosticLabels = await send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: '[...document.querySelectorAll("[aria-label]")].map((element) => element.getAttribute("aria-label")).filter(Boolean)',
+  });
+  const waitFor = async (expression, timeout = 5_000) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const result = await send("Runtime.evaluate", {
+        awaitPromise: true,
+        returnByValue: true,
+        expression,
+      });
+      if (result.result.value) return true;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return false;
+  };
+  const centerOf = async (selector) => {
+    const result = await send("Runtime.evaluate", {
+      returnByValue: true,
+      expression: `(() => {
+        const element = document.querySelector(${JSON.stringify(selector)});
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      })()`,
+    });
+    return result.result.value;
+  };
+  const click = async (selector) => {
+    const center = await centerOf(selector);
+    if (!center) return false;
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: center.x, y: center.y, button: "left", clickCount: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: center.x, y: center.y, button: "left", clickCount: 1 });
+    return true;
+  };
+  const touch = async (selector) => {
+    const center = await centerOf(selector);
+    if (!center) return false;
+    await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: center.x, y: center.y, id: 1 }] });
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    return true;
+  };
+  const key = async (name) => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: name, code: name });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: name, code: name });
+  };
+  const arrival = '[aria-label^="Arrival, movies"]';
+  const back = '[aria-label="Back to atlas"]';
+  const pane = ".react-flow__pane";
+  const closeDetails = '[aria-label="Close details"]';
+  const detailSurface = `Boolean(document.querySelector(${JSON.stringify(back)}) || document.querySelector(${JSON.stringify(closeDetails)}))`;
+  const dismissDetailSurface = async () => {
+    if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(back)}))`)) return click(back);
+    if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(closeDetails)}))`)) return click(closeDetails);
+    return false;
+  };
+  if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(closeDetails)}))`)) {
+    await click(closeDetails);
+    await waitFor(`!document.querySelector(${JSON.stringify(closeDetails)})`);
+  }
+  const paneCenter = await centerOf(pane);
+  let mousePan = false;
+  if (paneCenter) {
+    const before = await send("Runtime.evaluate", { returnByValue: true, expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""' });
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: paneCenter.x, y: paneCenter.y, button: "left", clickCount: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: paneCenter.x + 40, y: paneCenter.y + 24, button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: paneCenter.x + 40, y: paneCenter.y + 24, button: "left", clickCount: 1 });
+    const after = await send("Runtime.evaluate", { returnByValue: true, expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""' });
+    mousePan = Boolean(after.result.value) && after.result.value !== before.result.value;
+  }
+  const mouseOrbitAndRestore = (await click(arrival)) && (await waitFor(detailSurface)) && (await dismissDetailSurface()) && (await waitFor(`!(${detailSurface})`));
+  await send("Runtime.evaluate", { expression: 'document.querySelector("[role=application]")?.focus()' });
+  await key("ArrowRight");
+  await key("Enter");
+  const keyboardOrbitAndRestore = (await waitFor(detailSurface)) && (await key("Escape"), await waitFor(`!(${detailSurface})`));
+  const touchOrbitAndRestore = !useTouch || ((await touch(arrival)) && (await waitFor(detailSurface)) && (await dismissDetailSurface()) && (await waitFor(`!(${detailSurface})`)));
+  return {
+    mousePan,
+    mouseOrbitAndRestore,
+    keyboardOrbitAndRestore,
+    touchOrbitAndRestore,
+    diagnosticLabels: diagnosticLabels.result.value,
+  };
 }
 
 async function runSmokeInPage() {

@@ -199,3 +199,31 @@ it("uses close detail at a high map zoom", () => {
     representativeNodeIds: [],
   });
 });
+
+it("settles a 200-node, 400-edge atlas deterministically", () => {
+  const createAtlasLayout = loadMapLayout().createAtlasLayout as (
+    nodes: unknown[],
+    edges: unknown[],
+    options: unknown
+  ) => Record<string, { x: number; y: number }>;
+  const categories = ["movies", "books", "albums", "artists"];
+  const nodes = Array.from({ length: 200 }, (_, index) => ({
+    id: `${categories[index % categories.length]}:item-${index}`,
+    category: categories[index % categories.length],
+  }));
+  const edges = Array.from({ length: 400 }, (_, index) => ({
+    source: nodes[index % nodes.length].id,
+    target: nodes[(index * 37 + 11) % nodes.length].id,
+  })).filter((edge) => edge.source !== edge.target);
+
+  const startedAt = performance.now();
+  const first = createAtlasLayout(nodes, edges, { seed: "release-200-400" });
+  const elapsedMilliseconds = performance.now() - startedAt;
+  const second = createAtlasLayout([...nodes].reverse(), [...edges].reverse(), {
+    seed: "release-200-400",
+  });
+
+  expect(Object.keys(first)).toHaveLength(200);
+  expect(second).toEqual(first);
+  expect(elapsedMilliseconds).toBeLessThan(1_000);
+});
