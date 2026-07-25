@@ -4,6 +4,17 @@ import type { SavedItem } from "./saved";
 
 export const DISCOVERY_MAP_STORAGE_KEY = "godiscover:discovery-map-edges:v1";
 
+export type MapExperienceMode = "atlas" | "orbit";
+
+export type CulturalProfile = {
+  vocabularyVersion: 1;
+  genres: string[];
+  styles: string[];
+  subjects: string[];
+  creators: string[];
+  era?: string;
+};
+
 export type MapNode = {
   id: string;
   category: ContentCategory;
@@ -15,6 +26,7 @@ export type MapNode = {
   savedAt: number;
   x: number;
   y: number;
+  culturalProfile?: CulturalProfile;
 };
 
 export type MapEdge = {
@@ -22,6 +34,7 @@ export type MapEdge = {
   source: string;
   target: string;
   createdAt: number;
+  reason?: string;
 };
 
 export type MapTrailEvent = {
@@ -30,11 +43,33 @@ export type MapTrailEvent = {
   occurredAt: number;
 };
 
-export type MapSnapshot = {
+export type TrailMutationEvent = {
+  id: string;
+  relationshipId: string;
+  action: "connect" | "disconnect";
+  source: string;
+  target: string;
+  occurredAt: number;
+  reason?: string;
+  sessionId?: string;
+  userId?: string;
+};
+
+export type LegacyMapSnapshot = {
   version: 1;
   nodes: MapNode[];
   edges: MapEdge[];
+  events?: TrailMutationEvent[];
 };
+
+export type CurrentMapSnapshot = {
+  version: 2;
+  nodes: MapNode[];
+  edges: MapEdge[];
+  events: TrailMutationEvent[];
+};
+
+export type MapSnapshot = LegacyMapSnapshot | CurrentMapSnapshot;
 
 function nodeId(item: Pick<SavedItem, "category" | "id">): string {
   return `${item.category}:${item.id}`;
@@ -65,7 +100,38 @@ function isMapEdge(value: unknown): value is MapEdge {
   );
 }
 
-async function readStoredEdges(): Promise<MapEdge[]> {
+function isTrailMutationEvent(value: unknown): value is TrailMutationEvent {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Partial<TrailMutationEvent>;
+  return (
+    typeof event.id === "string" &&
+    typeof event.relationshipId === "string" &&
+    (event.action === "connect" || event.action === "disconnect") &&
+    typeof event.source === "string" &&
+    typeof event.target === "string" &&
+    typeof event.occurredAt === "number" &&
+    Number.isFinite(event.occurredAt)
+  );
+}
+
+function legacyEvent(edge: MapEdge): TrailMutationEvent {
+  return {
+    id: `legacy:${edge.id}:${edge.createdAt}`,
+    relationshipId: edge.id,
+    action: "connect",
+    source: edge.source,
+    target: edge.target,
+    occurredAt: edge.createdAt,
+  };
+}
+
+function uniqueEvents(events: readonly TrailMutationEvent[]): TrailMutationEvent[] {
+  const byId = new Map<string, TrailMutationEvent>();
+  for (const event of events) byId.set(event.id, event);
+  return [...byId.values()];
+}
+
+async function readStoredEvents(): Promise<TrailMutationEvent[]> {
   let raw: string | null;
   try {
     raw = await AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY);
@@ -74,38 +140,70 @@ async function readStoredEdges(): Promise<MapEdge[]> {
   }
   if (!raw) return [];
 
-  let parsed: { version?: unknown; edges?: unknown };
+  let parsed: { version?: unknown; edges?: unknown; events?: unknown };
   try {
-    parsed = JSON.parse(raw) as { version?: unknown; edges?: unknown };
+    parsed = JSON.parse(raw) as { version?: unknown; edges?: unknown; events?: unknown };
   } catch {
-    await writeStoredEdges([]);
+    await writeStoredEvents([]);
     return [];
   }
-  if (
-    parsed.version !== 1 ||
-    !Array.isArray(parsed.edges) ||
-    !parsed.edges.every(isMapEdge)
-  ) {
-    await writeStoredEdges([]);
-    return [];
+
+  if (parsed.version === 2 && Array.isArray(parsed.events) && parsed.events.every(isTrailMutationEvent)) {
+    return uniqueEvents(parsed.events);
   }
-  return parsed.edges;
+
+  if (parsed.version === 1 && Array.isArray(parsed.edges) && parsed.edges.every(isMapEdge)) {
+    const events = uniqueEvents(parsed.edges.map(legacyEvent));
+    await writeStoredEvents(events);
+    return events;
+  }
+
+  await writeStoredEvents([]);
+  return [];
 }
 
-async function writeStoredEdges(edges: readonly MapEdge[]): Promise<void> {
+async function writeStoredEvents(events: readonly TrailMutationEvent[]): Promise<void> {
   await AsyncStorage.setItem(
     DISCOVERY_MAP_STORAGE_KEY,
-    JSON.stringify({ version: 1, edges })
+    JSON.stringify({ version: 2, events: uniqueEvents(events) })
   );
 }
 
-function pruneEdges(
-  edges: readonly MapEdge[],
+function pruneEvents(
+  events: readonly TrailMutationEvent[],
   nodeIds: ReadonlySet<string>
-): MapEdge[] {
-  return edges.filter(
-    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+): TrailMutationEvent[] {
+  return events.filter(
+    (event) => nodeIds.has(event.source) && nodeIds.has(event.target)
   );
+}
+
+function eventToEdge(event: TrailMutationEvent): MapEdge {
+  return {
+    id: event.relationshipId,
+    source: event.source,
+    target: event.target,
+    createdAt: event.occurredAt,
+  };
+}
+
+export function foldTrailMutationEvents(
+  events: readonly TrailMutationEvent[]
+): MapEdge[] {
+  const newest = new Map<string, TrailMutationEvent>();
+  for (const event of events) {
+    const previous = newest.get(event.relationshipId);
+    if (
+      !previous ||
+      event.occurredAt > previous.occurredAt ||
+      (event.occurredAt === previous.occurredAt && event.id > previous.id)
+    ) {
+      newest.set(event.relationshipId, event);
+    }
+  }
+  return [...newest.values()]
+    .filter((event) => event.action === "connect")
+    .map(eventToEdge);
 }
 
 export function deriveMapNodes(savedItems: readonly SavedItem[]): MapNode[] {
@@ -131,10 +229,10 @@ export async function loadMapSnapshot(
 ): Promise<MapSnapshot> {
   const nodes = deriveMapNodes(savedItems);
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const storedEdges = await readStoredEdges();
-  const edges = pruneEdges(storedEdges, nodeIds);
-  if (edges.length !== storedEdges.length) await writeStoredEdges(edges);
-  return { version: 1, nodes, edges };
+  const storedEvents = await readStoredEvents();
+  const events = pruneEvents(storedEvents, nodeIds);
+  if (events.length !== storedEvents.length) await writeStoredEvents(events);
+  return { version: 2, nodes, edges: foldTrailMutationEvents(events), events };
 }
 
 export async function recordMapTrailEvent(
@@ -145,19 +243,25 @@ export async function recordMapTrailEvent(
   const nodeIds = new Set(nodes.map((node) => node.id));
   const source = nodeId(event.source);
   const target = nodeId(event.target);
-  const storedEdges = pruneEdges(await readStoredEdges(), nodeIds);
-  let edges = storedEdges;
+  const storedEvents = pruneEvents(await readStoredEvents(), nodeIds);
+  let events = storedEvents;
   if (source !== target && nodeIds.has(source) && nodeIds.has(target)) {
-    const edge: MapEdge = {
-      id: `${source}->${target}`,
+    const relationshipId = `${source}->${target}`;
+    const trailEvent: TrailMutationEvent = {
+      id: `connect:${relationshipId}:${event.occurredAt}`,
+      relationshipId,
+      action: "connect",
       source,
       target,
-      createdAt: event.occurredAt,
+      occurredAt: event.occurredAt,
     };
-    edges = [...storedEdges.filter((stored) => stored.id !== edge.id), edge];
+    events = uniqueEvents([
+      ...storedEvents.filter((stored) => stored.id !== trailEvent.id),
+      trailEvent,
+    ]);
   }
 
-  await writeStoredEdges(edges);
+  await writeStoredEvents(events);
 
-  return { version: 1, nodes, edges };
+  return { version: 2, nodes, edges: foldTrailMutationEvents(events), events };
 }
