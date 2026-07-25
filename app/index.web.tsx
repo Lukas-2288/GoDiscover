@@ -144,22 +144,37 @@ export default function WebHomeScreen() {
   const commit = (decision: "save" | "skip") => {
     if (!activeItem) return;
     const committed = activeItem;
-    const ownerId = authSession?.user.id ?? null;
+    const operationOwnerId = authSession?.user.id ?? null;
+    const operationMapSequence = mapLoadSequence.current;
+    const operationCategory = selected;
+    const operationTrailSeed = trailSeed.current;
+    const operationIsCurrent = () =>
+      mapLoadSequence.current === operationMapSequence &&
+      activeOwnerId.current === operationOwnerId;
     void discovery.commit(committed, decision).then(() => {
-      if (decision !== "save" || !selected || !trailSeed.current) return;
-      const mapSequence = mapLoadSequence.current;
-      const savedTarget: SavedItem = { ...committed, category: selected, savedAt: Date.now() };
+      if (
+        decision !== "save" ||
+        !operationCategory ||
+        !operationTrailSeed ||
+        !operationIsCurrent()
+      ) {
+        return;
+      }
+      const savedTarget: SavedItem = {
+        ...committed,
+        category: operationCategory,
+        savedAt: Date.now(),
+      };
       void recordMapTrailEvent(
-        { source: trailSeed.current, target: { category: selected, id: committed.id }, occurredAt: Date.now() },
+        {
+          source: operationTrailSeed,
+          target: { category: operationCategory, id: committed.id },
+          occurredAt: Date.now(),
+        },
         [...savedItems, savedTarget],
-        ownerId ?? undefined
+        operationOwnerId ?? undefined
       ).then((snapshot) => {
-        if (
-          mapLoadSequence.current !== mapSequence ||
-          activeOwnerId.current !== ownerId
-        ) {
-          return;
-        }
+        if (!operationIsCurrent()) return;
         setMapSnapshot(snapshot);
       }).catch(() => undefined);
     });

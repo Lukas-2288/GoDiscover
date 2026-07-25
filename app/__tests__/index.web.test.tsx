@@ -245,6 +245,7 @@ function expectVisibleAtlas(expected: Owner | "empty") {
 beforeEach(() => {
   jest.clearAllMocks();
   authStateChangeHandler = null;
+  mockDiscoveryCommit.mockReset().mockResolvedValue(undefined);
   jest.mocked(listSaved).mockReset();
   jest.mocked(loadMapSnapshot).mockReset().mockResolvedValue({
     version: 1,
@@ -479,7 +480,97 @@ it("keeps owner B visible when owner A's older trail mutation resolves last", as
   expectVisibleAtlas(ownerB);
 });
 
-it("applies a trail mutation snapshot while its owner remains current", async () => {
+it("does not record an owner A trail after its pending commit crosses an A to B to A cycle", async () => {
+  const pendingCommit = deferred<undefined>();
+  const rehydratedOwnerASnapshot: MapSnapshot = {
+    ...snapshot(ownerA),
+    nodes: [
+      {
+        ...snapshot(ownerA).nodes[0],
+        id: "movies:owner-a-rehydrated",
+        title: "owner-a rehydrated atlas",
+      },
+    ],
+  };
+
+  mockDiscoveryCommit.mockReturnValueOnce(pendingCommit.promise);
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest
+    .mocked(listSaved)
+    .mockResolvedValueOnce([saved(ownerA.id)])
+    .mockResolvedValueOnce([saved(ownerB.id)])
+    .mockResolvedValueOnce([saved(`${ownerA.id}-rehydrated`)]);
+  jest
+    .mocked(loadMapSnapshot)
+    .mockResolvedValueOnce(snapshot(ownerA))
+    .mockResolvedValueOnce(snapshot(ownerB))
+    .mockResolvedValueOnce(rehydratedOwnerASnapshot);
+  jest.mocked(recordMapTrailEvent).mockResolvedValueOnce(snapshot(ownerA));
+
+  render(<WebHomeScreen />);
+  openAtlas();
+  await waitFor(() => expectVisibleAtlas(ownerA));
+
+  recordTrailFromDiscovery();
+  expect(mockDiscoveryCommit).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    authStateChangeHandler?.("SIGNED_IN", session(ownerB));
+  });
+  openAtlas();
+  await waitFor(() => expectVisibleAtlas(ownerB));
+
+  await act(async () => {
+    authStateChangeHandler?.("SIGNED_IN", session(ownerA));
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("saved-atlas").props.accessibilityLabel).toBe(
+      "movies:owner-a-rehydrated:owner-a rehydrated atlas"
+    )
+  );
+
+  await act(async () => {
+    pendingCommit.resolve(undefined);
+    await pendingCommit.promise;
+  });
+
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+  expect(screen.getByTestId("saved-atlas").props.accessibilityLabel).toBe(
+    "movies:owner-a-rehydrated:owner-a rehydrated atlas"
+  );
+});
+
+it("does not record a trail after unmounting while its discovery commit is pending", async () => {
+  const pendingCommit = deferred<undefined>();
+
+  mockDiscoveryCommit.mockReturnValueOnce(pendingCommit.promise);
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest.mocked(listSaved).mockResolvedValueOnce([saved(ownerA.id)]);
+  jest.mocked(loadMapSnapshot).mockResolvedValueOnce(snapshot(ownerA));
+  jest.mocked(recordMapTrailEvent).mockResolvedValueOnce(snapshot(ownerA));
+
+  const view = render(<WebHomeScreen />);
+  openAtlas();
+  await waitFor(() => expectVisibleAtlas(ownerA));
+
+  recordTrailFromDiscovery();
+  expect(mockDiscoveryCommit).toHaveBeenCalledTimes(1);
+  view.unmount();
+
+  await act(async () => {
+    pendingCommit.resolve(undefined);
+    await pendingCommit.promise;
+  });
+
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+});
+
+it("applies a deferred trail mutation snapshot while its owner and map generation remain current", async () => {
+  const pendingCommit = deferred<undefined>();
   const ownerATrailSnapshot: MapSnapshot = {
     ...snapshot(ownerA),
     nodes: [
@@ -491,6 +582,7 @@ it("applies a trail mutation snapshot while its owner remains current", async ()
     ],
   };
 
+  mockDiscoveryCommit.mockReturnValueOnce(pendingCommit.promise);
   jest.mocked(supabase.auth.getSession).mockResolvedValue({
     data: { session: session(ownerA) },
   } as never);
@@ -505,6 +597,12 @@ it("applies a trail mutation snapshot while its owner remains current", async ()
   await waitFor(() => expectVisibleAtlas(ownerA));
 
   recordTrailFromDiscovery();
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+
+  await act(async () => {
+    pendingCommit.resolve(undefined);
+    await pendingCommit.promise;
+  });
   openAtlas();
 
   await waitFor(() =>
