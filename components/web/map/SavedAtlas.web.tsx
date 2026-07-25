@@ -94,6 +94,8 @@ type SavedAtlasProps = {
   layout?: "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop";
   reducedMotion?: boolean;
   responsiveRecommendations?: readonly OrbitRecommendation[];
+  responsiveOrbitSeed?: OrbitSeed;
+  responsivePreviewId?: string;
 };
 
 export type OrbitSeed = {
@@ -120,6 +122,8 @@ function SavedAtlasInner({
   layout = "desktop",
   reducedMotion = false,
   responsiveRecommendations,
+  responsiveOrbitSeed,
+  responsivePreviewId,
 }: SavedAtlasProps) {
   const { width, height } = useWindowDimensions();
   const { getViewport, setCenter, setViewport } = useReactFlow<AtlasArtworkNodeDefinition, Edge>();
@@ -136,6 +140,7 @@ function SavedAtlasInner({
   const orbitRequest = useRef(0);
   const activeOrbitSeedId = useRef<string | null>(selectedId);
   const previousSelectedId = useRef<string | null>(null);
+  const focusedResponsivePreview = useRef<string | null>(null);
   const showMiniMap = width >= 1_200 || (width >= 900 && width > height);
 
   const captureOverviewViewport = () => {
@@ -167,9 +172,14 @@ function SavedAtlasInner({
   }, [getViewport, selectedId]);
 
   const graphRecommendations = responsiveRecommendations ?? recommendations;
+  const graphOrbitSeedId = responsiveOrbitSeed?.id ?? orbitSeedId;
+  const responsiveTransientSeed = responsiveOrbitSeed && !nodes.some((node) => node.id === responsiveOrbitSeed.id)
+    ? responsiveOrbitSeed
+    : undefined;
+  const graphTransientSeed = responsiveTransientSeed ?? transientOrbitSeed ?? undefined;
   const orbitGraph = useMemo(
-    () => (orbitSeedId ? buildOrbitGraph(nodes, edges, orbitSeedId, graphRecommendations, transientOrbitSeed ?? undefined) : null),
-    [edges, graphRecommendations, nodes, orbitSeedId, transientOrbitSeed]
+    () => (graphOrbitSeedId ? buildOrbitGraph(nodes, edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed) : null),
+    [edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed, nodes]
   );
   const displayedNodes = orbitGraph?.nodes ?? nodes;
   const displayedEdges = orbitGraph?.edges ?? edges;
@@ -178,7 +188,7 @@ function SavedAtlasInner({
     () =>
       buildAtlasFlowNodes(displayedNodes, displayedEdges, {
         detailMode,
-        selectedId: orbitSeedId ?? selectedId,
+        selectedId: graphOrbitSeedId ?? selectedId,
         positions: orbitGraph?.positions,
         fadedNodeIds: orbitGraph?.nodes.filter((node) => node.faded).map((node) => node.id),
         transientNodeIds: orbitGraph?.nodes.filter((node) => node.transient).map((node) => node.id),
@@ -191,14 +201,14 @@ function SavedAtlasInner({
           style: { height: node.height, width: node.width },
         })
       ),
-    [detailMode, displayedEdges, displayedNodes, orbitGraph?.nodes, orbitGraph?.positions, orbitSeedId, selectedId, spatialNodeId]
+    [detailMode, displayedEdges, displayedNodes, graphOrbitSeedId, orbitGraph?.nodes, orbitGraph?.positions, selectedId, spatialNodeId]
   );
   const flowEdges = useMemo(
-    () => buildAtlasFlowEdges(displayedEdges, orbitSeedId ?? selectedId, {
+    () => buildAtlasFlowEdges(displayedEdges, graphOrbitSeedId ?? selectedId, {
       transientEdgeIds: orbitGraph?.edges.filter((edge) => edge.transient).map((edge) => edge.id),
       reducedMotion,
     }) as Edge[],
-    [displayedEdges, orbitGraph?.edges, orbitSeedId, reducedMotion, selectedId]
+    [displayedEdges, graphOrbitSeedId, orbitGraph?.edges, reducedMotion, selectedId]
   );
   const filteredListNodes = useMemo(() => {
     return filterAtlasSearchMatches(nodes, query);
@@ -210,6 +220,23 @@ function SavedAtlasInner({
     const initial = flowNodes.find((node) => !node.hidden && !node.data.faded);
     if (initial) setSpatialNodeId(initial.id);
   }, [flowNodes, spatialNodeId]);
+
+  useEffect(() => {
+    if (!responsivePreviewId) {
+      focusedResponsivePreview.current = null;
+      return;
+    }
+    if (focusedResponsivePreview.current === responsivePreviewId) return;
+    const preview = flowNodes.find((node) => node.id === responsivePreviewId && !node.hidden);
+    if (!preview) return;
+    focusedResponsivePreview.current = responsivePreviewId;
+    setSpatialNodeId(responsivePreviewId);
+    void setCenter(
+      preview.position.x + (preview.width ?? 0) / 2,
+      preview.position.y + (preview.height ?? 0) / 2,
+      { duration: reducedMotion ? 0 : 220, zoom: 1.35 }
+    );
+  }, [flowNodes, reducedMotion, responsivePreviewId, setCenter]);
 
   const focusSearchMatch = (nextQuery: string) => {
     setQuery(nextQuery);
@@ -300,9 +327,9 @@ function SavedAtlasInner({
   };
 
   useEffect(() => {
-    if (!orbitSeedId) return;
+    if (!graphOrbitSeedId) return;
     void setCenter(800, 500, { duration: reducedMotion ? 0 : 220, zoom: 1.15 });
-  }, [orbitSeedId, reducedMotion, setCenter]);
+  }, [graphOrbitSeedId, reducedMotion, setCenter]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;

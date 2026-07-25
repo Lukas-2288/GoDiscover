@@ -523,6 +523,60 @@ describe("Saved Atlas React Flow canvas", () => {
     ]));
   });
 
+  it("focuses a responsive preview and then a controlled transient reseed without persistence", async () => {
+    const responsiveRecommendation = {
+      category: "books" as const,
+      item: { id: "story", title: "Story of Your Life", subtitle: "Ted Chiang", meta: "1998" },
+      reason: { label: "Shared speculative language" },
+    };
+    const view = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        layout="mobile"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        responsiveRecommendations={[responsiveRecommendation]}
+        responsivePreviewId="books:story"
+      />
+    );
+    await act(async () => undefined);
+
+    expect(mockFlowProps.nodes.find((node: any) => node.id === "books:story").data.active).toBe(true);
+    expect(mockSetCenter).toHaveBeenCalled();
+
+    view.rerender(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        layout="mobile"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        responsiveOrbitSeed={{
+          id: "books:story",
+          category: "books",
+          item: responsiveRecommendation.item,
+        }}
+        responsivePreviewId="books:story"
+        responsiveRecommendations={[{
+          category: "albums",
+          item: { id: "music", title: "Music for the Orbit", subtitle: "A composer", meta: "2026" },
+          reason: { label: "Shared atmosphere" },
+        }]}
+      />
+    );
+    await act(async () => undefined);
+
+    expect(mockFlowProps.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "books:story", data: expect.objectContaining({ transient: true, active: true }) }),
+      expect.objectContaining({ id: "albums:music", data: expect.objectContaining({ transient: true }) }),
+    ]));
+  });
+
   it("uses immediate camera feedback and disables animated paths when reduced motion is requested", () => {
     render(
       <SavedAtlas

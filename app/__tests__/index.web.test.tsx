@@ -30,6 +30,12 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       onSave,
       onToggleExpanded,
       onFindSimilarInAtlas,
+      onPreviewAtlasRecommendation,
+      onSaveAtlasRecommendation,
+      onSkipAtlasRecommendation,
+      onReseedAtlasRecommendation,
+      atlasRecommendations = [],
+      atlasRecommendationsError = false,
       presentation = "rail",
       expanded = true,
       similarLabel,
@@ -38,6 +44,12 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       onSave(): void;
       onToggleExpanded?(): void;
       onFindSimilarInAtlas?(): void;
+      onPreviewAtlasRecommendation?(id: string): void;
+      onSaveAtlasRecommendation?(id: string): void;
+      onSkipAtlasRecommendation?(id: string): void;
+      onReseedAtlasRecommendation?(id: string): void;
+      atlasRecommendations?: Array<{ id: string; title: string }>;
+      atlasRecommendationsError?: boolean;
       presentation?: "drawer" | "rail" | "sheet";
       expanded?: boolean;
       similarLabel?: string;
@@ -48,7 +60,15 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       React.createElement(Pressable, { onPress: onSave, testID: "detail-toggle" }),
       onFindSimilarInAtlas ? React.createElement(Pressable, { onPress: onFindSimilarInAtlas, testID: "atlas-find-similar" }) : null,
       onToggleExpanded ? React.createElement(Pressable, { onPress: onToggleExpanded, testID: "drawer-expand" }) : null,
-      expanded ? React.createElement(MockText, { testID: "drawer-expanded" }, similarLabel ?? "Find similar") : null
+      expanded ? React.createElement(MockText, { testID: "drawer-expanded" }, similarLabel ?? "Find similar") : null,
+      atlasRecommendationsError ? React.createElement(MockText, { testID: "atlas-recommendation-error" }, "offline") : null,
+      ...atlasRecommendations.flatMap((recommendation) => [
+        React.createElement(MockText, { key: `${recommendation.id}-title`, testID: `responsive-result-${recommendation.id}` }, recommendation.title),
+        React.createElement(Pressable, { key: `${recommendation.id}-preview`, onPress: () => onPreviewAtlasRecommendation?.(recommendation.id), testID: `responsive-preview-${recommendation.id}` }),
+        React.createElement(Pressable, { key: `${recommendation.id}-save`, onPress: () => onSaveAtlasRecommendation?.(recommendation.id), testID: `responsive-save-${recommendation.id}` }),
+        React.createElement(Pressable, { key: `${recommendation.id}-skip`, onPress: () => onSkipAtlasRecommendation?.(recommendation.id), testID: `responsive-skip-${recommendation.id}` }),
+        React.createElement(Pressable, { key: `${recommendation.id}-reseed`, onPress: () => onReseedAtlasRecommendation?.(recommendation.id), testID: `responsive-reseed-${recommendation.id}` }),
+      ])
     ),
     WebDiscoveryStage: ({
       onSave,
@@ -424,6 +444,144 @@ it("keeps a failed mobile atlas orbit retryable without leaving the atlas", asyn
   fireEvent.press(screen.getByTestId("atlas-find-similar"));
   await waitFor(() => expect(findMapRecommendations).toHaveBeenCalledTimes(2));
   expect(screen.getByTestId("saved-atlas")).toBeTruthy();
+});
+
+it("preserves the exact responsive orbit in the sheet and map while refresh fails", async () => {
+  mockLayout = "mobile";
+  const source = sourceItem();
+  const failedRefresh = deferred<never>();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations)
+    .mockResolvedValueOnce(orbitResult("movies", "candidate", "Candidate") as never)
+    .mockReturnValueOnce(failedRefresh.promise);
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(await screen.findByTestId("atlas-find-similar"));
+  await waitFor(() => expect(screen.getByTestId("responsive-result-movies:candidate")).toHaveTextContent("Candidate"));
+
+  const settledRecommendations = mockSavedAtlasProps.responsiveRecommendations;
+  expect(settledRecommendations).toEqual([
+    expect.objectContaining({ item: expect.objectContaining({ id: "candidate" }) }),
+  ]);
+
+  fireEvent.press(screen.getByTestId("atlas-find-similar"));
+  expect(screen.getByTestId("responsive-result-movies:candidate")).toHaveTextContent("Candidate");
+  expect(mockSavedAtlasProps.responsiveRecommendations).toEqual(settledRecommendations);
+
+  await act(async () => {
+    failedRefresh.reject(new Error("offline"));
+    await failedRefresh.promise.catch(() => undefined);
+  });
+
+  await waitFor(() => expect(screen.getByTestId("atlas-recommendation-error")).toBeTruthy());
+  expect(screen.getByTestId("responsive-result-movies:candidate")).toHaveTextContent("Candidate");
+  expect(mockSavedAtlasProps.responsiveRecommendations).toEqual(settledRecommendations);
+});
+
+it("previews and skips a mobile recommendation without mutating persistence", async () => {
+  mockLayout = "mobile";
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(await screen.findByTestId("atlas-find-similar"));
+  await screen.findByTestId("responsive-result-movies:candidate");
+
+  fireEvent.press(screen.getByTestId("responsive-preview-movies:candidate"));
+  await waitFor(() => expect(mockSavedAtlasProps.responsivePreviewId).toBe("movies:candidate"));
+  expect(mockSavedAtlasProps.responsiveRecommendations).toEqual([
+    expect.objectContaining({ item: expect.objectContaining({ id: "candidate" }) }),
+  ]);
+  expect(saveSavedItem).not.toHaveBeenCalled();
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+
+  fireEvent.press(screen.getByTestId("responsive-skip-movies:candidate"));
+  await waitFor(() => expect(screen.queryByTestId("responsive-result-movies:candidate")).toBeNull());
+  expect(mockSavedAtlasProps.responsiveRecommendations).toEqual([]);
+  expect(saveSavedItem).not.toHaveBeenCalled();
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+});
+
+it("saves a mobile recommendation through the guarded atlas persistence path", async () => {
+  mockLayout = "mobile";
+  const source = sourceItem();
+  const candidate: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
+  const items = [source, candidate];
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot)
+    .mockResolvedValueOnce(sourceSnapshot([source]))
+    .mockResolvedValue(sourceSnapshot(items));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+  jest.mocked(saveSavedItem).mockResolvedValue({ items, confirmed: true, created: true });
+  jest.mocked(recordMapTrailEvent).mockResolvedValue(sourceSnapshot(items));
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(await screen.findByTestId("atlas-find-similar"));
+  fireEvent.press(await screen.findByTestId("responsive-save-movies:candidate"));
+
+  await waitFor(() => expect(recordMapTrailEvent).toHaveBeenCalledWith(
+    expect.objectContaining({
+      source: { category: "movies", id: "source" },
+      target: { category: "movies", id: "candidate" },
+    }),
+    items,
+    ownerA.id
+  ));
+  expect(saveSavedItem).toHaveBeenCalledWith("movies", expect.objectContaining({ id: "candidate" }));
+  expect(mockSavedAtlasProps.responsiveRecommendations).toEqual([]);
+  await waitFor(() => expect(screen.getByTestId("saved-atlas").props.accessibilityLabel).toContain("movies:candidate:Candidate"));
+});
+
+it("reseeds and focuses a portrait orbit while capping replacement results at eight", async () => {
+  mockLayout = "tabletPortrait";
+  const source = sourceItem();
+  const replacementRecommendations = Array.from({ length: 10 }, (_, index) => ({
+    category: "movies" as const,
+    item: { id: `next-${index}`, title: `Next ${index}`, subtitle: "Candidate", meta: "2025" },
+    reason: { label: `Connection ${index}` },
+  }));
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations)
+    .mockResolvedValueOnce(orbitResult("movies", "candidate", "Candidate") as never)
+    .mockResolvedValueOnce({ recommendations: replacementRecommendations, sourceStatuses: [] } as never);
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(await screen.findByTestId("atlas-find-similar"));
+  fireEvent.press(await screen.findByTestId("responsive-reseed-movies:candidate"));
+
+  await waitFor(() => expect(findMapRecommendations).toHaveBeenLastCalledWith(
+    expect.objectContaining({ item: expect.objectContaining({ id: "candidate" }) }),
+    expect.any(Object)
+  ));
+  await waitFor(() => expect(mockSavedAtlasProps.responsiveOrbitSeed).toEqual(
+    expect.objectContaining({ id: "movies:candidate" })
+  ));
+  expect(mockSavedAtlasProps.responsivePreviewId).toBe("movies:candidate");
+  expect(mockSavedAtlasProps.responsiveRecommendations).toHaveLength(8);
+  expect(screen.queryByTestId("responsive-result-movies:candidate")).toBeNull();
+  expect(screen.getByTestId("responsive-result-movies:next-0")).toBeTruthy();
+  expect(screen.getByTestId("responsive-result-movies:next-7")).toBeTruthy();
+  expect(screen.queryByTestId("responsive-result-movies:next-8")).toBeNull();
 });
 
 it.each([
