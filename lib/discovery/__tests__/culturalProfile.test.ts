@@ -96,4 +96,15 @@ describe("buildCulturalProfile", () => {
     expect(profile.subjects).toEqual(["Mystery / Thriller", "Historical Fiction"]);
     expect(profile.styles).toEqual(["Epic"]);
   });
+
+  it("prefers specific non-overlapping fiction aliases over generic Fiction in descriptions", () => {
+    const profile = buildCulturalProfile(
+      "books",
+      { id: "book", title: "Book", subtitle: "", meta: "" },
+      { description: "A Young Adult Fiction and Literary Fiction companion, not Non-Fiction." }
+    );
+
+    expect(profile.subjects).toEqual(["Young Adult", "Literary Fiction", "Non-Fiction"]);
+    expect(profile.subjects).not.toContain("Fiction");
+  });
 });

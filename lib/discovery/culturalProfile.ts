@@ -137,13 +137,36 @@ function deriveEra(values: readonly (string | number | undefined)[]): string | u
   return undefined;
 }
 
-function descriptionTerms(description: string, vocabulary: Record<string, string>): string[] {
-  return Object.keys(vocabulary).filter((term) => {
-    if (term === "fiction" && /\b(?:science|historical)[ -]fiction\b/i.test(description)) {
-      return false;
+function descriptionTerms(
+  description: string,
+  vocabulary: Record<string, string>,
+  specificityVocabulary: Record<string, string> = vocabulary
+): string[] {
+  const terms = new Set([...Object.keys(vocabulary), ...Object.keys(specificityVocabulary)]);
+  const matches: { term: string; start: number; end: number; emitsTrait: boolean }[] = [];
+  for (const term of terms) {
+    const matcher = new RegExp(`\\b${term.replace(/[- ]/g, "[- ]")}\\b`, "gi");
+    let match: RegExpExecArray | null;
+    while ((match = matcher.exec(description))) {
+      matches.push({
+        term,
+        start: match.index,
+        end: match.index + match[0].length,
+        emitsTrait: term in vocabulary,
+      });
     }
-    return new RegExp(`\\b${term.replace(/[- ]/g, "[- ]")}\\b`, "i").test(description);
-  });
+  }
+
+  const selected = matches
+    .sort((left, right) => (right.end - right.start) - (left.end - left.start) || left.start - right.start)
+    .filter((match, index, sorted) => !sorted.slice(0, index).some((specific) =>
+      specific.start <= match.start && specific.end >= match.end
+    ));
+
+  return selected
+    .sort((left, right) => left.start - right.start || (right.end - right.start) - (left.end - left.start))
+    .filter((match) => match.emitsTrait)
+    .map((match) => match.term);
 }
 
 export function buildCulturalProfile(
@@ -157,7 +180,10 @@ export function buildCulturalProfile(
     category === "books" || category === "albums" ? [item.subtitle] : [];
   const creators = detail.creators ?? detail.authors ?? detail.artists ?? fallbackCreators;
   const genreValues = [...(detail.genres ?? []), ...(detail.subjects ?? []), ...descriptionTerms(description, GENRE_VOCABULARY)];
-  const subjectValues = [...(detail.subjects ?? []), ...descriptionTerms(description, SUBJECT_VOCABULARY)];
+  const subjectValues = [
+    ...(detail.subjects ?? []),
+    ...descriptionTerms(description, SUBJECT_VOCABULARY, GENRE_VOCABULARY),
+  ];
 
   return {
     vocabularyVersion: CULTURAL_VOCABULARY_VERSION,
