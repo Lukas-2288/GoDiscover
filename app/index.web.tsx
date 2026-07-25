@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 
-import { WebShell, ArchiveAtlas, WebConstellation, WebDetailPanel, WebDiscoveryStage, resolveWebLayout, webPalette, type WebSection } from "../components/web/WebHomeScreen";
+import { WebShell, ArchiveAtlas, WebDetailPanel, WebDiscoveryStage, resolveWebLayout, webPalette, type WebSection } from "../components/web/WebHomeScreen";
+import { SavedAtlas } from "../components/web/map/SavedAtlas.web";
 import { useDiscoveryController } from "../components/discovery/useDiscoveryController";
 import { useReducedMotion } from "../components/discovery/useReducedMotion";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
@@ -170,9 +171,19 @@ export default function WebHomeScreen() {
           {panelSelection && layout !== "mobile" ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
         </View>
       ) : null}
-      {section === "map" || section === "saved" ? (
+      {section === "atlas" ? (
         <View style={styles.mapWorkspace}>
-          <WebConstellation nodes={mapSnapshot.nodes} edges={mapSnapshot.edges} selectedId={selectedNodeId} empty={savedItems.length === 0} reducedMotion={reducedMotion} onSelect={selectMapNode} onStart={() => setSection("archive")} />
+          <SavedAtlas
+            nodes={mapSnapshot.nodes}
+            edges={mapSnapshot.edges}
+            selectedId={selectedNodeId}
+            onSelect={selectMapNode}
+            onClearSelection={() => {
+              setSelectedNodeId(null);
+              setDetailSelection(null);
+            }}
+            onStart={() => setSection("archive")}
+          />
           {panelSelection && layout !== "mobile" ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
         </View>
       ) : null}
@@ -200,5 +211,5 @@ function getShareLabel(category: ContentCategory): string {
 }
 
 const styles = StyleSheet.create({
-  workspace: { flex: 1, flexDirection: "row" }, workspaceMobile: { flexDirection: "column" }, workspaceMain: { flex: 1 }, mapWorkspace: { flex: 1 }, accountView: { alignSelf: "center", maxWidth: 720, padding: 48, width: "100%" }, accountKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.7 }, accountTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 48, fontWeight: "900", marginTop: 10 }, accountBody: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 16, lineHeight: 24, marginTop: 12 }, authCard: { backgroundColor: "#241B35", borderRadius: 24, gap: 12, marginTop: 28, maxWidth: 460, padding: 24 }, authInput: { backgroundColor: "#34264A", borderColor: webPalette.border, borderRadius: 12, borderWidth: 1, color: webPalette.text, fontFamily: "DM Sans", minHeight: 48, paddingHorizontal: 14 }, authButton: { alignItems: "center", backgroundColor: webPalette.lime, borderRadius: 999, minHeight: 46, justifyContent: "center", marginTop: 4, paddingHorizontal: 20 }, authButtonText: { color: webPalette.bg, fontFamily: "DM Sans", fontWeight: "900" }, authSwitch: { color: webPalette.mint, fontFamily: "DM Sans", fontSize: 13, paddingVertical: 8, textAlign: "center" }, authMessage: { color: webPalette.tangerine, fontFamily: "DM Sans", fontSize: 13, marginTop: 5 }, mobileDetail: { bottom: 0, left: 0, position: "absolute", right: 0 },
+  workspace: { flex: 1, flexDirection: "row" }, workspaceMobile: { flexDirection: "column" }, workspaceMain: { flex: 1 }, mapWorkspace: { flex: 1, flexDirection: "row" }, accountView: { alignSelf: "center", maxWidth: 720, padding: 48, width: "100%" }, accountKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.7 }, accountTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 48, fontWeight: "900", marginTop: 10 }, accountBody: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 16, lineHeight: 24, marginTop: 12 }, authCard: { backgroundColor: "#241B35", borderRadius: 24, gap: 12, marginTop: 28, maxWidth: 460, padding: 24 }, authInput: { backgroundColor: "#34264A", borderColor: webPalette.border, borderRadius: 12, borderWidth: 1, color: webPalette.text, fontFamily: "DM Sans", minHeight: 48, paddingHorizontal: 14 }, authButton: { alignItems: "center", backgroundColor: webPalette.lime, borderRadius: 999, minHeight: 46, justifyContent: "center", marginTop: 4, paddingHorizontal: 20 }, authButtonText: { color: webPalette.bg, fontFamily: "DM Sans", fontWeight: "900" }, authSwitch: { color: webPalette.mint, fontFamily: "DM Sans", fontSize: 13, paddingVertical: 8, textAlign: "center" }, authMessage: { color: webPalette.tangerine, fontFamily: "DM Sans", fontSize: 13, marginTop: 5 }, mobileDetail: { bottom: 0, left: 0, position: "absolute", right: 0 },
 });

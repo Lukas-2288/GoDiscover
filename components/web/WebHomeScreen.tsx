@@ -1,6 +1,5 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import {
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,14 +7,12 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { useMemo, useRef, useState } from "react";
 
 import { getCategoryTheme, CATEGORY_ORDER } from "../../lib/discovery/categoryThemes";
 import type { ContentDetail } from "../../lib/discovery/loadDetail";
-import type { MapEdge, MapNode } from "../../lib/storage/discoveryMap";
 import type { ContentCategory, ResultItem } from "../../types/content";
 
-export type WebSection = "archive" | "discover" | "map" | "saved" | "account";
+export type WebSection = "archive" | "discover" | "atlas" | "account";
 export type WebLayoutMode = "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop";
 
 export type WebPalette = {
@@ -64,8 +61,7 @@ export function WebShell({
   const nav = [
     ["archive", "Archive", "th-large"],
     ["discover", "Discover", "compass"],
-    ["map", "Map", "sitemap"],
-    ["saved", `Saved${savedCount ? ` ${savedCount}` : ""}`, "bookmark"],
+    ["atlas", `Saved Atlas${savedCount ? ` ${savedCount}` : ""}`, "sitemap"],
     ["account", "Account", "user-circle-o"],
   ] as const;
 
@@ -257,85 +253,6 @@ export function WebDiscoveryStage({
   );
 }
 
-export function WebConstellation({
-  nodes,
-  edges,
-  selectedId,
-  empty,
-  onSelect,
-  onStart,
-  reducedMotion = false,
-}: {
-  nodes: readonly MapNode[];
-  edges: readonly MapEdge[];
-  selectedId: string | null;
-  empty: boolean;
-  onSelect(node: MapNode): void;
-  onStart(): void;
-  reducedMotion?: boolean;
-}) {
-  const { width } = useWindowDimensions();
-  const [scale, setScale] = useState(1);
-  const offset = useRef({ x: 0, y: 0 });
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const mapWidth = Math.min(Math.max(width - 48, 320), 1080);
-  const mapHeight = width < 700 ? 500 : 620;
-  const panResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
-    onPanResponderGrant: () => { offset.current = pan; },
-    onPanResponderMove: (_, gesture) => setPan({ x: offset.current.x + gesture.dx, y: offset.current.y + gesture.dy }),
-    onPanResponderRelease: () => undefined,
-  }), [pan]);
-
-  const shownNodes = empty ? demoNodes : nodes;
-  const shownEdges = empty ? demoEdges : edges;
-  return (
-    <View style={styles.mapSection}>
-      <View style={styles.mapHeader}>
-        <View><Text style={styles.sectionKicker}>03 / YOUR CONSTELLATION</Text><Text style={styles.sectionTitle}>{empty ? "A map waiting for its first star." : "The things you kept looking at."}</Text></View>
-        <View style={styles.mapControls}>
-          <Pressable accessibilityLabel="Zoom out" accessibilityRole="button" onPress={() => setScale((value) => Math.max(0.7, value - 0.1))} style={styles.mapControl}><Text style={styles.mapControlText}>−</Text></Pressable>
-          <Text style={styles.mapScale}>{Math.round(scale * 100)}%</Text>
-          <Pressable accessibilityLabel="Zoom in" accessibilityRole="button" onPress={() => setScale((value) => Math.min(1.5, value + 0.1))} style={styles.mapControl}><Text style={styles.mapControlText}>+</Text></Pressable>
-          <Pressable accessibilityLabel="Reset map view" accessibilityRole="button" onPress={() => { setScale(1); setPan({ x: 0, y: 0 }); }} style={styles.resetButton}><Text style={styles.resetText}>RESET VIEW</Text></Pressable>
-        </View>
-      </View>
-      <View style={[styles.mapCanvas, { width: mapWidth, height: mapHeight }]} {...panResponder.panHandlers}>
-        <View style={[styles.mapWorld, { width: mapWidth, height: mapHeight, transform: reducedMotion ? [{ scale }] : [{ translateX: pan.x }, { translateY: pan.y }, { scale }] }]} pointerEvents="box-none">
-          {shownEdges.map((edge) => {
-            const source = shownNodes.find((node) => node.id === edge.source);
-            const target = shownNodes.find((node) => node.id === edge.target);
-            if (!source || !target) return null;
-            const dx = (target.x - source.x) * mapWidth;
-            const dy = (target.y - source.y) * mapHeight;
-            const length = Math.sqrt(dx * dx + dy * dy);
-            const angle = Math.atan2(dy, dx);
-            return <View key={edge.id} accessible={false} style={[styles.mapEdge, { left: source.x * mapWidth, top: source.y * mapHeight, width: length, transform: [{ rotate: `${angle}rad` }] }]} />;
-          })}
-          {shownNodes.map((node) => {
-            const theme = getCategoryTheme(node.category);
-            const isDemo = empty;
-            return (
-              <Pressable
-                key={node.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${theme.label}: ${node.title}${isDemo ? ". Example constellation item" : ""}`}
-                onPress={() => !isDemo && onSelect(node)}
-                style={[styles.mapNode, { left: `${node.x * 100}%`, top: `${node.y * 100}%`, borderColor: theme.accent, backgroundColor: webPalette.bg }, selectedId === node.id && styles.mapNodeSelected]}
-              >
-                <View style={[styles.mapNodeDot, { backgroundColor: theme.accent }]} />
-                <Text style={styles.mapNodeCategory}>{theme.label.toUpperCase()}</Text>
-                <Text style={styles.mapNodeTitle} numberOfLines={2}>{node.title}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {empty ? <View style={styles.emptyMapOverlay}><Text style={styles.emptyMapLabel}>EXAMPLE CONSTELLATION</Text><Text style={styles.emptyMapCopy}>Save something and this space becomes yours.</Text><Pressable accessibilityRole="button" onPress={onStart} style={styles.mapStartButton}><Text style={styles.mapStartText}>Start discovering</Text></Pressable></View> : null}
-      </View>
-    </View>
-  );
-}
-
 export function WebDetailPanel({
   item,
   category,
@@ -382,19 +299,6 @@ function detailDescription(detail: ContentDetail): string {
   return data.overview || data.description || (data.genres?.length ? data.genres.join(" · ") : "No additional field note available.");
 }
 
-const demoNodes: MapNode[] = [
-  { id: "demo:1", category: "movies", itemId: "1", title: "A film you haven't met yet", subtitle: "Example node", meta: "MOVIE", savedAt: 0, x: 0.3, y: 0.35 },
-  { id: "demo:2", category: "books", itemId: "2", title: "A page left open", subtitle: "Example node", meta: "BOOK", savedAt: 0, x: 0.66, y: 0.28 },
-  { id: "demo:3", category: "albums", itemId: "3", title: "A record from the next room", subtitle: "Example node", meta: "ALBUM", savedAt: 0, x: 0.56, y: 0.7 },
-  { id: "demo:4", category: "artists", itemId: "4", title: "A voice worth following", subtitle: "Example node", meta: "ARTIST", savedAt: 0, x: 0.2, y: 0.76 },
-];
-
-const demoEdges: MapEdge[] = [
-  { id: "demo:1->demo:2", source: "demo:1", target: "demo:2", createdAt: 0 },
-  { id: "demo:2->demo:3", source: "demo:2", target: "demo:3", createdAt: 0 },
-  { id: "demo:3->demo:4", source: "demo:3", target: "demo:4", createdAt: 0 },
-];
-
 const styles = StyleSheet.create({
   shell: { backgroundColor: webPalette.bg, flex: 1, minHeight: "100vh" as any },
   chrome: { alignItems: "center", borderBottomColor: webPalette.border, borderBottomWidth: 1, flexDirection: "row", gap: 28, justifyContent: "space-between", paddingHorizontal: 28, paddingVertical: 18 },
@@ -403,7 +307,6 @@ const styles = StyleSheet.create({
   archive: { alignSelf: "center", gap: 34, maxWidth: 1180, padding: 34, width: "100%" }, heroRow: { flexDirection: "row", justifyContent: "space-between", minHeight: 260 }, heroCopy: { maxWidth: 700 }, eyebrow: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 11, letterSpacing: 2 }, heroTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 58, fontWeight: "900", letterSpacing: -2, lineHeight: 61, marginTop: 12 }, heroBody: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 17, lineHeight: 26, maxWidth: 560, marginTop: 18 }, heroButton: { alignItems: "center", backgroundColor: webPalette.lime, borderRadius: 999, flexDirection: "row", gap: 12, marginTop: 22, paddingHorizontal: 19, paddingVertical: 12 }, heroButtonText: { color: webPalette.bg, fontFamily: "DM Sans", fontSize: 14, fontWeight: "800" }, heroStamp: { alignItems: "center", borderColor: webPalette.tangerine, borderRadius: 100, borderWidth: 1, height: 132, justifyContent: "center", marginTop: 10, transform: [{ rotate: "8deg" }], width: 132 }, heroStampText: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1 }, heroStampYear: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 26, fontWeight: "900", marginVertical: 4 },
   sectionHeading: { gap: 5 }, sectionHeadingInline: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionKicker: { color: webPalette.mint, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.6 }, sectionTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 30, fontWeight: "900", marginTop: 4 }, sectionAside: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, atlasGrid: { flexDirection: "row", flexWrap: "wrap", gap: 13 }, atlasTile: { borderRadius: 22, borderWidth: 1, minHeight: 190, overflow: "hidden", padding: 19, position: "relative", width: "23.5%" }, atlasTilePressed: { opacity: 0.75, transform: [{ scale: 0.98 }] }, atlasOrb: { borderRadius: 999, height: 120, opacity: 0.16, position: "absolute", right: -18, top: -25, width: 120 }, atlasNumber: { fontFamily: "IBM Plex Mono", fontSize: 10, marginBottom: 26 }, atlasLabel: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 25, fontWeight: "900", marginTop: 12 }, atlasHint: { bottom: 17, fontFamily: "IBM Plex Mono", fontSize: 9, position: "absolute" }, recentSection: { gap: 17 }, recentRow: { gap: 13 }, recentTile: { width: 150 }, recentImage: { alignItems: "center", borderRadius: 14, height: 112, justifyContent: "center", overflow: "hidden", width: 150 }, recentImageFill: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, width: "100%" as any }, recentCategory: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 10 }, recentTitle: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 14, fontWeight: "800", lineHeight: 18, marginTop: 4 },
   discoveryStage: { alignSelf: "center", maxWidth: 1040, padding: 34, width: "100%" }, discoveryHeader: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between" }, discoveryHeading: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 34, fontWeight: "900", marginTop: 6 }, portalTag: { borderRadius: 999, borderWidth: 1, fontFamily: "IBM Plex Mono", fontSize: 9, paddingHorizontal: 10, paddingVertical: 8 }, cardStage: { alignItems: "center", justifyContent: "center", minHeight: 610, position: "relative" }, peekCard: { borderRadius: 26, borderWidth: 1, height: 430, opacity: 0.55, padding: 20, position: "absolute", right: "12%" as any, top: 75, transform: [{ rotate: "5deg" }], width: 360 }, peekLabel: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, peekTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 23, fontWeight: "900", marginTop: 20 }, webCard: { backgroundColor: webPalette.surface, borderRadius: 28, maxWidth: 470, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 26, transform: [{ rotate: "-2deg" }], width: "100%" }, cardArt: { alignItems: "center", height: 310, justifyContent: "center", overflow: "hidden", position: "relative" }, cardArtImage: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, position: "absolute", width: "100%" as any }, cardBadge: { borderRadius: 999, left: 17, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", top: 17 }, cardBadgeText: { fontFamily: "IBM Plex Mono", fontSize: 9, fontWeight: "800" }, cardCopy: { padding: 22 }, cardCategory: { color: "#6D5B88", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1 }, cardTitle: { color: "#171225", fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", lineHeight: 35, marginTop: 10 }, cardSubtitle: { color: "#4A4057", fontFamily: "DM Sans", fontSize: 15, marginTop: 7 }, cardMeta: { color: "#857896", fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 14 }, actionRow: { alignItems: "stretch", flexDirection: "row", gap: 10, justifyContent: "center" }, primaryAction: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, primaryActionText: { fontFamily: "DM Sans", fontSize: 14, fontWeight: "900" }, secondaryAction: { alignItems: "center", borderColor: webPalette.border, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, secondaryActionText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "800" }, keyboardHint: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 18, textAlign: "center" }, emptyStage: { alignItems: "center", flex: 1, gap: 14, justifyContent: "center", minHeight: 520, padding: 34 }, stageKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.5 }, stageTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", textAlign: "center" }, loadingBar: { backgroundColor: webPalette.border, borderRadius: 999, height: 6, marginTop: 10, overflow: "hidden", width: 240 }, loadingFill: { height: "100%" as any, width: "55%" as any },
-  mapSection: { alignSelf: "center", maxWidth: 1180, padding: 34, width: "100%" }, mapHeader: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between", marginBottom: 19 }, mapControls: { alignItems: "center", flexDirection: "row", gap: 7 }, mapControl: { alignItems: "center", borderColor: webPalette.border, borderRadius: 999, borderWidth: 1, height: 34, justifyContent: "center", width: 34 }, mapControlText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 20 }, mapScale: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 10, width: 44, textAlign: "center" }, resetButton: { marginLeft: 8, paddingHorizontal: 8, paddingVertical: 10 }, resetText: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, mapCanvas: { alignSelf: "center", backgroundColor: "#1F1830", borderColor: webPalette.border, borderRadius: 28, overflow: "hidden", position: "relative" }, mapWorld: { left: 0, position: "absolute", top: 0 }, mapEdge: { backgroundColor: "rgba(215,243,106,0.35)", height: 1, position: "absolute", transformOrigin: "left center" as any }, mapNode: { borderRadius: 16, borderWidth: 1, minWidth: 128, padding: 11, position: "absolute", transform: [{ translateX: -64 }, { translateY: -30 }] }, mapNodeSelected: { backgroundColor: "#2D2143", borderWidth: 2, shadowColor: webPalette.lime, shadowOpacity: 0.6, shadowRadius: 13 }, mapNodeDot: { borderRadius: 999, height: 8, marginBottom: 8, width: 8 }, mapNodeCategory: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 8, letterSpacing: 1 }, mapNodeTitle: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "800", lineHeight: 16, marginTop: 4 }, emptyMapOverlay: { alignItems: "center", backgroundColor: "rgba(21,17,31,0.72)", bottom: 0, justifyContent: "center", left: 0, padding: 24, position: "absolute", right: 0, top: 0 }, emptyMapLabel: { color: webPalette.lime, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 2 }, emptyMapCopy: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 25, fontWeight: "900", marginTop: 9, textAlign: "center" }, mapStartButton: { backgroundColor: webPalette.lime, borderRadius: 999, marginTop: 18, paddingHorizontal: 17, paddingVertical: 11 }, mapStartText: { color: webPalette.bg, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" },
   atlasTileGrow: { flexGrow: 1 }, heroTitleMobile: { fontSize: 40, lineHeight: 43 }, webCardReduced: { transform: [] },
   actionRowMobile: { flexDirection: "column" }, detailPanel: { backgroundColor: "#241B35", borderLeftColor: webPalette.border, borderLeftWidth: 1, minHeight: 300, padding: 28, width: 360 }, detailPanelMobile: { borderLeftWidth: 0, width: "100%" as any }, detailTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, closeButton: { alignItems: "center", height: 32, justifyContent: "center", width: 32 }, closeText: { color: webPalette.muted, fontSize: 28, lineHeight: 30 }, detailTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 35, fontWeight: "900", lineHeight: 38, marginTop: 22 }, detailSubtitle: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 15, marginTop: 9 }, detailMeta: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 15 }, detailLoading: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 14, marginTop: 34 }, detailDescription: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 15, lineHeight: 23, marginTop: 28 }, detailActions: { gap: 10, marginTop: 30 },
 });

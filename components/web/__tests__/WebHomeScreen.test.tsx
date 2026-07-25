@@ -11,7 +11,7 @@ jest.mock("@expo/vector-icons/FontAwesome", () => {
 
 import {
   ArchiveAtlas,
-  WebConstellation,
+  WebShell,
   resolveWebLayout,
 } from "../WebHomeScreen";
 
@@ -37,14 +37,21 @@ describe("web digital arcade layout", () => {
     expect(onSurprise).toHaveBeenCalledTimes(1);
   });
 
-  it("labels an empty constellation as an example and provides a start action", () => {
-    const onStart = jest.fn();
-    const { getByText } = render(
-      <WebConstellation nodes={[]} edges={[]} selectedId={null} empty onSelect={jest.fn()} onStart={onStart} />
+  it("consolidates map and saved navigation into one Saved Atlas destination", () => {
+    const onSectionChange = jest.fn();
+    const { getByText, queryByText } = render(
+      <WebShell
+        section={"atlas" as any}
+        onSectionChange={onSectionChange}
+        savedCount={3}
+      >
+        <></>
+      </WebShell>
     );
 
-    expect(getByText("EXAMPLE CONSTELLATION")).toBeTruthy();
-    fireEvent.press(getByText("Start discovering"));
-    expect(onStart).toHaveBeenCalledTimes(1);
+    fireEvent.press(getByText("Saved Atlas 3"));
+    expect(onSectionChange).toHaveBeenCalledWith("atlas");
+    expect(queryByText("Map")).toBeNull();
+    expect(queryByText("Saved 3")).toBeNull();
   });
 });
