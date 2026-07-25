@@ -89,7 +89,7 @@ describe("Saved Atlas React Flow canvas", () => {
 
   it("selects artwork for detail and moves search matches into focus", () => {
     const onSelect = jest.fn();
-    const { getByLabelText } = render(
+    const { getByLabelText, unmount } = render(
       <SavedAtlas
         nodes={nodes}
         edges={edges}
@@ -163,7 +163,7 @@ describe("Saved Atlas React Flow canvas", () => {
     );
 
     expect(mockGetViewport).toHaveBeenCalled();
-    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    fireEvent.press(getByLabelText("Find similar in atlas to Arrival"));
     await act(async () => undefined);
     expect(onFindSimilar).toHaveBeenCalledWith(
       expect.objectContaining({ id: "movies:arrival" })
@@ -194,7 +194,7 @@ describe("Saved Atlas React Flow canvas", () => {
       />
     );
 
-    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    fireEvent.press(getByLabelText("Find similar in atlas to Arrival"));
     await act(async () => undefined);
     expect(getByText("Recommendations are unavailable right now.")).toBeTruthy();
     fireEvent.press(getByLabelText("Retry recommendations"));
@@ -226,7 +226,7 @@ describe("Saved Atlas React Flow canvas", () => {
       />
     );
 
-    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    fireEvent.press(getByLabelText("Find similar in atlas to Arrival"));
     await act(async () => undefined);
     fireEvent.press(getByLabelText("Reseed from Story of Your Life"));
     await act(async () => undefined);
@@ -234,7 +234,7 @@ describe("Saved Atlas React Flow canvas", () => {
     expect(onFindSimilar).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: "books:story" })
     );
-    expect(getByLabelText("Find similar to Story of Your Life")).toBeTruthy();
+    expect(getByLabelText("Find similar in atlas to Story of Your Life")).toBeTruthy();
   });
 
   it("discards a pending recommendation response when selection moves to another saved seed", async () => {
@@ -259,7 +259,7 @@ describe("Saved Atlas React Flow canvas", () => {
       />
     );
 
-    fireEvent.press(view.getByLabelText("Find similar to Arrival"));
+    fireEvent.press(view.getByLabelText("Find similar in atlas to Arrival"));
     view.rerender(
       <SavedAtlas
         nodes={orbitNodes}
@@ -277,7 +277,7 @@ describe("Saved Atlas React Flow canvas", () => {
       reason: { label: "Stale" },
     }]); });
 
-    expect(view.getByLabelText("Find similar to Moonlight")).toBeTruthy();
+    expect(view.getByLabelText("Find similar in atlas to Moonlight")).toBeTruthy();
     expect(view.queryByText("Wrong seed")).toBeNull();
   });
 
@@ -299,7 +299,7 @@ describe("Saved Atlas React Flow canvas", () => {
       />
     );
 
-    fireEvent.press(view.getByLabelText("Find similar to Arrival"));
+    fireEvent.press(view.getByLabelText("Find similar in atlas to Arrival"));
     view.rerender(
       <SavedAtlas
         nodes={[]}
@@ -322,7 +322,7 @@ describe("Saved Atlas React Flow canvas", () => {
 
   it("provides an explicit back action alongside keyboard escape and atlas restoration", () => {
     const onClearSelection = jest.fn();
-    const { getByLabelText } = render(
+    const { getByLabelText, unmount } = render(
       <SavedAtlas
         nodes={nodes}
         edges={edges}
@@ -335,6 +335,19 @@ describe("Saved Atlas React Flow canvas", () => {
 
     fireEvent.press(getByLabelText("Back to atlas"));
     expect(onClearSelection).toHaveBeenCalledTimes(1);
+    unmount();
+    const escaped = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        onSelect={jest.fn()}
+        onClearSelection={onClearSelection}
+        onStart={jest.fn()}
+      />
+    );
+    fireEvent(escaped.getByLabelText("Atlas spatial navigation"), "keyDown", { key: "Escape", preventDefault: jest.fn() });
+    expect(onClearSelection).toHaveBeenCalledTimes(2);
     expect(mockSetViewport).toHaveBeenCalledWith(
       { x: 24, y: -18, zoom: 0.86 },
       expect.any(Object)
@@ -367,6 +380,19 @@ describe("Saved Atlas React Flow canvas", () => {
       />
     );
     expect(mobile.queryByLabelText("Discovery Orbit")).toBeNull();
+
+    const portrait = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        layout="tabletPortrait"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+    expect(portrait.queryByLabelText("Discovery Orbit")).toBeNull();
   });
 
   it("keeps only the selected context in the graph tab order and supports keyboard focus alternatives", () => {
@@ -397,6 +423,56 @@ describe("Saved Atlas React Flow canvas", () => {
     expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ id: orbitNodes[0].id }));
   });
 
+  it("announces an initial visible artwork, roves to a directional neighbor, and opens that exact artwork", () => {
+    const spatialNodes: MapNode[] = [
+      ...nodes,
+      { ...nodes[0], id: "movies:moonlight", itemId: "moonlight", title: "Moonlight" },
+    ];
+    const onSelect = jest.fn();
+    const { getByLabelText } = render(
+      <SavedAtlas
+        nodes={spatialNodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={onSelect}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+
+    const navigation = getByLabelText("Atlas spatial navigation");
+    const initialNode = mockFlowProps.nodes.find((node: any) => node.data.active);
+    const nextNode = mockFlowProps.nodes.find((node: any) => node.id !== initialNode.id);
+    const key = nextNode.position.x >= initialNode.position.x ? "ArrowRight" : "ArrowLeft";
+
+    expect(navigation.props["aria-activedescendant"]).toBe(`atlas-active-${initialNode.id}`);
+    fireEvent(navigation, "keyDown", { key, preventDefault: jest.fn() });
+    expect(mockFlowProps.nodes.find((node: any) => node.id === nextNode.id).data.active).toBe(true);
+    expect(navigation.props["aria-activedescendant"]).toBe(`atlas-active-${nextNode.id}`);
+
+    fireEvent(navigation, "keyDown", { key: "Enter", preventDefault: jest.fn() });
+    expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ id: nextNode.id }));
+  });
+
+  it("keeps list selection equivalent to map selection for the portrait drawer owner", () => {
+    const onSelect = jest.fn();
+    const { getByLabelText, getByRole } = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        layout="tabletPortrait"
+        onSelect={onSelect}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+
+    fireEvent.press(getByRole("tab", { name: "List" }));
+    fireEvent.press(getByLabelText("Open Arrival"));
+    expect(onSelect).toHaveBeenCalledWith(nodes[0]);
+  });
+
   it("preserves the atlas while giving failed discovery a retryable connectivity explanation", async () => {
     const onFindSimilar = jest.fn(async () => {
       throw new Error("offline");
@@ -413,7 +489,7 @@ describe("Saved Atlas React Flow canvas", () => {
       />
     );
 
-    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    fireEvent.press(getByLabelText("Find similar in atlas to Arrival"));
     await act(async () => undefined);
     expect(getByText("Discovery is offline. Your saved atlas and trails are still available.")).toBeTruthy();
     expect(getByLabelText("Retry recommendations")).toBeTruthy();

@@ -12,7 +12,7 @@ export type AtlasArtworkNodeDefinition = Node<
 export function AtlasArtworkNode({
   data,
 }: NodeProps<AtlasArtworkNodeDefinition>) {
-  const { node, shape, imageUrl, selected, showTitle, showMeta, summary, faded, transient } = data;
+  const { node, shape, imageUrl, selected, active, showTitle, showMeta, summary, faded, transient } = data;
   const categoryLabel =
     node.category === "movies"
       ? "FILM"
@@ -30,6 +30,7 @@ export function AtlasArtworkNode({
         styles.frame,
         shape === "circle" && styles.circle,
         selected && styles.selected,
+        active && styles.active,
         faded && styles.faded,
         transient && styles.transient,
       ]}
@@ -119,6 +120,13 @@ const styles = StyleSheet.create({
     shadowColor: "#7C5CFC",
     shadowOpacity: 0.34,
     shadowRadius: 16,
+  },
+  active: {
+    borderColor: "#D7F36A",
+    borderWidth: 2,
+    shadowColor: "#D7F36A",
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
   },
   faded: { opacity: 0.23 },
   transient: { borderColor: "#D7F36A", borderStyle: "dashed" },

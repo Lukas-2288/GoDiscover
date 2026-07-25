@@ -17,6 +17,7 @@ export type AtlasArtworkData = {
   showTitle: boolean;
   showMeta: boolean;
   summary?: string;
+  active?: boolean;
   faded?: boolean;
   transient?: boolean;
 };

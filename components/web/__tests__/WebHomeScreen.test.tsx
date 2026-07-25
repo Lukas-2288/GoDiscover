@@ -19,6 +19,7 @@ describe("web digital arcade layout", () => {
   it("selects intentional phone, tablet, and desktop layout modes", () => {
     expect(resolveWebLayout(390, 844)).toBe("mobile");
     expect(resolveWebLayout(768, 1024)).toBe("tabletPortrait");
+    expect(resolveWebLayout(800, 600)).toBe("tabletLandscape");
     expect(resolveWebLayout(1024, 768)).toBe("tabletLandscape");
     expect(resolveWebLayout(1440, 900)).toBe("desktop");
   });

@@ -130,7 +130,6 @@ function SavedAtlasInner({
   const [recommendationError, setRecommendationError] = useState(false);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [spatialNodeId, setSpatialNodeId] = useState<string | null>(selectedId);
-  const [detailExpanded, setDetailExpanded] = useState(false);
   const overviewViewport = useRef<Viewport | null>(null);
   const orbitRequest = useRef(0);
   const activeOrbitSeedId = useRef<string | null>(selectedId);
@@ -151,7 +150,6 @@ function SavedAtlasInner({
     if (selectedId) {
       setOrbitSeedId(selectedId);
       setSpatialNodeId(selectedId);
-      setDetailExpanded(false);
       setTransientOrbitSeed(null);
       setRecommendations([]);
       setRecommendationError(false);
@@ -185,6 +183,7 @@ function SavedAtlasInner({
         (node): AtlasArtworkNodeDefinition => ({
           ...node,
           ariaLabel: `${node.data.node.title}, ${node.data.node.category}`,
+          data: { ...node.data, active: node.id === spatialNodeId },
           focusable: node.id === spatialNodeId,
           style: { height: node.height, width: node.width },
         })
@@ -201,6 +200,13 @@ function SavedAtlasInner({
   const filteredListNodes = useMemo(() => {
     return filterAtlasSearchMatches(nodes, query);
   }, [nodes, query]);
+
+  useEffect(() => {
+    const current = flowNodes.find((node) => node.id === spatialNodeId && !node.hidden && !node.data.faded);
+    if (current) return;
+    const initial = flowNodes.find((node) => !node.hidden && !node.data.faded);
+    if (initial) setSpatialNodeId(initial.id);
+  }, [flowNodes, spatialNodeId]);
 
   const focusSearchMatch = (nextQuery: string) => {
     setQuery(nextQuery);
@@ -298,6 +304,7 @@ function SavedAtlasInner({
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key !== "Escape" || !orbitSeedId) return;
       event.preventDefault();
       restoreOverview();
@@ -318,19 +325,20 @@ function SavedAtlasInner({
       ArrowLeft: "left",
       ArrowRight: "right",
     };
+    const activeNodeId = spatialNodeId ?? flowNodes.find((node) => !node.hidden && !node.data.faded)?.id ?? null;
     const direction = directionByKey[event.key];
     if (direction) {
       const next = findNearestAtlasNodeInDirection(
         flowNodes,
-        spatialNodeId ?? selectedId ?? flowNodes.find((node) => !node.hidden && !node.data.faded)?.id ?? "",
+        activeNodeId ?? "",
         direction
       );
       if (next) setSpatialNodeId(next.id);
       event.preventDefault();
       return;
     }
-    if ((event.key === "Enter" || event.key === " ") && spatialNodeId) {
-      const selectedNode = flowNodes.find((node) => node.id === spatialNodeId);
+    if ((event.key === "Enter" || event.key === " ") && activeNodeId) {
+      const selectedNode = flowNodes.find((node) => node.id === activeNodeId);
       if (selectedNode && !selectedNode.data.transient) {
         captureOverviewViewport();
         onSelect(selectedNode.data.node);
@@ -346,6 +354,7 @@ function SavedAtlasInner({
 
   const isPortraitDrawer = layout === "tabletPortrait";
   const isMobileSheet = layout === "mobile";
+  const activeNode = flowNodes.find((node) => node.id === spatialNodeId) ?? null;
 
   return (
     <View style={styles.root}>
@@ -371,6 +380,7 @@ function SavedAtlasInner({
         <div
           className="saved-atlas-flow"
           aria-description="Use search, map and list controls, zoom buttons, fit view, or arrow keys to explore the atlas."
+          aria-activedescendant={activeNode ? `atlas-active-${activeNode.id}` : undefined}
           aria-label="Atlas spatial navigation"
           onKeyDown={handleSpatialKeyDown}
           role="application"
@@ -384,6 +394,7 @@ function SavedAtlasInner({
           }}
         >
           <style>{mapTheme}</style>
+          {activeNode ? <div aria-live="polite" id={`atlas-active-${activeNode.id}`} style={{ height: 1, overflow: "hidden", position: "absolute", width: 1 }}>{`Keyboard focus: ${activeNode.data.node.title}. Press Enter to open details.`}</div> : null}
           <ReactFlow<AtlasArtworkNodeDefinition, Edge>
             nodes={flowNodes}
             edges={flowEdges}
@@ -431,40 +442,28 @@ function SavedAtlasInner({
               />
             ) : null}
           </ReactFlow>
-          {currentSeed && !isMobileSheet ? (
+          {currentSeed && !isMobileSheet && !isPortraitDrawer ? (
             <View
               accessibilityLabel="Discovery Orbit"
               style={[
                 styles.orbitPanel,
-                isPortraitDrawer && styles.orbitPanelPortrait,
-                isPortraitDrawer && detailExpanded && styles.orbitPanelPortraitExpanded,
               ]}
             >
               <Text style={styles.orbitKicker}>DISCOVERY ORBIT</Text>
               <Text style={styles.orbitTitle}>{currentSeed.title}</Text>
-              {isPortraitDrawer ? (
-                <Pressable
-                  accessibilityLabel={detailExpanded ? "Collapse detail drawer" : "Expand detail drawer"}
-                  accessibilityRole="button"
-                  onPress={() => setDetailExpanded((expanded) => !expanded)}
-                  style={styles.drawerToggle}
-                >
-                  <Text style={styles.drawerToggleText}>{detailExpanded ? "Show preview" : "Expand details"}</Text>
-                </Pressable>
-              ) : null}
               <View style={styles.orbitActions}>
                 <Pressable accessibilityLabel="Back to atlas" accessibilityRole="button" onPress={restoreOverview} style={styles.orbitButton}>
                   <Text style={styles.orbitButtonText}>Back</Text>
                 </Pressable>
                 <Pressable
-                  accessibilityLabel={`Find similar to ${currentSeed.title}`}
+                  accessibilityLabel={`Find similar in atlas to ${currentSeed.title}`}
                   accessibilityRole="button"
                   disabled={recommendationsLoading || !onFindSimilar}
                   onPress={() => void requestRecommendations(seedFromNode(currentSeed))}
                   style={[styles.orbitButton, styles.orbitPrimary]}
                 >
                   <Text style={styles.orbitPrimaryText}>
-                    {recommendationsLoading ? "Looking…" : "Find similar"}
+                    {recommendationsLoading ? "Looking…" : "Find similar in atlas"}
                   </Text>
                 </Pressable>
                 <Pressable accessibilityLabel="View whole atlas" accessibilityRole="button" onPress={restoreOverview} style={styles.orbitButton}>
@@ -529,8 +528,6 @@ const styles = StyleSheet.create({
     minHeight: 620,
   },
   orbitPanel: { backgroundColor: "rgba(33, 27, 42, 0.96)", borderColor: "rgba(244, 241, 234, 0.18)", borderRadius: 8, borderWidth: 1, maxWidth: 390, padding: 15, position: "absolute", right: 20, top: 18, width: "42%" as any },
-  orbitPanelPortrait: { bottom: 16, maxWidth: "none" as any, right: 16, top: undefined, width: "calc(100% - 32px)" as any },
-  orbitPanelPortraitExpanded: { minHeight: 300 },
   orbitKicker: { color: "#D7F36A", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1.4 },
   orbitTitle: { color: "#F4F1EA", fontFamily: "Bricolage Grotesque", fontSize: 21, fontWeight: "900", marginTop: 4 },
   orbitActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
@@ -547,8 +544,6 @@ const styles = StyleSheet.create({
   recommendationTitle: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" },
   recommendationReason: { color: "#A59EAE", fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 3 },
   recommendationAction: { borderColor: "rgba(244, 241, 234, 0.2)", borderRadius: 4, borderWidth: 1, minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
-  drawerToggle: { alignSelf: "flex-start", justifyContent: "center", minHeight: 44, marginTop: 4 },
-  drawerToggleText: { color: "#D7F36A", fontFamily: "DM Sans", fontSize: 12, fontWeight: "900" },
   recommendationSave: { backgroundColor: "#7C5CFC", borderColor: "#7C5CFC" },
   recommendationSaveText: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 11, fontWeight: "900" },
   recommendationSkipText: { color: "#D7D1DC", fontFamily: "DM Sans", fontSize: 11, fontWeight: "800" },

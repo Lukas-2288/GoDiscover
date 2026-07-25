@@ -20,12 +20,33 @@ let mockSavedAtlasProps: Record<string, unknown> = {};
 
 jest.mock("../../components/web/WebHomeScreen", () => {
   const React = require("react");
-  const { Pressable, View } = require("react-native");
+  const { Pressable, Text: MockText, View } = require("react-native");
   const Empty = () => React.createElement(View);
 
   return {
     ArchiveAtlas: Empty,
-    WebDetailPanel: ({ onSave }: { onSave(): void }) => React.createElement(Pressable, { onPress: onSave, testID: "detail-toggle" }),
+    WebDetailPanel: ({
+      item,
+      onSave,
+      onToggleExpanded,
+      presentation = "rail",
+      expanded = true,
+      similarLabel,
+    }: {
+      item?: { title: string; meta: string } | null;
+      onSave(): void;
+      onToggleExpanded?(): void;
+      presentation?: "drawer" | "rail" | "sheet";
+      expanded?: boolean;
+      similarLabel?: string;
+    }) => React.createElement(
+      View,
+      { accessibilityLabel: `${presentation} detail` },
+      item ? React.createElement(MockText, null, item.title) : null,
+      React.createElement(Pressable, { onPress: onSave, testID: "detail-toggle" }),
+      onToggleExpanded ? React.createElement(Pressable, { onPress: onToggleExpanded, testID: "drawer-expand" }) : null,
+      expanded ? React.createElement(MockText, { testID: "drawer-expanded" }, similarLabel ?? "Find similar") : null
+    ),
     WebDiscoveryStage: ({
       onSave,
       onSimilar,
@@ -320,6 +341,7 @@ it("hands the resolved web layout and motion preference to the web-only Saved At
   jest.mocked(listSaved).mockResolvedValue([]);
 
   render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([], undefined));
   openAtlas();
 
   await waitFor(() =>
@@ -328,6 +350,35 @@ it("hands the resolved web layout and motion preference to the web-only Saved At
       reducedMotion: true,
     }))
   );
+});
+
+it.each([
+  { layout: "tabletPortrait" as const, presentation: "drawer" },
+  { layout: "tabletLandscape" as const, presentation: "rail" },
+  { layout: "desktop" as const, presentation: "rail" },
+  { layout: "mobile" as const, presentation: "sheet" },
+])("renders the selected atlas detail as a $presentation for $layout", async ({ layout, presentation }) => {
+  mockLayout = layout;
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+
+  await waitFor(() => expect(screen.getByLabelText(`${presentation} detail`)).toBeTruthy());
+  if (presentation === "drawer") {
+    expect(screen.getByText("Source")).toBeTruthy();
+    expect(screen.queryByTestId("drawer-expanded")).toBeNull();
+    fireEvent.press(screen.getByTestId("drawer-expand"));
+    expect(screen.getByTestId("drawer-expanded")).toHaveTextContent("Open discovery deck");
+  }
+  if (presentation === "rail") {
+    expect(screen.getByTestId("drawer-expanded")).toHaveTextContent("Open discovery deck");
+  }
 });
 
 it.each([
