@@ -14,6 +14,12 @@ import { loadMapSnapshot, recordMapTrailEvent, type MapNode, type MapSnapshot } 
 import type { ContentCategory, ResultItem } from "../types/content";
 import { supabase } from "../lib/supabase";
 
+const EMPTY_MAP_SNAPSHOT: MapSnapshot = {
+  version: 1,
+  nodes: [],
+  edges: [],
+};
+
 export default function WebHomeScreen() {
   const { width, height } = useWindowDimensions();
   const layout = resolveWebLayout(width, height);
@@ -24,7 +30,7 @@ export default function WebHomeScreen() {
     undefined
   );
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
-  const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>({ version: 1, nodes: [], edges: [] });
+  const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>(EMPTY_MAP_SNAPSHOT);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [detailSelection, setDetailSelection] = useState<{ category: ContentCategory; item: ResultItem } | null>(null);
   const [detail, setDetail] = useState<ContentDetail | null>(null);
@@ -34,7 +40,9 @@ export default function WebHomeScreen() {
   const [authPassword, setAuthPassword] = useState("");
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const activeOwnerId = useRef<string | null | undefined>(undefined);
   const detailRequest = useRef(0);
+  const mapLoadSequence = useRef(0);
   const savedRefreshSequence = useRef(0);
   const trailSeed = useRef<{ category: ContentCategory; id: string } | null>(null);
   const discovery = useDiscoveryController({ onSavedItemsChange: setSavedItems });
@@ -48,6 +56,13 @@ export default function WebHomeScreen() {
     const refreshSavedForSession = (next: Session | null) => {
       const ownerId = next?.user.id ?? null;
       const refreshSequence = ++savedRefreshSequence.current;
+      if (activeOwnerId.current !== ownerId) {
+        activeOwnerId.current = ownerId;
+        mapLoadSequence.current += 1;
+        setMapSnapshot(EMPTY_MAP_SNAPSHOT);
+        setSelectedNodeId(null);
+        setDetailSelection(null);
+      }
       setAuthSession(next);
       setSavedOwnerId((hydratedOwnerId) =>
         hydratedOwnerId === ownerId ? hydratedOwnerId : undefined
@@ -78,9 +93,23 @@ export default function WebHomeScreen() {
   useEffect(() => {
     const ownerId = authSession?.user.id ?? null;
     if (savedOwnerId !== ownerId) return;
+    const loadSequence = ++mapLoadSequence.current;
+    let cancelled = false;
     void loadMapSnapshot(savedItems, authSession?.user.id)
-      .then(setMapSnapshot)
+      .then((snapshot) => {
+        if (
+          cancelled ||
+          mapLoadSequence.current !== loadSequence ||
+          activeOwnerId.current !== ownerId
+        ) {
+          return;
+        }
+        setMapSnapshot(snapshot);
+      })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [authSession?.user.id, savedItems, savedOwnerId]);
 
   useEffect(() => {

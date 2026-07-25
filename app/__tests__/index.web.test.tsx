@@ -1,6 +1,13 @@
 import React from "react";
-import { act, render, waitFor } from "@testing-library/react-native";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react-native";
 
+import type { MapSnapshot } from "../../lib/storage/discoveryMap";
 import type { SavedItem } from "../../lib/storage/saved";
 
 let authStateChangeHandler:
@@ -9,15 +16,29 @@ let authStateChangeHandler:
 
 jest.mock("../../components/web/WebHomeScreen", () => {
   const React = require("react");
-  const { View } = require("react-native");
+  const { Pressable, View } = require("react-native");
   const Empty = () => React.createElement(View);
 
   return {
     ArchiveAtlas: Empty,
     WebDetailPanel: Empty,
     WebDiscoveryStage: Empty,
-    WebShell: ({ children }: { children: React.ReactNode }) =>
-      React.createElement(View, null, children),
+    WebShell: ({
+      children,
+      onSectionChange,
+    }: {
+      children: React.ReactNode;
+      onSectionChange(section: string): void;
+    }) =>
+      React.createElement(
+        View,
+        null,
+        React.createElement(Pressable, {
+          onPress: () => onSectionChange("atlas"),
+          testID: "open-atlas",
+        }),
+        children
+      ),
     resolveWebLayout: () => "desktop",
     webPalette: {
       bg: "#000",
@@ -35,7 +56,16 @@ jest.mock("../../components/web/map/SavedAtlas.web", () => {
   const React = require("react");
   const { View } = require("react-native");
   return {
-    SavedAtlas: () => React.createElement(View),
+    SavedAtlas: ({
+      nodes,
+    }: {
+      nodes: Array<{ id: string; title: string }>;
+    }) =>
+      React.createElement(View, {
+        accessibilityLabel:
+          nodes.map((node) => `${node.id}:${node.title}`).join("|") || "empty",
+        testID: "saved-atlas",
+      }),
   };
 });
 
@@ -132,18 +162,59 @@ function saved(id: string): SavedItem {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 const ownerA = { id: "owner-a", email: "a@example.com" };
 const ownerB = { id: "owner-b", email: "b@example.com" };
 
+function snapshot(owner: Owner): MapSnapshot {
+  return {
+    version: 1,
+    edges: [],
+    nodes: [
+      {
+        category: "movies",
+        id: `movies:${owner.id}`,
+        itemId: owner.id,
+        meta: "2026",
+        savedAt: 1,
+        subtitle: "Owner-specific",
+        title: `${owner.id} atlas`,
+        x: 0.5,
+        y: 0.5,
+      },
+    ],
+  };
+}
+
+function openAtlas() {
+  fireEvent.press(screen.getByTestId("open-atlas"));
+}
+
+function expectVisibleAtlas(expected: Owner | "empty") {
+  expect(screen.getByTestId("saved-atlas").props.accessibilityLabel).toBe(
+    expected === "empty"
+      ? "empty"
+      : `movies:${expected.id}:${expected.id} atlas`
+  );
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   authStateChangeHandler = null;
+  jest.mocked(listSaved).mockReset();
+  jest.mocked(loadMapSnapshot).mockReset().mockResolvedValue({
+    version: 1,
+    nodes: [],
+    edges: [],
+  });
+  jest.mocked(supabase.auth.getSession).mockReset();
 });
 
 it.each([
@@ -244,4 +315,84 @@ it("keeps same-owner hydration valid until that owner's refresh resolves", async
     expect(loadMapSnapshot).toHaveBeenCalledWith(refreshedItems, ownerA.id)
   );
   expect(loadMapSnapshot).toHaveBeenCalledTimes(1);
+});
+
+it("clears owner A immediately and stays empty when owner B map loading fails before a successful retry", async () => {
+  const ownerBRefresh = deferred<SavedItem[]>();
+  const ownerASnapshot = snapshot(ownerA);
+  const ownerBSnapshot = snapshot(ownerB);
+
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest
+    .mocked(listSaved)
+    .mockResolvedValueOnce([saved(ownerA.id)])
+    .mockReturnValueOnce(ownerBRefresh.promise)
+    .mockResolvedValueOnce([saved(`${ownerB.id}-retry`)]);
+  jest
+    .mocked(loadMapSnapshot)
+    .mockResolvedValueOnce(ownerASnapshot)
+    .mockRejectedValueOnce(new Error("owner B map unavailable"))
+    .mockResolvedValueOnce(ownerBSnapshot);
+
+  render(<WebHomeScreen />);
+  openAtlas();
+  await waitFor(() => expectVisibleAtlas(ownerA));
+
+  await act(async () => {
+    authStateChangeHandler?.("SIGNED_IN", session(ownerB));
+  });
+  expectVisibleAtlas("empty");
+
+  await act(async () => {
+    ownerBRefresh.resolve([saved(ownerB.id)]);
+    await ownerBRefresh.promise;
+  });
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledTimes(2));
+  expectVisibleAtlas("empty");
+
+  await act(async () => {
+    authStateChangeHandler?.("TOKEN_REFRESHED", session(ownerB));
+  });
+  await waitFor(() => expectVisibleAtlas(ownerB));
+});
+
+it("keeps owner B visible when owner A's older map load resolves last", async () => {
+  const ownerAMap = deferred<MapSnapshot>();
+  const ownerBMap = deferred<MapSnapshot>();
+
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest
+    .mocked(listSaved)
+    .mockResolvedValueOnce([saved(ownerA.id)])
+    .mockResolvedValueOnce([saved(ownerB.id)]);
+  jest
+    .mocked(loadMapSnapshot)
+    .mockReturnValueOnce(ownerAMap.promise)
+    .mockReturnValueOnce(ownerBMap.promise);
+
+  render(<WebHomeScreen />);
+  openAtlas();
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledTimes(1));
+
+  await act(async () => {
+    authStateChangeHandler?.("SIGNED_IN", session(ownerB));
+  });
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledTimes(2));
+  expectVisibleAtlas("empty");
+
+  await act(async () => {
+    ownerBMap.resolve(snapshot(ownerB));
+    await ownerBMap.promise;
+  });
+  await waitFor(() => expectVisibleAtlas(ownerB));
+
+  await act(async () => {
+    ownerAMap.resolve(snapshot(ownerA));
+    await ownerAMap.promise;
+  });
+  expectVisibleAtlas(ownerB);
 });
