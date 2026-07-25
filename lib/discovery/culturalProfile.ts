@@ -27,25 +27,47 @@ export type CulturalProfileDetail = {
 };
 
 const GENRE_VOCABULARY: Record<string, string> = {
-  "science fiction": "Sci-Fi",
-  "sci fi": "Sci-Fi",
-  "sci-fi": "Sci-Fi",
-  electronic: "Electronic / EDM",
-  edm: "Electronic / EDM",
+  action: "Action",
+  adventure: "Adventure",
+  animation: "Animation",
+  comedy: "Comedy",
+  crime: "Crime",
+  documentary: "Documentary",
+  drama: "Drama",
   fantasy: "Fantasy",
   horror: "Horror",
   romance: "Romance",
-  drama: "Drama",
-  comedy: "Comedy",
-  documentary: "Documentary",
+  "science fiction": "Sci-Fi",
+  "sci fi": "Sci-Fi",
+  "sci-fi": "Sci-Fi",
+  thriller: "Thriller",
+  western: "Western",
+  "hip hop": "Hip-Hop / Rap",
+  "hip hop rap": "Hip-Hop / Rap",
+  rap: "Hip-Hop / Rap",
+  "r b": "R&B / Soul",
+  "r and b": "R&B / Soul",
+  "r b soul": "R&B / Soul",
+  soul: "R&B / Soul",
+  electronic: "Electronic / EDM",
+  edm: "Electronic / EDM",
+  "electronic edm": "Electronic / EDM",
+  country: "Country",
   jazz: "Jazz",
   classical: "Classical",
+  metal: "Metal",
+  "heavy metal": "Metal",
+  indie: "Indie / Alternative",
+  "indie rock": "Indie / Alternative",
+  alternative: "Indie / Alternative",
+  "indie alternative": "Indie / Alternative",
   rock: "Rock",
   pop: "Pop",
+  "k pop": "K-Pop",
+  "k-pop": "K-Pop",
   reggae: "Reggae",
   blues: "Blues",
   latin: "Latin",
-  country: "Country",
   folk: "Folk",
 };
 
@@ -62,13 +84,28 @@ const STYLE_VOCABULARY: Record<string, string> = {
 };
 
 const SUBJECT_VOCABULARY: Record<string, string> = {
+  fiction: "Fiction",
+  nonfiction: "Non-Fiction",
+  "non fiction": "Non-Fiction",
+  fantasy: "Fantasy",
+  romance: "Romance",
   "space opera": "Space opera",
   "coming of age": "Coming of age",
   "coming-of-age": "Coming of age",
-  mystery: "Mystery",
-  thriller: "Thriller",
+  mystery: "Mystery / Thriller",
+  thriller: "Mystery / Thriller",
+  "mystery thriller": "Mystery / Thriller",
+  "historical fiction": "Historical Fiction",
   history: "History",
-  biography: "Biography",
+  biography: "Biography / Memoir",
+  memoir: "Biography / Memoir",
+  "biography memoir": "Biography / Memoir",
+  "self help": "Self-Help",
+  "self-help": "Self-Help",
+  "young adult": "Young Adult",
+  "young adult fiction": "Young Adult",
+  "literary fiction": "Literary Fiction",
+  "graphic novel": "Graphic Novel",
   philosophy: "Philosophy",
 };
 
@@ -100,8 +137,13 @@ function deriveEra(values: readonly (string | number | undefined)[]): string | u
   return undefined;
 }
 
-function descriptionStyles(description: string): string[] {
-  return normalize(Object.keys(STYLE_VOCABULARY).filter((term) => new RegExp(`\\b${term.replace(/[- ]/g, "[- ]")}\\b`, "i").test(description)), STYLE_VOCABULARY);
+function descriptionTerms(description: string, vocabulary: Record<string, string>): string[] {
+  return Object.keys(vocabulary).filter((term) => {
+    if (term === "fiction" && /\b(?:science|historical)[ -]fiction\b/i.test(description)) {
+      return false;
+    }
+    return new RegExp(`\\b${term.replace(/[- ]/g, "[- ]")}\\b`, "i").test(description);
+  });
 }
 
 export function buildCulturalProfile(
@@ -114,15 +156,17 @@ export function buildCulturalProfile(
     category === "artists" ? [detail.name ?? item.title] :
     category === "books" || category === "albums" ? [item.subtitle] : [];
   const creators = detail.creators ?? detail.authors ?? detail.artists ?? fallbackCreators;
+  const genreValues = [...(detail.genres ?? []), ...(detail.subjects ?? []), ...descriptionTerms(description, GENRE_VOCABULARY)];
+  const subjectValues = [...(detail.subjects ?? []), ...descriptionTerms(description, SUBJECT_VOCABULARY)];
 
   return {
     vocabularyVersion: CULTURAL_VOCABULARY_VERSION,
-    genres: normalize([...(detail.genres ?? []), ...(detail.subjects ?? [])], GENRE_VOCABULARY),
+    genres: normalize(genreValues, GENRE_VOCABULARY),
     styles: unique([
       ...normalize(detail.styles ?? [], STYLE_VOCABULARY),
-      ...descriptionStyles(description),
+      ...normalize(descriptionTerms(description, STYLE_VOCABULARY), STYLE_VOCABULARY),
     ]),
-    subjects: normalize(detail.subjects ?? [], SUBJECT_VOCABULARY),
+    subjects: normalize(subjectValues, SUBJECT_VOCABULARY),
     creators: normalizeCreators(creators),
     era: deriveEra([detail.releaseYear, detail.firstPublishYear, detail.releaseDate, item.meta]),
   };

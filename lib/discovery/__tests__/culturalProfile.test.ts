@@ -58,4 +58,42 @@ describe("buildCulturalProfile", () => {
 
     expect(profile.creators).toEqual([]);
   });
+
+  it("normalizes every supported provider genre and book subject label", () => {
+    const movie = buildCulturalProfile(
+      "movies",
+      { id: "movie", title: "Movie", subtitle: "", meta: "" },
+      { genres: ["Action", "Adventure", "Animation", "Crime", "Thriller", "Western"] }
+    );
+    const book = buildCulturalProfile(
+      "books",
+      { id: "book", title: "Book", subtitle: "", meta: "" },
+      { subjects: ["Fiction", "Historical fiction", "Biography", "Memoir", "Self help", "Young adult fiction", "Literary fiction", "Graphic novel"] }
+    );
+    const music = buildCulturalProfile(
+      "albums",
+      { id: "album", title: "Album", subtitle: "", meta: "" },
+      { genres: ["Pop", "Rock", "Hip-Hop / Rap", "R&B / Soul", "Electronic / EDM", "Country", "Jazz", "Classical", "Metal", "Indie / Alternative", "Latin", "K-Pop", "Folk", "Reggae", "Blues"] }
+    );
+
+    expect(movie.genres).toEqual(["Action", "Adventure", "Animation", "Crime", "Thriller", "Western"]);
+    expect(book.subjects).toEqual([
+      "Fiction", "Historical Fiction", "Biography / Memoir", "Self-Help", "Young Adult", "Literary Fiction", "Graphic Novel",
+    ]);
+    expect(music.genres).toEqual([
+      "Pop", "Rock", "Hip-Hop / Rap", "R&B / Soul", "Electronic / EDM", "Country", "Jazz", "Classical", "Metal", "Indie / Alternative", "Latin", "K-Pop", "Folk", "Reggae", "Blues",
+    ]);
+  });
+
+  it("extracts normalized genre and subject aliases from descriptions", () => {
+    const profile = buildCulturalProfile(
+      "movies",
+      { id: "movie", title: "Movie", subtitle: "", meta: "" },
+      { overview: "A science-fiction mystery and historical fiction epic." }
+    );
+
+    expect(profile.genres).toEqual(["Sci-Fi"]);
+    expect(profile.subjects).toEqual(["Mystery / Thriller", "Historical Fiction"]);
+    expect(profile.styles).toEqual(["Epic"]);
+  });
 });

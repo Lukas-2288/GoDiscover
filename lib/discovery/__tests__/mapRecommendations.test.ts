@@ -1,4 +1,5 @@
 import type { ContentCategory, ResultItem } from "../../../types/content";
+import { decadeToYearRange } from "../../api/tmdb";
 import type { DiscoveryProviderRegistry } from "../loadDiscovery";
 import { findMapRecommendations } from "../mapRecommendations";
 
@@ -76,7 +77,7 @@ describe("findMapRecommendations", () => {
       { category: "albums", id: "untrue", score: 0.68, reason: { kind: "shared-genre", label: "Shared genre: Jazz", evidence: ["Jazz"] } },
     ]);
     for (const category of ["artists", "albums"] as const) {
-      expect(registry[category].filter).toHaveBeenCalledWith(["Jazz", "2010s"]);
+      expect(registry[category].filter).toHaveBeenCalledWith(["Jazz", "10s"]);
     }
     expect(registry.movies.filter).not.toHaveBeenCalled();
     expect(registry.books.filter).not.toHaveBeenCalled();
@@ -167,6 +168,49 @@ describe("findMapRecommendations", () => {
     expect(result.recommendations).toHaveLength(8);
     expect(result.recommendations.map((candidate) => candidate.item.id)).toEqual([
       "artist-0", "artist-1", "artist-2", "artist-3", "artist-4", "artist-5", "artist-6", "artist-7",
+    ]);
+  });
+
+  it("adapts canonical eras to the live provider decade contract", async () => {
+    const registry = providers({
+      movies: { similar: async () => [], filter: jest.fn(async () => []) },
+    });
+
+    await findMapRecommendations(
+      { category: "movies", item: seed, profile: { vocabularyVersion: 1, genres: ["Action"], styles: [], subjects: [], creators: [], era: "2010s" } },
+      { providers: registry }
+    );
+
+    expect(registry.movies.filter).toHaveBeenCalledWith(["Action", "10s"]);
+    expect(decadeToYearRange("10s")).toEqual({ yearFrom: 2010, yearTo: 2019 });
+  });
+
+  it("orders equal recommendation titles by item ID and source statuses by category despite reversed completion", async () => {
+    const delayed = <T,>(milliseconds: number, value: T): Promise<T> =>
+      new Promise((resolve) => setTimeout(() => resolve(value), milliseconds));
+    const registry = providers({
+      movies: { similar: () => delayed(1, [similarMovie]) },
+      artists: {
+        filter: () => delayed(30, [
+          { id: "b", title: "Same", subtitle: "Artist", meta: "" },
+          { id: "a", title: "Same", subtitle: "Artist", meta: "" },
+        ]),
+      },
+      albums: { filter: () => delayed(1, []) },
+    });
+
+    const result = await findMapRecommendations(
+      { category: "movies", item: seed, profile: { vocabularyVersion: 1, genres: ["Jazz"], styles: [], subjects: [], creators: [], era: "2010s" } },
+      { providers: registry }
+    );
+
+    expect(result.recommendations.map((candidate) => candidate.item.id)).toEqual(["contact", "a", "b"]);
+    expect(result.sourceStatuses).toEqual([
+      { category: "movies", source: "similar", status: "available" },
+      { category: "movies", source: "traits", status: "not-applicable" },
+      { category: "books", source: "traits", status: "not-applicable" },
+      { category: "artists", source: "traits", status: "available" },
+      { category: "albums", source: "traits", status: "available" },
     ]);
   });
 });
