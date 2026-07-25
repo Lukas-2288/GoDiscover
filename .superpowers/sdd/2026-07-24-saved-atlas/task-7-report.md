@@ -84,4 +84,17 @@ Independent review found that the original browser report incorrectly treated Re
 - The browser smoke now enables and dispatches CDP touch input at every size, uses exact sheet (375), drawer (768 portrait), and rail (1024/1440 landscape) contracts, and verifies the rail's independent `Back to atlas` and detail-close ownership rather than requiring unrelated panels to disappear together.
 - The layout fixture now has 200 nodes and 400 distinct directed relationships with a 250 ms budget (five times the prior observed 50 ms baseline). A component instrumentation test proves pan/zoom detail-mode changes do not call `createAtlasLayout` again.
 
-Final browser state: 375 × 812 sheet and 768 × 1024 drawer pass all CDP mouse/keyboard/touch checks with zero runtime exceptions. Fresh 1440 × 960 passes the unfiltered zero-runtime-error gate; its pre-contract-refresh interaction run passed. At 1024 × 768, the CDP rail run has zero runtime errors, pan and keyboard restoration pass, but the post-pan raw mouse/touch node sequence remains non-reproducible; this is an explicit release-verification limitation, not a pass. No live Supabase mutation was performed.
+## Final browser closure
+
+The remaining 1024 × 768 result was a test setup defect, not a product input failure. The old combined smoke first used synthetic DOM events to open Map/List, select nodes, and apply a search. It then performed the CDP mouse, keyboard, and touch checks in that altered state. The runner now has an `input-only` mode that opens Saved Atlas through CDP after hydration, waits for the React Flow viewport to stabilize, and tests exactly one input mode in a fresh Chrome profile.
+
+The isolated matrix is fully green with zero runtime exceptions. Mouse selection and restoration, keyboard selection and Escape restoration, touch selection and restoration, and pan each run in separate browser instances.
+
+| Viewport | Expected detail surface | Isolated results |
+| --- | --- | --- |
+| 375 × 844 | Sheet | Mouse, keyboard, touch, and pan PASS |
+| 768 × 1024 | Drawer | Mouse, keyboard, touch, and pan PASS |
+| 1024 × 768 | Rail | Mouse, keyboard, touch, and pan PASS |
+| 1440 × 900 | Rail | Mouse, keyboard, touch, and pan PASS |
+
+The retained harness self checks that the Saved Atlas tab has hydrated, the map opened, and the React Flow viewport was stable before it starts a selected input contract. It reports the last viewport transform if that stability wait times out. A legacy combined functional smoke at 1440 × 900 also passes its hydration, Map/List, relationship, diacritic search, pan, mouse, keyboard, touch, and no-runtime-error assertions. No live Supabase mutation was performed.

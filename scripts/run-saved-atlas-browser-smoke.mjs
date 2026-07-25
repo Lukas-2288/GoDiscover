@@ -8,6 +8,11 @@ const targetUrl = process.argv[2] ?? "http://127.0.0.1:4179/";
 const viewportWidth = Number(process.argv[3] ?? "390");
 const viewportHeight = Number(process.argv[4] ?? "844");
 const screenshotPath = process.argv[5];
+// The optional sixth argument selects one input contract. The seventh opts out
+// of the synthetic functional smoke so the selected contract starts on a
+// freshly loaded Saved Atlas map.
+const inputMode = process.argv[6] ?? "all";
+const inputOnly = process.argv[7] === "input-only";
 const chromeBinary =
   process.env.CHROME_BIN ??
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -152,11 +157,13 @@ try {
     ),
   ]);
 
-  const smoke = await send("Runtime.evaluate", {
-    awaitPromise: true,
-    returnByValue: true,
-    expression: `(${runSmokeInPage.toString()})()`,
-  });
+  const smoke = inputOnly
+    ? { result: { value: { checks: { inputOnlyOpened: true }, diagnostics: {} } } }
+    : await send("Runtime.evaluate", {
+        awaitPromise: true,
+        returnByValue: true,
+        expression: `(${runSmokeInPage.toString()})()`,
+      });
   if (smoke.exceptionDetails) {
     throw new Error(
       smoke.exceptionDetails.exception?.description ??
@@ -164,11 +171,17 @@ try {
     );
   }
   const result = smoke.result.value;
-  result.interactions = await runInputSmoke(send, viewportWidth, viewportHeight);
-  result.checks.mousePan = result.interactions.mousePan;
-  result.checks.mouseOrbitAndRestore = result.interactions.mouseOrbitAndRestore;
-  result.checks.keyboardOrbitAndRestore = result.interactions.keyboardOrbitAndRestore;
-  result.checks.touchOrbitAndRestore = result.interactions.touchOrbitAndRestore;
+  result.interactions = await runInputSmoke(send, viewportWidth, viewportHeight, inputOnly);
+  if (inputOnly) {
+    result.checks.inputOnlyOpened = result.interactions.atlasReady;
+    result.checks.viewportStable = result.interactions.cleanupViewport.stable;
+    result.checks[inputMode] = result.interactions.modePassed;
+  } else {
+    result.checks.mousePan = result.interactions.mousePan;
+    result.checks.mouseOrbitAndRestore = result.interactions.mouseOrbitAndRestore;
+    result.checks.keyboardOrbitAndRestore = result.interactions.keyboardOrbitAndRestore;
+    result.checks.touchOrbitAndRestore = result.interactions.touchOrbitAndRestore;
+  }
   const fatalRuntimeExceptions = runtimeExceptions;
   result.checks.noFatalRuntimeErrors = fatalRuntimeExceptions.length === 0;
   if (screenshotPath) {
@@ -206,7 +219,7 @@ try {
   await rm(profileDirectory, { force: true, recursive: true });
 }
 
-async function runInputSmoke(send, width, height) {
+async function runInputSmoke(send, width, height, isInputOnly) {
   const diagnosticLabels = await send("Runtime.evaluate", {
     returnByValue: true,
     expression: '[...document.querySelectorAll("[aria-label]")].map((element) => element.getAttribute("aria-label")).filter(Boolean)',
@@ -223,6 +236,22 @@ async function runInputSmoke(send, width, height) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     return false;
+  };
+  const waitForViewportStable = async () => {
+    let previous = null;
+    let stableSamples = 0;
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const current = (await send("Runtime.evaluate", {
+        returnByValue: true,
+        expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""',
+      })).result.value;
+      stableSamples = current === previous ? stableSamples + 1 : 0;
+      if (stableSamples >= 3) return { stable: true, transform: current };
+      previous = current;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return { stable: false, transform: previous };
   };
   const centerOf = async (selector) => {
     const result = await send("Runtime.evaluate", {
@@ -243,6 +272,21 @@ async function runInputSmoke(send, width, height) {
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: center.x, y: center.y, button: "left", clickCount: 1 });
     return true;
   };
+  const openAtlas = async () => {
+    const tabReady = await waitFor(
+      `Boolean([...document.querySelectorAll('[role="tab"]')].find((candidate) => candidate.textContent.includes('Saved Atlas')))`
+    );
+    if (!tabReady) return false;
+    const result = await send("Runtime.evaluate", {
+      returnByValue: true,
+      expression: `(() => { const element = [...document.querySelectorAll('[role="tab"]')].find((candidate) => candidate.textContent.includes('Saved Atlas')); if (!element) return null; const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }; })()`,
+    });
+    const center = result.result.value;
+    if (!center) return false;
+    await send("Input.dispatchMouseEvent", { type: "mousePressed", x: center.x, y: center.y, button: "left", clickCount: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: center.x, y: center.y, button: "left", clickCount: 1 });
+    return waitFor('Boolean(document.querySelector(".saved-atlas-flow"))');
+  };
   const touch = async (selector) => {
     const center = await centerOf(selector);
     if (!center) return false;
@@ -258,6 +302,7 @@ async function runInputSmoke(send, width, height) {
   const back = '[aria-label="Back to atlas"]';
   const pane = ".react-flow__pane";
   const closeDetails = '[aria-label="Close details"]';
+  const atlasReady = !isInputOnly || (await openAtlas());
   const expectedSurface = width < 700
     ? "sheet"
     : height > width
@@ -273,9 +318,7 @@ async function runInputSmoke(send, width, height) {
       return (await click(closeDetails)) && (await waitFor(`!(${expectedSurfacePresent})`));
     }
     return (await click(back)) &&
-      (await waitFor(`!document.querySelector(${JSON.stringify(back)}) && Boolean(document.querySelector('[aria-label="Arrival details"]'))`)) &&
-      (await click(closeDetails)) &&
-      (await waitFor(`!document.querySelector('[aria-label="Arrival details"]')`));
+      (await waitFor(`!document.querySelector(${JSON.stringify(back)}) && !document.querySelector('[aria-label="Arrival details"]')`));
   };
   if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(closeDetails)}))`)) {
     await click(closeDetails);
@@ -285,9 +328,10 @@ async function runInputSmoke(send, width, height) {
     await click(back);
     await waitFor(`!document.querySelector(${JSON.stringify(back)})`);
   }
+  const cleanupViewport = await waitForViewportStable();
   const paneCenter = await centerOf(pane);
   let mousePan = false;
-  if (paneCenter) {
+  if (paneCenter && (inputMode === "all" || inputMode === "pan")) {
     const before = await send("Runtime.evaluate", { returnByValue: true, expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""' });
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x: paneCenter.x, y: paneCenter.y, button: "left", clickCount: 1 });
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: paneCenter.x + 40, y: paneCenter.y + 24, button: "left", buttons: 1 });
@@ -296,18 +340,35 @@ async function runInputSmoke(send, width, height) {
     mousePan = Boolean(after.result.value) && after.result.value !== before.result.value;
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  const mouseOrbitAndRestore = (await click(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
-  await send("Runtime.evaluate", { expression: 'document.querySelector("[role=application]")?.focus()' });
-  await key("ArrowRight");
-  await key("Enter");
-  const keyboardOrbitAndRestore = (await waitFor(expectedSurfacePresent)) && (await key("Escape"), await waitFor(`!(${expectedSurfacePresent}) && !document.querySelector('[aria-label="Arrival details"]')`));
-  const touchOrbitAndRestore = (await touch(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
+  const mouseOrbitAndRestore = (inputMode === "all" || inputMode === "mouse") &&
+    (await click(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
+  let keyboardOrbitAndRestore = false;
+  if (inputMode === "all" || inputMode === "keyboard") {
+    await send("Runtime.evaluate", { expression: 'document.querySelector("[role=application]")?.focus()' });
+    await key("ArrowRight");
+    await key("Enter");
+    keyboardOrbitAndRestore = (await waitFor(expectedSurfacePresent)) &&
+      (await key("Escape"), await waitFor(`!(${expectedSurfacePresent}) && !document.querySelector('[aria-label="Arrival details"]')`));
+  }
+  const touchOrbitAndRestore = (inputMode === "all" || inputMode === "touch") &&
+    (await touch(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
+  const modePassed = {
+    pan: mousePan,
+    mouse: mouseOrbitAndRestore,
+    keyboard: keyboardOrbitAndRestore,
+    touch: touchOrbitAndRestore,
+    all: mousePan && mouseOrbitAndRestore && keyboardOrbitAndRestore && touchOrbitAndRestore,
+  }[inputMode];
   return {
     expectedSurface,
+    inputMode,
+    atlasReady,
+    cleanupViewport,
     mousePan,
     mouseOrbitAndRestore,
     keyboardOrbitAndRestore,
     touchOrbitAndRestore,
+    modePassed: Boolean(modePassed),
     diagnosticLabels: diagnosticLabels.result.value,
   };
 }
