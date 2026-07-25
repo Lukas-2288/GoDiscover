@@ -131,6 +131,23 @@ function uniqueEvents(events: readonly TrailMutationEvent[]): TrailMutationEvent
   return [...byId.values()];
 }
 
+function newestEventsByRelationship(
+  events: readonly TrailMutationEvent[]
+): TrailMutationEvent[] {
+  const newest = new Map<string, TrailMutationEvent>();
+  for (const event of events) {
+    const previous = newest.get(event.relationshipId);
+    if (
+      !previous ||
+      event.occurredAt > previous.occurredAt ||
+      (event.occurredAt === previous.occurredAt && event.id > previous.id)
+    ) {
+      newest.set(event.relationshipId, event);
+    }
+  }
+  return [...newest.values()];
+}
+
 async function readStoredEvents(): Promise<TrailMutationEvent[]> {
   let raw: string | null;
   try {
@@ -153,7 +170,7 @@ async function readStoredEvents(): Promise<TrailMutationEvent[]> {
   }
 
   if (parsed.version === 1 && Array.isArray(parsed.edges) && parsed.edges.every(isMapEdge)) {
-    const events = uniqueEvents(parsed.edges.map(legacyEvent));
+    const events = newestEventsByRelationship(parsed.edges.map(legacyEvent));
     await writeStoredEvents(events);
     return events;
   }
@@ -174,7 +191,9 @@ function pruneEvents(
   nodeIds: ReadonlySet<string>
 ): TrailMutationEvent[] {
   return events.filter(
-    (event) => nodeIds.has(event.source) && nodeIds.has(event.target)
+    (event) =>
+      event.action === "disconnect" ||
+      (nodeIds.has(event.source) && nodeIds.has(event.target))
   );
 }
 
@@ -190,18 +209,7 @@ function eventToEdge(event: TrailMutationEvent): MapEdge {
 export function foldTrailMutationEvents(
   events: readonly TrailMutationEvent[]
 ): MapEdge[] {
-  const newest = new Map<string, TrailMutationEvent>();
-  for (const event of events) {
-    const previous = newest.get(event.relationshipId);
-    if (
-      !previous ||
-      event.occurredAt > previous.occurredAt ||
-      (event.occurredAt === previous.occurredAt && event.id > previous.id)
-    ) {
-      newest.set(event.relationshipId, event);
-    }
-  }
-  return [...newest.values()]
+  return newestEventsByRelationship(events)
     .filter((event) => event.action === "connect")
     .map(eventToEdge);
 }

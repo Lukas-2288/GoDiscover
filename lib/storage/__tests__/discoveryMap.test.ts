@@ -106,30 +106,31 @@ it("keeps node positions stable when save order and metadata change", async () =
   expect(secondPositions).toEqual(firstPositions);
 });
 
-it("migrates duplicate legacy directed edges into one deterministic connect event", async () => {
+it("migrates duplicate legacy directed edges into their newest deterministic connect event", async () => {
   const legacyEdge = {
     id: "movies:arrival->books:kindred",
     source: "movies:arrival",
     target: "books:kindred",
     createdAt: 42,
   };
+  const newestLegacyEdge = { ...legacyEdge, createdAt: 84 };
   const expectedEvent = {
-    id: "legacy:movies:arrival->books:kindred:42",
+    id: "legacy:movies:arrival->books:kindred:84",
     relationshipId: "movies:arrival->books:kindred",
     action: "connect",
     source: "movies:arrival",
     target: "books:kindred",
-    occurredAt: 42,
+    occurredAt: 84,
   };
 
   await AsyncStorage.setItem(
     DISCOVERY_MAP_STORAGE_KEY,
-    JSON.stringify({ version: 1, edges: [legacyEdge, legacyEdge] })
+    JSON.stringify({ version: 1, edges: [legacyEdge, newestLegacyEdge] })
   );
 
   await expect(loadMapSnapshot([arrival, kindred])).resolves.toMatchObject({
     version: 2,
-    edges: [legacyEdge],
+    edges: [newestLegacyEdge],
     events: [expectedEvent],
   });
   await expect(
@@ -179,6 +180,43 @@ it("folds the newest relationship event so a disconnected trail remains hidden",
       createdAt: 11,
     },
   ]);
+});
+
+it("keeps a persisted disconnect after its target is removed and saved again", async () => {
+  const connectEvent = {
+    id: "connect:movies:arrival->books:kindred:10",
+    relationshipId: "movies:arrival->books:kindred",
+    action: "connect",
+    source: "movies:arrival",
+    target: "books:kindred",
+    occurredAt: 10,
+  } as const;
+  const disconnectEvent = {
+    id: "disconnect:movies:arrival->books:kindred:20",
+    relationshipId: "movies:arrival->books:kindred",
+    action: "disconnect",
+    source: "movies:arrival",
+    target: "books:kindred",
+    occurredAt: 20,
+  } as const;
+  await AsyncStorage.setItem(
+    DISCOVERY_MAP_STORAGE_KEY,
+    JSON.stringify({ version: 2, events: [connectEvent, disconnectEvent] })
+  );
+
+  await expect(loadMapSnapshot([arrival])).resolves.toMatchObject({
+    edges: [],
+    events: [disconnectEvent],
+  });
+  await expect(loadMapSnapshot([arrival, kindred])).resolves.toMatchObject({
+    edges: [],
+    events: [disconnectEvent],
+  });
+  await expect(
+    AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY).then((raw) =>
+      raw ? JSON.parse(raw) : null
+    )
+  ).resolves.toEqual({ version: 2, events: [disconnectEvent] });
 });
 
 it("records an on-demand exploration edge in versioned storage", async () => {
