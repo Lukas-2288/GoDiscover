@@ -87,7 +87,10 @@ export default function WebHomeScreen() {
       authEventObserved = true;
       refreshSavedForSession(next);
     });
-    return () => listener.subscription.unsubscribe();
+    return () => {
+      mapLoadSequence.current += 1;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -141,14 +144,24 @@ export default function WebHomeScreen() {
   const commit = (decision: "save" | "skip") => {
     if (!activeItem) return;
     const committed = activeItem;
+    const ownerId = authSession?.user.id ?? null;
     void discovery.commit(committed, decision).then(() => {
       if (decision !== "save" || !selected || !trailSeed.current) return;
+      const mapSequence = mapLoadSequence.current;
       const savedTarget: SavedItem = { ...committed, category: selected, savedAt: Date.now() };
       void recordMapTrailEvent(
         { source: trailSeed.current, target: { category: selected, id: committed.id }, occurredAt: Date.now() },
         [...savedItems, savedTarget],
-        authSession?.user.id
-      ).then(setMapSnapshot).catch(() => undefined);
+        ownerId ?? undefined
+      ).then((snapshot) => {
+        if (
+          mapLoadSequence.current !== mapSequence ||
+          activeOwnerId.current !== ownerId
+        ) {
+          return;
+        }
+        setMapSnapshot(snapshot);
+      }).catch(() => undefined);
     });
   };
 

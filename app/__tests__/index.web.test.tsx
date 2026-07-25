@@ -13,6 +13,7 @@ import type { SavedItem } from "../../lib/storage/saved";
 let authStateChangeHandler:
   | ((event: string, session: unknown) => void)
   | null = null;
+const mockDiscoveryCommit = jest.fn(async () => undefined);
 
 jest.mock("../../components/web/WebHomeScreen", () => {
   const React = require("react");
@@ -22,7 +23,25 @@ jest.mock("../../components/web/WebHomeScreen", () => {
   return {
     ArchiveAtlas: Empty,
     WebDetailPanel: Empty,
-    WebDiscoveryStage: Empty,
+    WebDiscoveryStage: ({
+      onSave,
+      onSimilar,
+    }: {
+      onSave(): void;
+      onSimilar(): void;
+    }) =>
+      React.createElement(
+        View,
+        null,
+        React.createElement(Pressable, {
+          onPress: onSimilar,
+          testID: "start-similar",
+        }),
+        React.createElement(Pressable, {
+          onPress: onSave,
+          testID: "save-discovery",
+        })
+      ),
     WebShell: ({
       children,
       onSectionChange,
@@ -36,6 +55,10 @@ jest.mock("../../components/web/WebHomeScreen", () => {
         React.createElement(Pressable, {
           onPress: () => onSectionChange("atlas"),
           testID: "open-atlas",
+        }),
+        React.createElement(Pressable, {
+          onPress: () => onSectionChange("discover"),
+          testID: "open-discover",
         }),
         children
       ),
@@ -71,11 +94,16 @@ jest.mock("../../components/web/map/SavedAtlas.web", () => {
 
 jest.mock("../../components/discovery/useDiscoveryController", () => ({
   useDiscoveryController: () => ({
-    activeItem: null,
-    commit: jest.fn(),
+    activeItem: {
+      id: "active-discovery",
+      meta: "2026",
+      subtitle: "Discovery",
+      title: "Active discovery",
+    },
+    commit: mockDiscoveryCommit,
     selectCategory: jest.fn(),
     similar: jest.fn(),
-    state: { selected: null, sessions: {} },
+    state: { selected: "movies", sessions: {} },
     submit: jest.fn(),
     undo: jest.fn(),
   }),
@@ -130,7 +158,10 @@ jest.mock("../../lib/supabase", () => ({
   },
 }));
 
-import { loadMapSnapshot } from "../../lib/storage/discoveryMap";
+import {
+  loadMapSnapshot,
+  recordMapTrailEvent,
+} from "../../lib/storage/discoveryMap";
 import { listSaved } from "../../lib/storage/saved";
 import { supabase } from "../../lib/supabase";
 import WebHomeScreen from "../index.web";
@@ -197,6 +228,12 @@ function openAtlas() {
   fireEvent.press(screen.getByTestId("open-atlas"));
 }
 
+function recordTrailFromDiscovery() {
+  fireEvent.press(screen.getByTestId("open-discover"));
+  fireEvent.press(screen.getByTestId("start-similar"));
+  fireEvent.press(screen.getByTestId("save-discovery"));
+}
+
 function expectVisibleAtlas(expected: Owner | "empty") {
   expect(screen.getByTestId("saved-atlas").props.accessibilityLabel).toBe(
     expected === "empty"
@@ -214,6 +251,7 @@ beforeEach(() => {
     nodes: [],
     edges: [],
   });
+  jest.mocked(recordMapTrailEvent).mockReset();
   jest.mocked(supabase.auth.getSession).mockReset();
 });
 
@@ -395,4 +433,83 @@ it("keeps owner B visible when owner A's older map load resolves last", async ()
     await ownerAMap.promise;
   });
   expectVisibleAtlas(ownerB);
+});
+
+it("keeps owner B visible when owner A's older trail mutation resolves last", async () => {
+  const ownerATrailMutation = deferred<MapSnapshot>();
+
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest
+    .mocked(listSaved)
+    .mockResolvedValueOnce([saved(ownerA.id)])
+    .mockResolvedValueOnce([saved(ownerB.id)]);
+  jest
+    .mocked(loadMapSnapshot)
+    .mockResolvedValueOnce(snapshot(ownerA))
+    .mockResolvedValueOnce(snapshot(ownerB));
+  jest
+    .mocked(recordMapTrailEvent)
+    .mockReturnValueOnce(ownerATrailMutation.promise);
+
+  render(<WebHomeScreen />);
+  openAtlas();
+  await waitFor(() => expectVisibleAtlas(ownerA));
+
+  recordTrailFromDiscovery();
+  await waitFor(() =>
+    expect(recordMapTrailEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      ownerA.id
+    )
+  );
+
+  await act(async () => {
+    authStateChangeHandler?.("SIGNED_IN", session(ownerB));
+  });
+  openAtlas();
+  await waitFor(() => expectVisibleAtlas(ownerB));
+
+  await act(async () => {
+    ownerATrailMutation.resolve(snapshot(ownerA));
+    await ownerATrailMutation.promise;
+  });
+  expectVisibleAtlas(ownerB);
+});
+
+it("applies a trail mutation snapshot while its owner remains current", async () => {
+  const ownerATrailSnapshot: MapSnapshot = {
+    ...snapshot(ownerA),
+    nodes: [
+      {
+        ...snapshot(ownerA).nodes[0],
+        id: "movies:owner-a-trail",
+        title: "owner-a trail atlas",
+      },
+    ],
+  };
+
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest.mocked(listSaved).mockResolvedValueOnce([saved(ownerA.id)]);
+  jest.mocked(loadMapSnapshot).mockResolvedValueOnce(snapshot(ownerA));
+  jest
+    .mocked(recordMapTrailEvent)
+    .mockResolvedValueOnce(ownerATrailSnapshot);
+
+  render(<WebHomeScreen />);
+  openAtlas();
+  await waitFor(() => expectVisibleAtlas(ownerA));
+
+  recordTrailFromDiscovery();
+  openAtlas();
+
+  await waitFor(() =>
+    expect(screen.getByTestId("saved-atlas").props.accessibilityLabel).toBe(
+      "movies:owner-a-trail:owner-a trail atlas"
+    )
+  );
 });
