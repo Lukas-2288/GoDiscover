@@ -7,6 +7,10 @@ let mockFlowProps: Record<string, any> = {};
 const mockSetCenter = jest.fn();
 const mockGetViewport = jest.fn(() => ({ x: 24, y: -18, zoom: 0.86 }));
 const mockSetViewport = jest.fn();
+jest.mock("../../../../lib/discovery/mapLayout", () => {
+  const actual = jest.requireActual("../../../../lib/discovery/mapLayout");
+  return { ...actual, createAtlasLayout: jest.fn(actual.createAtlasLayout) };
+});
 
 jest.mock("@xyflow/react", () => {
   const React = require("react");
@@ -85,6 +89,29 @@ describe("Saved Atlas React Flow canvas", () => {
         fitView: true,
       })
     );
+  });
+
+  it("reuses settled atlas positions when pan or zoom only changes detail mode", () => {
+    const createAtlasLayout = (jest.requireMock("../../../../lib/discovery/mapLayout") as {
+      createAtlasLayout: jest.Mock;
+    }).createAtlasLayout;
+    render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+    const layoutsAfterInitialRender = createAtlasLayout.mock.calls.length;
+
+    act(() => {
+      mockFlowProps.onMoveEnd(null, { x: 100, y: 40, zoom: 2 });
+    });
+
+    expect(createAtlasLayout).toHaveBeenCalledTimes(layoutsAfterInitialRender);
   });
 
   it("selects artwork for detail and moves search matches into focus", () => {

@@ -124,6 +124,10 @@ try {
     screenWidth: viewportWidth,
     width: viewportWidth,
   });
+  await send("Emulation.setTouchEmulationEnabled", {
+    enabled: true,
+    maxTouchPoints: 1,
+  });
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `
       localStorage.clear();
@@ -160,14 +164,12 @@ try {
     );
   }
   const result = smoke.result.value;
-  result.interactions = await runInputSmoke(send, viewportWidth <= 768);
+  result.interactions = await runInputSmoke(send, viewportWidth, viewportHeight);
   result.checks.mousePan = result.interactions.mousePan;
   result.checks.mouseOrbitAndRestore = result.interactions.mouseOrbitAndRestore;
   result.checks.keyboardOrbitAndRestore = result.interactions.keyboardOrbitAndRestore;
   result.checks.touchOrbitAndRestore = result.interactions.touchOrbitAndRestore;
-  const fatalRuntimeExceptions = runtimeExceptions.filter(
-    (error) => !error.includes("Minified React error #418")
-  );
+  const fatalRuntimeExceptions = runtimeExceptions;
   result.checks.noFatalRuntimeErrors = fatalRuntimeExceptions.length === 0;
   if (screenshotPath) {
     const screenshot = await send("Page.captureScreenshot", {
@@ -182,9 +184,6 @@ try {
       `FAIL ${JSON.stringify({
         ...result,
         fatalRuntimeExceptions,
-        recoverableRuntimeExceptions: runtimeExceptions.filter((error) =>
-          error.includes("Minified React error #418")
-        ),
       })}`
     );
   }
@@ -207,7 +206,7 @@ try {
   await rm(profileDirectory, { force: true, recursive: true });
 }
 
-async function runInputSmoke(send, useTouch) {
+async function runInputSmoke(send, width, height) {
   const diagnosticLabels = await send("Runtime.evaluate", {
     returnByValue: true,
     expression: '[...document.querySelectorAll("[aria-label]")].map((element) => element.getAttribute("aria-label")).filter(Boolean)',
@@ -259,15 +258,32 @@ async function runInputSmoke(send, useTouch) {
   const back = '[aria-label="Back to atlas"]';
   const pane = ".react-flow__pane";
   const closeDetails = '[aria-label="Close details"]';
-  const detailSurface = `Boolean(document.querySelector(${JSON.stringify(back)}) || document.querySelector(${JSON.stringify(closeDetails)}))`;
-  const dismissDetailSurface = async () => {
-    if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(back)}))`)) return click(back);
-    if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(closeDetails)}))`)) return click(closeDetails);
-    return false;
+  const expectedSurface = width < 700
+    ? "sheet"
+    : height > width
+      ? "drawer"
+      : "rail";
+  const expectedSurfacePresent = expectedSurface === "sheet"
+    ? 'Boolean(document.querySelector(\'[aria-modal="true"][aria-label="Arrival details"]\'))'
+    : expectedSurface === "drawer"
+      ? 'Boolean(document.querySelector(\'[aria-label="Arrival details"]\') && document.querySelector(\'[aria-label="Expand detail drawer"]\'))'
+      : `Boolean(document.querySelector(${JSON.stringify(back)}) && document.querySelector('[aria-label="Arrival details"]'))`;
+  const restoreExpectedSurface = async () => {
+    if (expectedSurface !== "rail") {
+      return (await click(closeDetails)) && (await waitFor(`!(${expectedSurfacePresent})`));
+    }
+    return (await click(back)) &&
+      (await waitFor(`!document.querySelector(${JSON.stringify(back)}) && Boolean(document.querySelector('[aria-label="Arrival details"]'))`)) &&
+      (await click(closeDetails)) &&
+      (await waitFor(`!document.querySelector('[aria-label="Arrival details"]')`));
   };
   if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(closeDetails)}))`)) {
     await click(closeDetails);
     await waitFor(`!document.querySelector(${JSON.stringify(closeDetails)})`);
+  }
+  if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(back)}))`)) {
+    await click(back);
+    await waitFor(`!document.querySelector(${JSON.stringify(back)})`);
   }
   const paneCenter = await centerOf(pane);
   let mousePan = false;
@@ -278,14 +294,16 @@ async function runInputSmoke(send, useTouch) {
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: paneCenter.x + 40, y: paneCenter.y + 24, button: "left", clickCount: 1 });
     const after = await send("Runtime.evaluate", { returnByValue: true, expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""' });
     mousePan = Boolean(after.result.value) && after.result.value !== before.result.value;
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  const mouseOrbitAndRestore = (await click(arrival)) && (await waitFor(detailSurface)) && (await dismissDetailSurface()) && (await waitFor(`!(${detailSurface})`));
+  const mouseOrbitAndRestore = (await click(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
   await send("Runtime.evaluate", { expression: 'document.querySelector("[role=application]")?.focus()' });
   await key("ArrowRight");
   await key("Enter");
-  const keyboardOrbitAndRestore = (await waitFor(detailSurface)) && (await key("Escape"), await waitFor(`!(${detailSurface})`));
-  const touchOrbitAndRestore = !useTouch || ((await touch(arrival)) && (await waitFor(detailSurface)) && (await dismissDetailSurface()) && (await waitFor(`!(${detailSurface})`)));
+  const keyboardOrbitAndRestore = (await waitFor(expectedSurfacePresent)) && (await key("Escape"), await waitFor(`!(${expectedSurfacePresent}) && !document.querySelector('[aria-label="Arrival details"]')`));
+  const touchOrbitAndRestore = (await touch(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
   return {
+    expectedSurface,
     mousePan,
     mouseOrbitAndRestore,
     keyboardOrbitAndRestore,

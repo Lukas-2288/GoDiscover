@@ -211,10 +211,10 @@ it("settles a 200-node, 400-edge atlas deterministically", () => {
     id: `${categories[index % categories.length]}:item-${index}`,
     category: categories[index % categories.length],
   }));
-  const edges = Array.from({ length: 400 }, (_, index) => ({
-    source: nodes[index % nodes.length].id,
-    target: nodes[(index * 37 + 11) % nodes.length].id,
-  })).filter((edge) => edge.source !== edge.target);
+  const edges = nodes.flatMap((node, index) => [
+    { source: node.id, target: nodes[(index * 37 + 11) % nodes.length].id },
+    { source: node.id, target: nodes[(index * 53 + 17) % nodes.length].id },
+  ]);
 
   const startedAt = performance.now();
   const first = createAtlasLayout(nodes, edges, { seed: "release-200-400" });
@@ -224,6 +224,8 @@ it("settles a 200-node, 400-edge atlas deterministically", () => {
   });
 
   expect(Object.keys(first)).toHaveLength(200);
+  expect(new Set(edges.map((edge) => `${edge.source}->${edge.target}`)).size).toBe(400);
   expect(second).toEqual(first);
-  expect(elapsedMilliseconds).toBeLessThan(1_000);
+  // 250 ms gives a 5× buffer over the observed 50 ms release-check baseline.
+  expect(elapsedMilliseconds).toBeLessThan(250);
 });

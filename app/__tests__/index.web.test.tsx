@@ -17,6 +17,12 @@ const mockDiscoveryCommit = jest.fn(async () => undefined);
 let mockLayout: "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop" = "desktop";
 let mockReducedMotion = false;
 let mockSavedAtlasProps: Record<string, unknown> = {};
+let mockWebHydrated = true;
+
+jest.mock("../../components/useClientOnlyValue", () => ({
+  useClientOnlyValue: (server: boolean, client: boolean) =>
+    mockWebHydrated ? client : server,
+}));
 
 jest.mock("../../components/web/WebHomeScreen", () => {
   const React = require("react");
@@ -342,6 +348,7 @@ beforeEach(() => {
   mockLayout = "desktop";
   mockReducedMotion = false;
   mockSavedAtlasProps = {};
+  mockWebHydrated = true;
   mockDiscoveryCommit.mockReset().mockResolvedValue(undefined);
   jest.mocked(listSaved).mockReset();
   jest.mocked(loadMapSnapshot).mockReset().mockResolvedValue({
@@ -355,6 +362,17 @@ beforeEach(() => {
   jest.mocked(disconnectSavedItemTrails).mockReset().mockResolvedValue([]);
   jest.mocked(findMapRecommendations).mockReset();
   jest.mocked(supabase.auth.getSession).mockReset();
+});
+
+it("keeps the responsive web application out of the hydration tree until client effects run", () => {
+  mockWebHydrated = false;
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: null } } as never);
+  jest.mocked(listSaved).mockResolvedValue([]);
+
+  render(<WebHomeScreen />);
+
+  expect(screen.getByLabelText("Loading GoDiscover")).toBeTruthy();
+  expect(screen.queryByTestId("open-atlas")).toBeNull();
 });
 
 it("hands the resolved web layout and motion preference to the web-only Saved Atlas", async () => {

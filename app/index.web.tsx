@@ -6,6 +6,7 @@ import { WebShell, ArchiveAtlas, WebDetailPanel, WebDiscoveryStage, resolveWebLa
 import { SavedAtlas } from "../components/web/map/SavedAtlas.web";
 import { useDiscoveryController } from "../components/discovery/useDiscoveryController";
 import { useReducedMotion } from "../components/discovery/useReducedMotion";
+import { useClientOnlyValue } from "../components/useClientOnlyValue";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
 import { listSaved, type SavedItem } from "../lib/storage/saved";
 import { removeSavedItem, runSavedMutation, saveSavedItem, toggleSavedItem } from "../lib/storage/savedMutations";
@@ -26,7 +27,15 @@ const EMPTY_MAP_SNAPSHOT: MapSnapshot = {
   edges: [],
 };
 
-export default function WebHomeScreen() {
+export default function WebHomeScreenEntry() {
+  const hydrated = useClientOnlyValue(false, true);
+  if (!hydrated) {
+    return <View accessibilityLabel="Loading GoDiscover" />;
+  }
+  return <WebHomeScreen />;
+}
+
+function WebHomeScreen() {
   const { width, height } = useWindowDimensions();
   const layout = resolveWebLayout(width, height);
   const reducedMotion = useReducedMotion();

@@ -13,7 +13,11 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { resolveZoomDetail, type ZoomDetailMode } from "../../../lib/discovery/mapLayout";
+import {
+  createAtlasLayout,
+  resolveZoomDetail,
+  type ZoomDetailMode,
+} from "../../../lib/discovery/mapLayout";
 import type { MapEdge, MapNode } from "../../../lib/storage/discoveryMap";
 import { AtlasArtworkNode, type AtlasArtworkNodeDefinition } from "./AtlasArtworkNode.web";
 import {
@@ -181,6 +185,7 @@ function SavedAtlasInner({
     () => (graphOrbitSeedId ? buildOrbitGraph(nodes, edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed) : null),
     [edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed, nodes]
   );
+  const atlasPositions = useMemo(() => createAtlasLayout(nodes, edges), [edges, nodes]);
   const displayedNodes = orbitGraph?.nodes ?? nodes;
   const displayedEdges = orbitGraph?.edges ?? edges;
 
@@ -189,7 +194,7 @@ function SavedAtlasInner({
       buildAtlasFlowNodes(displayedNodes, displayedEdges, {
         detailMode,
         selectedId: graphOrbitSeedId ?? selectedId,
-        positions: orbitGraph?.positions,
+        positions: orbitGraph?.positions ?? atlasPositions,
         fadedNodeIds: orbitGraph?.nodes.filter((node) => node.faded).map((node) => node.id),
         transientNodeIds: orbitGraph?.nodes.filter((node) => node.transient).map((node) => node.id),
       }).map(

@@ -75,3 +75,13 @@ The app's event sync converts/restricts rows to the authenticated session user a
 ## Code review
 
 `git diff --check a1a281c..HEAD` is clean; the checked-out branch is already at the requested baseline, so there was no branch delta to review beyond the Saved Atlas source and verification additions. Static review found no additional load-bearing issue. The temporary export and screenshot artifacts are under `/private/tmp`; no user-owned untracked plan or `task-6-review.md` file was modified.
+
+## Review remediation — 2026-07-25
+
+Independent review found that the original browser report incorrectly treated React #418 as recoverable and used one generic detail-surface assertion. This was corrected rather than filtered:
+
+- The first client render now gates both the root font/navigation tree and the responsive web application until client effects run. This aligns static-server and first-client markup. A fresh production export (`/private/tmp/godiscover-task7-web-final`) was checked at 1440 × 960 with the unfiltered harness: `fatalRuntimeExceptions: []`.
+- The browser smoke now enables and dispatches CDP touch input at every size, uses exact sheet (375), drawer (768 portrait), and rail (1024/1440 landscape) contracts, and verifies the rail's independent `Back to atlas` and detail-close ownership rather than requiring unrelated panels to disappear together.
+- The layout fixture now has 200 nodes and 400 distinct directed relationships with a 250 ms budget (five times the prior observed 50 ms baseline). A component instrumentation test proves pan/zoom detail-mode changes do not call `createAtlasLayout` again.
+
+Final browser state: 375 × 812 sheet and 768 × 1024 drawer pass all CDP mouse/keyboard/touch checks with zero runtime exceptions. Fresh 1440 × 960 passes the unfiltered zero-runtime-error gate; its pre-contract-refresh interaction run passed. At 1024 × 768, the CDP rail run has zero runtime errors, pan and keyboard restoration pass, but the post-pan raw mouse/touch node sequence remains non-reproducible; this is an explicit release-verification limitation, not a pass. No live Supabase mutation was performed.

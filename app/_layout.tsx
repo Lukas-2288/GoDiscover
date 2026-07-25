@@ -11,6 +11,7 @@ import { useEffect } from "react";
 import "react-native-reanimated";
 
 import { useColorScheme } from "@/components/useColorScheme";
+import { useClientOnlyValue } from "@/components/useClientOnlyValue";
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -42,7 +43,8 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
-  if (!loaded) {
+  const hydrated = useClientOnlyValue(false, true);
+  if (!hydrated || !loaded) {
     return null;
   }
 
