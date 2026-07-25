@@ -3,6 +3,8 @@ import type { ContentCategory } from "../../types/content";
 import type { SavedItem } from "./saved";
 
 export const DISCOVERY_MAP_STORAGE_KEY = "godiscover:discovery-map-edges:v1";
+export const DISCOVERY_MAP_MALFORMED_STORAGE_KEY =
+  "godiscover:discovery-map-edges:malformed";
 
 export type MapExperienceMode = "atlas" | "orbit";
 
@@ -127,7 +129,9 @@ function legacyEvent(edge: MapEdge): TrailMutationEvent {
 
 function uniqueEvents(events: readonly TrailMutationEvent[]): TrailMutationEvent[] {
   const byId = new Map<string, TrailMutationEvent>();
-  for (const event of events) byId.set(event.id, event);
+  for (const event of events) {
+    byId.set(`${event.userId ?? "anonymous"}:${event.id}`, event);
+  }
   return [...byId.values()];
 }
 
@@ -161,7 +165,7 @@ async function readStoredEvents(): Promise<TrailMutationEvent[]> {
   try {
     parsed = JSON.parse(raw) as { version?: unknown; edges?: unknown; events?: unknown };
   } catch {
-    await writeStoredEvents([]);
+    await recoverMalformedStoredEvents(raw);
     return [];
   }
 
@@ -175,7 +179,7 @@ async function readStoredEvents(): Promise<TrailMutationEvent[]> {
     return events;
   }
 
-  await writeStoredEvents([]);
+  await recoverMalformedStoredEvents(raw);
   return [];
 }
 
@@ -184,6 +188,35 @@ async function writeStoredEvents(events: readonly TrailMutationEvent[]): Promise
     DISCOVERY_MAP_STORAGE_KEY,
     JSON.stringify({ version: 2, events: uniqueEvents(events) })
   );
+}
+
+async function recoverMalformedStoredEvents(raw: string): Promise<void> {
+  try {
+    const previous = await AsyncStorage.getItem(DISCOVERY_MAP_MALFORMED_STORAGE_KEY);
+    if (!previous) {
+      await AsyncStorage.setItem(DISCOVERY_MAP_MALFORMED_STORAGE_KEY, raw);
+    }
+  } finally {
+    await writeStoredEvents([]);
+  }
+}
+
+export async function readDiscoveryTrailEvents(): Promise<TrailMutationEvent[]> {
+  return readStoredEvents();
+}
+
+export async function writeDiscoveryTrailEvents(
+  events: readonly TrailMutationEvent[]
+): Promise<void> {
+  await writeStoredEvents(events);
+}
+
+export async function appendDiscoveryTrailEvents(
+  events: readonly TrailMutationEvent[]
+): Promise<TrailMutationEvent[]> {
+  const next = uniqueEvents([...await readStoredEvents(), ...events]);
+  await writeStoredEvents(next);
+  return next;
 }
 
 function pruneEvents(
@@ -263,10 +296,7 @@ export async function recordMapTrailEvent(
       target,
       occurredAt: event.occurredAt,
     };
-    events = uniqueEvents([
-      ...storedEvents.filter((stored) => stored.id !== trailEvent.id),
-      trailEvent,
-    ]);
+    events = uniqueEvents([...storedEvents, trailEvent]);
   }
 
   await writeStoredEvents(events);

@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { SavedItem } from "../saved";
 import {
+  DISCOVERY_MAP_MALFORMED_STORAGE_KEY,
   DISCOVERY_MAP_STORAGE_KEY,
   loadMapSnapshot,
   recordMapTrailEvent,
@@ -317,4 +318,14 @@ it("falls back to a clean versioned edge store when persistence is malformed", a
     version: 2,
     events: [],
   });
+});
+
+it("keeps malformed persistence recoverable while resetting the active trail store", async () => {
+  await AsyncStorage.setItem(DISCOVERY_MAP_STORAGE_KEY, "{not-json");
+
+  await loadMapSnapshot([arrival]);
+
+  await expect(
+    AsyncStorage.getItem(DISCOVERY_MAP_MALFORMED_STORAGE_KEY)
+  ).resolves.toBe("{not-json");
 });
