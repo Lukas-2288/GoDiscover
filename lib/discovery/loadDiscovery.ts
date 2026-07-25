@@ -46,7 +46,7 @@ function minimumRating(filters: readonly string[]): number | undefined {
   return label ? Number.parseFloat(label) : undefined;
 }
 
-const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
+export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
   movies: {
     search: searchMovies,
     random: randomMovies,

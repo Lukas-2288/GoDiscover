@@ -22,7 +22,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
 
   return {
     ArchiveAtlas: Empty,
-    WebDetailPanel: Empty,
+    WebDetailPanel: ({ onSave }: { onSave(): void }) => React.createElement(Pressable, { onPress: onSave, testID: "detail-toggle" }),
     WebDiscoveryStage: ({
       onSave,
       onSimilar,
@@ -77,18 +77,51 @@ jest.mock("../../components/web/WebHomeScreen", () => {
 
 jest.mock("../../components/web/map/SavedAtlas.web", () => {
   const React = require("react");
-  const { View } = require("react-native");
+  const { Pressable, Text: MockText, View } = require("react-native");
   return {
     SavedAtlas: ({
       nodes,
+      onFindSimilar,
+      onSaveRecommendation,
+      onSelect,
     }: {
       nodes: Array<{ id: string; title: string }>;
-    }) =>
-      React.createElement(View, {
-        accessibilityLabel:
-          nodes.map((node) => `${node.id}:${node.title}`).join("|") || "empty",
-        testID: "saved-atlas",
-      }),
+      onFindSimilar?(seed: unknown): Promise<Array<unknown>>;
+      onSaveRecommendation?(seed: unknown, recommendation: unknown): Promise<void>;
+      onSelect?(node: unknown): void;
+    }) => {
+      const [orbitError, setOrbitError] = React.useState(false);
+      const seed = {
+        id: "movies:source",
+        category: "movies",
+        item: { id: "source", title: "Source", subtitle: "Seed", meta: "2026" },
+      };
+      return React.createElement(
+        View,
+        { accessibilityLabel: nodes.map((node) => `${node.id}:${node.title}`).join("|") || "empty", testID: "saved-atlas" },
+        React.createElement(Pressable, { onPress: () => onSelect?.(nodes[0]), testID: "atlas-select" }),
+        React.createElement(Pressable, {
+          onPress: async () => {
+            try {
+              await onFindSimilar?.(seed);
+            } catch {
+              setOrbitError(true);
+            }
+          },
+          testID: "orbit-find",
+        }),
+        React.createElement(Pressable, {
+          onPress: async () => {
+            const recommendations = await onFindSimilar?.(seed);
+            if (recommendations?.[0]) {
+              await onSaveRecommendation?.(seed, recommendations[0]).catch(() => undefined);
+            }
+          },
+          testID: "orbit-save",
+        }),
+        orbitError ? React.createElement(MockText, { testID: "orbit-error" }, "retry") : null
+      );
+    },
   };
 });
 
@@ -125,11 +158,12 @@ jest.mock("../../lib/storage/saved", () => ({
 jest.mock("../../lib/storage/savedMutations", () => ({
   removeSavedItem: jest.fn(),
   runSavedMutation: jest.fn((mutation: () => Promise<unknown>) => mutation()),
+  saveSavedItem: jest.fn(),
   toggleSavedItem: jest.fn(),
 }));
 
 jest.mock("../../lib/discovery/loadDetail", () => ({
-  loadDetail: jest.fn(),
+  loadDetail: jest.fn(async () => null),
 }));
 
 jest.mock("../../lib/storage/discoveryMap", () => ({
@@ -139,6 +173,14 @@ jest.mock("../../lib/storage/discoveryMap", () => ({
     edges: [],
   })),
   recordMapTrailEvent: jest.fn(),
+}));
+
+jest.mock("../../lib/storage/discoveryTrailSync", () => ({
+  disconnectSavedItemTrails: jest.fn(async () => []),
+}));
+
+jest.mock("../../lib/discovery/mapRecommendations", () => ({
+  findMapRecommendations: jest.fn(),
 }));
 
 jest.mock("../../lib/supabase", () => ({
@@ -163,6 +205,9 @@ import {
   recordMapTrailEvent,
 } from "../../lib/storage/discoveryMap";
 import { listSaved } from "../../lib/storage/saved";
+import { removeSavedItem, saveSavedItem } from "../../lib/storage/savedMutations";
+import { disconnectSavedItemTrails } from "../../lib/storage/discoveryTrailSync";
+import { findMapRecommendations } from "../../lib/discovery/mapRecommendations";
 import { supabase } from "../../lib/supabase";
 import WebHomeScreen from "../index.web";
 
@@ -253,6 +298,10 @@ beforeEach(() => {
     edges: [],
   });
   jest.mocked(recordMapTrailEvent).mockReset();
+  jest.mocked(removeSavedItem).mockReset();
+  jest.mocked(saveSavedItem).mockReset();
+  jest.mocked(disconnectSavedItemTrails).mockReset().mockResolvedValue([]);
+  jest.mocked(findMapRecommendations).mockReset();
   jest.mocked(supabase.auth.getSession).mockReset();
 });
 
@@ -610,4 +659,188 @@ it("applies a deferred trail mutation snapshot while its owner and map generatio
       "movies:owner-a-trail:owner-a trail atlas"
     )
   );
+});
+
+function sourceItem(): SavedItem {
+  return {
+    category: "movies",
+    id: "source",
+    meta: "2026",
+    savedAt: 1,
+    subtitle: "Seed",
+    title: "Source",
+  };
+}
+
+function sourceSnapshot(items: SavedItem[]): MapSnapshot {
+  return {
+    version: 1,
+    edges: [],
+    nodes: items.map((item) => ({
+      category: item.category,
+      id: `${item.category}:${item.id}`,
+      itemId: item.id,
+      meta: item.meta,
+      savedAt: item.savedAt,
+      subtitle: item.subtitle,
+      title: item.title,
+      x: 0.5,
+      y: 0.5,
+    })),
+  };
+}
+
+function orbitResult(category: "movies", id: string, title: string) {
+  return {
+    recommendations: [{
+      category,
+      item: { id, title, subtitle: "Candidate", meta: "2025" },
+      reason: { label: "Shared genre: Drama" },
+    }],
+    sourceStatuses: [],
+  };
+}
+
+it("persists a new orbit recommendation before recording its honest connecting trail", async () => {
+  const source = sourceItem();
+  const candidate: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
+  const items = [source, candidate];
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue(source ? [source] : []);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+  jest.mocked(saveSavedItem).mockResolvedValue({ items, confirmed: true, created: true });
+  jest.mocked(recordMapTrailEvent).mockResolvedValue(sourceSnapshot(items));
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  await act(async () => { fireEvent.press(screen.getByTestId("orbit-save")); });
+
+  await waitFor(() => expect(saveSavedItem).toHaveBeenCalledWith("movies", expect.objectContaining({ id: "candidate" })));
+  expect(recordMapTrailEvent).toHaveBeenCalledWith(
+    expect.objectContaining({
+      source: { category: "movies", id: "source" },
+      target: { category: "movies", id: "candidate" },
+      reason: "Shared genre: Drama",
+    }),
+    items,
+    ownerA.id
+  );
+  expect(jest.mocked(saveSavedItem).mock.invocationCallOrder[0]).toBeLessThan(
+    jest.mocked(recordMapTrailEvent).mock.invocationCallOrder[0]
+  );
+});
+
+it("turns all actual recommendation-provider failures into a retryable orbit failure", async () => {
+  const source = sourceItem();
+  const unavailable = async (): Promise<never[]> => { throw new Error("offline"); };
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockImplementation(async (seed) => {
+    const actual = jest.requireActual("../../lib/discovery/mapRecommendations") as typeof import("../../lib/discovery/mapRecommendations");
+    return actual.findMapRecommendations(seed, {
+      providers: {
+        movies: { search: unavailable, random: unavailable, similar: unavailable, filter: unavailable },
+        books: { search: unavailable, random: unavailable, similar: unavailable, filter: unavailable },
+        artists: { search: unavailable, random: unavailable, similar: unavailable, filter: unavailable },
+        albums: { search: unavailable, random: unavailable, similar: unavailable, filter: unavailable },
+      },
+    });
+  });
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  await act(async () => { fireEvent.press(screen.getByTestId("orbit-find")); });
+
+  await waitFor(() => expect(screen.getByTestId("orbit-error")).toBeTruthy());
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+});
+
+it("records only a relationship when an orbit candidate is already saved", async () => {
+  const source = sourceItem();
+  const existing: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
+  const items = [source, existing];
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue(items);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot(items));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+  jest.mocked(recordMapTrailEvent).mockResolvedValue(sourceSnapshot(items));
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith(items, ownerA.id));
+  openAtlas();
+  await act(async () => { fireEvent.press(screen.getByTestId("orbit-save")); });
+
+  await waitFor(() => expect(recordMapTrailEvent).toHaveBeenCalled());
+  expect(saveSavedItem).not.toHaveBeenCalled();
+  expect(recordMapTrailEvent).toHaveBeenCalledWith(
+    expect.objectContaining({ target: { category: "movies", id: "candidate" } }),
+    items,
+    ownerA.id
+  );
+});
+
+it("does not create a trail when saving a new orbit recommendation is unconfirmed", async () => {
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+  jest.mocked(saveSavedItem).mockResolvedValue({ items: [source], confirmed: false, created: true });
+  jest.mocked(recordMapTrailEvent).mockResolvedValue(sourceSnapshot([source]));
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  await act(async () => { fireEvent.press(screen.getByTestId("orbit-save")); });
+
+  await waitFor(() => expect(saveSavedItem).toHaveBeenCalled());
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+});
+
+it("drops a pending orbit save when ownership changes before persistence completes", async () => {
+  const source = sourceItem();
+  const candidate: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
+  const pendingSave = deferred<{ items: SavedItem[]; confirmed: boolean; created: boolean }>();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValueOnce([source]).mockResolvedValueOnce([saved(ownerB.id)]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+  jest.mocked(saveSavedItem).mockReturnValue(pendingSave.promise);
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("orbit-save"));
+  await waitFor(() => expect(saveSavedItem).toHaveBeenCalled());
+  await act(async () => { authStateChangeHandler?.("SIGNED_IN", session(ownerB)); });
+  await act(async () => { pendingSave.resolve({ items: [source, candidate], confirmed: true, created: true }); await pendingSave.promise; });
+
+  expect(recordMapTrailEvent).not.toHaveBeenCalled();
+});
+
+it("disconnects saved trails and reloads the atlas after unsaving from map detail", async () => {
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValueOnce(sourceSnapshot([source])).mockResolvedValueOnce(sourceSnapshot([]));
+  jest.mocked(removeSavedItem).mockResolvedValue([]);
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  await act(async () => { fireEvent.press(screen.getByTestId("detail-toggle")); });
+
+  await waitFor(() => expect(disconnectSavedItemTrails).toHaveBeenCalledWith(
+    { category: "movies", id: "source" },
+    expect.objectContaining({ userId: ownerA.id })
+  ));
+  expect(jest.mocked(disconnectSavedItemTrails).mock.invocationCallOrder[0]).toBeLessThan(
+    jest.mocked(removeSavedItem).mock.invocationCallOrder[0]
+  );
+  expect(loadMapSnapshot).toHaveBeenLastCalledWith([], ownerA.id);
 });

@@ -5,6 +5,8 @@ import type { MapEdge, MapNode } from "../../../../lib/storage/discoveryMap";
 
 let mockFlowProps: Record<string, any> = {};
 const mockSetCenter = jest.fn();
+const mockGetViewport = jest.fn(() => ({ x: 24, y: -18, zoom: 0.86 }));
+const mockSetViewport = jest.fn();
 
 jest.mock("@xyflow/react", () => {
   const React = require("react");
@@ -26,6 +28,8 @@ jest.mock("@xyflow/react", () => {
     useReactFlow: () => ({
       fitView: jest.fn(),
       setCenter: mockSetCenter,
+      getViewport: mockGetViewport,
+      setViewport: mockSetViewport,
     }),
   };
 });
@@ -54,6 +58,8 @@ describe("Saved Atlas React Flow canvas", () => {
   beforeEach(() => {
     mockFlowProps = {};
     mockSetCenter.mockClear();
+    mockGetViewport.mockClear();
+    mockSetViewport.mockClear();
   });
 
   it("keeps artwork fixed while preserving pan and zoom navigation", () => {
@@ -105,6 +111,233 @@ describe("Saved Atlas React Flow canvas", () => {
       expect.any(Number),
       expect.any(Number),
       expect.objectContaining({ zoom: 1.7 })
+    );
+  });
+
+  it("captures the overview viewport before selecting artwork can move the camera", () => {
+    const onSelect = jest.fn();
+    render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={onSelect}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+
+    act(() => {
+      mockFlowProps.onNodeClick({}, mockFlowProps.nodes[0]);
+    });
+
+    expect(mockGetViewport).toHaveBeenCalled();
+    expect(mockGetViewport.mock.invocationCallOrder[0]).toBeLessThan(
+      onSelect.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("keeps recommendations transient and restores the exact overview viewport when leaving an orbit", async () => {
+    const onFindSimilar = jest.fn(async () => [
+      {
+        category: "books" as const,
+        item: {
+          id: "story-of-your-life",
+          title: "Story of Your Life",
+          subtitle: "Ted Chiang",
+          meta: "1998",
+        },
+        reason: { label: "Shared speculative language" },
+      },
+    ]);
+    const { getByLabelText, getByText, queryByText } = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+
+    expect(mockGetViewport).toHaveBeenCalled();
+    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    await act(async () => undefined);
+    expect(onFindSimilar).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "movies:arrival" })
+    );
+    expect(getByText("Story of Your Life")).toBeTruthy();
+
+    fireEvent.press(getByLabelText("View whole atlas"));
+    expect(mockSetViewport).toHaveBeenCalledWith(
+      { x: 24, y: -18, zoom: 0.86 },
+      expect.any(Object)
+    );
+    expect(queryByText("Story of Your Life")).toBeNull();
+  });
+
+  it("keeps the orbit visible and offers retry when recommendations fail", async () => {
+    const onFindSimilar = jest.fn(async () => {
+      throw new Error("offline");
+    });
+    const { getByLabelText, getByText } = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+
+    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    await act(async () => undefined);
+    expect(getByText("Recommendations are unavailable right now.")).toBeTruthy();
+    fireEvent.press(getByLabelText("Retry recommendations"));
+    await act(async () => undefined);
+    expect(onFindSimilar).toHaveBeenCalledTimes(2);
+  });
+
+  it("reseeds from a transient recommendation only after its next orbit loads", async () => {
+    const onFindSimilar = jest.fn()
+      .mockResolvedValueOnce([{
+        category: "books" as const,
+        item: { id: "story", title: "Story of Your Life", subtitle: "Ted Chiang", meta: "1998" },
+        reason: { label: "Shared speculative language" },
+      }])
+      .mockResolvedValueOnce([{
+        category: "albums" as const,
+        item: { id: "music", title: "Music for the Orbit", subtitle: "A composer", meta: "2026" },
+        reason: { label: "Shared atmosphere" },
+      }]);
+    const { getByLabelText } = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+
+    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    await act(async () => undefined);
+    fireEvent.press(getByLabelText("Reseed from Story of Your Life"));
+    await act(async () => undefined);
+
+    expect(onFindSimilar).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "books:story" })
+    );
+    expect(getByLabelText("Find similar to Story of Your Life")).toBeTruthy();
+  });
+
+  it("discards a pending recommendation response when selection moves to another saved seed", async () => {
+    let resolveRecommendations!: (value: any[]) => void;
+    const pendingRecommendations = new Promise<any[]>((resolve) => {
+      resolveRecommendations = resolve;
+    });
+    const orbitNodes: MapNode[] = [
+      ...nodes,
+      { ...nodes[0], id: "movies:moonlight", itemId: "moonlight", title: "Moonlight" },
+    ];
+    const onFindSimilar = jest.fn(() => pendingRecommendations);
+    const view = render(
+      <SavedAtlas
+        nodes={orbitNodes}
+        edges={edges}
+        selectedId="movies:arrival"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+
+    fireEvent.press(view.getByLabelText("Find similar to Arrival"));
+    view.rerender(
+      <SavedAtlas
+        nodes={orbitNodes}
+        edges={edges}
+        selectedId="movies:moonlight"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+    await act(async () => { resolveRecommendations([{
+      category: "books",
+      item: { id: "wrong-seed", title: "Wrong seed", subtitle: "", meta: "" },
+      reason: { label: "Stale" },
+    }]); });
+
+    expect(view.getByLabelText("Find similar to Moonlight")).toBeTruthy();
+    expect(view.queryByText("Wrong seed")).toBeNull();
+  });
+
+  it("invalidates a pending orbit request when an owner or map reset clears selection", async () => {
+    let resolveRecommendations!: (value: any[]) => void;
+    const pendingRecommendations = new Promise<any[]>((resolve) => {
+      resolveRecommendations = resolve;
+    });
+    const onFindSimilar = jest.fn(() => pendingRecommendations);
+    const view = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId="movies:arrival"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+
+    fireEvent.press(view.getByLabelText("Find similar to Arrival"));
+    view.rerender(
+      <SavedAtlas
+        nodes={[]}
+        edges={[]}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+    await act(async () => { resolveRecommendations([{
+      category: "books",
+      item: { id: "stale-reset", title: "Stale reset", subtitle: "", meta: "" },
+      reason: { label: "Stale" },
+    }]); });
+
+    expect(view.queryByText("Stale reset")).toBeNull();
+  });
+
+  it("provides an explicit back action alongside keyboard escape and atlas restoration", () => {
+    const onClearSelection = jest.fn();
+    const { getByLabelText } = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        onSelect={jest.fn()}
+        onClearSelection={onClearSelection}
+        onStart={jest.fn()}
+      />
+    );
+
+    fireEvent.press(getByLabelText("Back to atlas"));
+    expect(onClearSelection).toHaveBeenCalledTimes(1);
+    expect(mockSetViewport).toHaveBeenCalledWith(
+      { x: 24, y: -18, zoom: 0.86 },
+      expect.any(Object)
     );
   });
 });

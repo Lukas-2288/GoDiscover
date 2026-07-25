@@ -8,9 +8,15 @@ import { useDiscoveryController } from "../components/discovery/useDiscoveryCont
 import { useReducedMotion } from "../components/discovery/useReducedMotion";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
 import { listSaved, type SavedItem } from "../lib/storage/saved";
-import { runSavedMutation, toggleSavedItem, removeSavedItem } from "../lib/storage/savedMutations";
+import { removeSavedItem, runSavedMutation, saveSavedItem, toggleSavedItem } from "../lib/storage/savedMutations";
 import { loadDetail, type ContentDetail } from "../lib/discovery/loadDetail";
 import { loadMapSnapshot, recordMapTrailEvent, type MapNode, type MapSnapshot } from "../lib/storage/discoveryMap";
+import { disconnectSavedItemTrails } from "../lib/storage/discoveryTrailSync";
+import { buildCulturalProfile } from "../lib/discovery/culturalProfile";
+import { findMapRecommendations } from "../lib/discovery/mapRecommendations";
+import { defaultDiscoveryProviders } from "../lib/discovery/loadDiscovery";
+import type { OrbitSeed } from "../components/web/map/SavedAtlas.web";
+import type { OrbitRecommendation } from "../components/web/map/orbitGraph";
 import type { ContentCategory, ResultItem } from "../types/content";
 import { supabase } from "../lib/supabase";
 
@@ -196,9 +202,96 @@ export default function WebHomeScreen() {
 
   const toggleDetailSave = () => {
     if (!detailSelection) return;
-    void runSavedMutation(() => toggleSavedItem(detailSelection.category, detailSelection.item))
-      .then(setSavedItems)
+    const operationOwnerId = authSession?.user.id ?? null;
+    const operationMapSequence = mapLoadSequence.current;
+    const operationIsCurrent = () =>
+      mapLoadSequence.current === operationMapSequence &&
+      activeOwnerId.current === operationOwnerId;
+    const isSaved = savedItems.some(
+      (item) => item.category === detailSelection.category && item.id === detailSelection.item.id
+    );
+    if (!isSaved) {
+      void runSavedMutation(() => toggleSavedItem(detailSelection.category, detailSelection.item))
+        .then((items) => { if (operationIsCurrent()) setSavedItems(items); })
+        .catch(() => undefined);
+      return;
+    }
+    void disconnectSavedItemTrails(
+      { category: detailSelection.category, id: detailSelection.item.id },
+      { occurredAt: Date.now(), reason: "Removed from saved atlas", userId: operationOwnerId ?? undefined }
+    )
+      .then(async () => {
+        if (!operationIsCurrent()) return;
+        const items = await removeSavedItem(detailSelection.category, detailSelection.item.id);
+        if (!operationIsCurrent()) return;
+        setSavedItems(items);
+        const snapshot = await loadMapSnapshot(items, operationOwnerId ?? undefined);
+        if (operationIsCurrent()) setMapSnapshot(snapshot);
+      })
       .catch(() => undefined);
+  };
+
+  const findOrbitRecommendations = async (seed: OrbitSeed): Promise<OrbitRecommendation[]> => {
+    const operationOwnerId = authSession?.user.id ?? null;
+    const operationMapSequence = mapLoadSequence.current;
+    const operationIsCurrent = () =>
+      mapLoadSequence.current === operationMapSequence &&
+      activeOwnerId.current === operationOwnerId;
+    const savedSeed = mapSnapshot.nodes.find((node) => node.id === seed.id);
+    const profile = savedSeed?.culturalProfile ?? buildCulturalProfile(seed.category, seed.item);
+    const result = await findMapRecommendations(
+      { category: seed.category, item: seed.item, profile },
+      { providers: defaultDiscoveryProviders }
+    );
+    if (!operationIsCurrent()) throw new Error("The atlas changed while recommendations were loading.");
+    const attemptedSources = result.sourceStatuses.filter(
+      (status) => status.status !== "not-applicable"
+    );
+    if (
+      result.recommendations.length === 0 &&
+      attemptedSources.length > 0 &&
+      attemptedSources.every((status) => status.status === "failed")
+    ) {
+      throw new Error("Every recommendation source is unavailable.");
+    }
+    return result.recommendations.slice(0, 8).map(({ category, item, reason }) => ({
+      category,
+      item,
+      reason: { label: reason.label },
+    }));
+  };
+
+  const saveOrbitRecommendation = async (
+    seed: OrbitSeed,
+    recommendation: OrbitRecommendation
+  ): Promise<void> => {
+    const operationOwnerId = authSession?.user.id ?? null;
+    const operationMapSequence = mapLoadSequence.current;
+    const operationIsCurrent = () =>
+      mapLoadSequence.current === operationMapSequence &&
+      activeOwnerId.current === operationOwnerId;
+    const alreadySaved = savedItems.some(
+      (item) => item.category === recommendation.category && item.id === recommendation.item.id
+    );
+    const nextItems = alreadySaved
+      ? savedItems
+      : await saveSavedItem(recommendation.category, recommendation.item).then((result) => {
+        if (!result.confirmed) throw new Error("The recommendation was not saved.");
+        return result.items;
+      });
+    if (!operationIsCurrent()) return;
+    if (!alreadySaved) setSavedItems(nextItems);
+    const snapshot = await recordMapTrailEvent(
+      {
+        source: { category: seed.category, id: seed.item.id },
+        target: { category: recommendation.category, id: recommendation.item.id },
+        occurredAt: Date.now(),
+        reason: recommendation.reason.label,
+      },
+      nextItems,
+      operationOwnerId ?? undefined
+    );
+    if (operationIsCurrent()) setMapSnapshot(snapshot);
   };
 
   const shareItem = async (category: ContentCategory, item: ResultItem) => {
@@ -267,6 +360,8 @@ export default function WebHomeScreen() {
               setDetailSelection(null);
             }}
             onStart={() => setSection("archive")}
+            onFindSimilar={findOrbitRecommendations}
+            onSaveRecommendation={saveOrbitRecommendation}
           />
           {panelSelection && layout !== "mobile" ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
         </View>

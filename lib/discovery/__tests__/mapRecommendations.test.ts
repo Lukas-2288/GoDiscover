@@ -121,6 +121,28 @@ describe("findMapRecommendations", () => {
     ]));
   });
 
+  it("reports every applicable provider failure without fabricating an empty-success result", async () => {
+    const offline = async (): Promise<ResultItem[]> => { throw new Error("offline"); };
+    const registry = providers({
+      movies: { similar: offline },
+      books: { filter: offline },
+      artists: { filter: offline },
+      albums: { filter: offline },
+    });
+
+    const result = await findMapRecommendations(
+      { category: "movies", item: seed, profile: { vocabularyVersion: 1, genres: ["Jazz"], styles: [], subjects: [], creators: [], era: "2010s" } },
+      { providers: registry }
+    );
+
+    expect(result.recommendations).toEqual([]);
+    expect(result.sourceStatuses.filter((status) => status.status !== "not-applicable")).toEqual([
+      { category: "movies", source: "similar", status: "failed" },
+      { category: "artists", source: "traits", status: "failed" },
+      { category: "albums", source: "traits", status: "failed" },
+    ]);
+  });
+
   it("does not call an incompatible provider filter or fabricate a shared trait label", async () => {
     const movieMatch: ResultItem = { id: "blade-runner", title: "Blade Runner", subtitle: "1982", meta: "1982" };
     const bookMatch: ResultItem = { id: "foundation", title: "Foundation", subtitle: "1951", meta: "1951" };

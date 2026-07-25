@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { DISCOVERY_MAP_STORAGE_KEY, recordMapTrailEvent } from "../discoveryMap";
+import { DISCOVERY_MAP_STORAGE_KEY, loadMapSnapshot, recordMapTrailEvent } from "../discoveryMap";
 import {
   disconnectSavedItemTrails,
   syncDiscoveryTrailEvents,
@@ -195,6 +195,34 @@ it("appends stable disconnect tombstones for every active trail attached to an u
       userId: undefined,
     },
   ]);
+});
+
+it("folds a real persisted connection into a persisted disconnect before the endpoint is removed", async () => {
+  const savedItems = [
+    { id: "arrival", category: "movies" as const, title: "Arrival", subtitle: "2016", meta: "Science fiction", savedAt: 10 },
+    { id: "kindred", category: "books" as const, title: "Kindred", subtitle: "Octavia E. Butler", meta: "1979", savedAt: 9 },
+  ];
+  await recordMapTrailEvent(
+    {
+      source: { category: "movies", id: "arrival" },
+      target: { category: "books", id: "kindred" },
+      occurredAt: 10,
+    },
+    savedItems
+  );
+  await disconnectSavedItemTrails(
+    { category: "movies", id: "arrival" },
+    { occurredAt: 20, reason: "unsaved" }
+  );
+
+  await expect(loadMapSnapshot([savedItems[1]])).resolves.toMatchObject({
+    edges: [],
+    events: [expect.objectContaining({ action: "disconnect", relationshipId: "movies:arrival->books:kindred" })],
+  });
+  await expect(AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY).then((raw) => raw ? JSON.parse(raw) : null)).resolves.toEqual({
+    version: 2,
+    events: [expect.objectContaining({ action: "disconnect", relationshipId: "movies:arrival->books:kindred" })],
+  });
 });
 
 it("keeps an offline event queued when its cloud read fails", async () => {

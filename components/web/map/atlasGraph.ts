@@ -17,6 +17,8 @@ export type AtlasArtworkData = {
   showTitle: boolean;
   showMeta: boolean;
   summary?: string;
+  faded?: boolean;
+  transient?: boolean;
 };
 
 export type AtlasFlowNode = {
@@ -53,6 +55,7 @@ export type AtlasFlowEdge = {
     fill: string;
     fillOpacity: number;
   };
+  animated?: boolean;
 };
 
 const CANVAS_WIDTH = 1_600;
@@ -122,12 +125,20 @@ export function buildAtlasFlowNodes(
   {
     detailMode,
     selectedId,
+    positions,
+    fadedNodeIds = [],
+    transientNodeIds = [],
   }: {
     detailMode: ZoomDetailMode;
     selectedId: string | null;
+    positions?: Readonly<Record<string, { x: number; y: number }>>;
+    fadedNodeIds?: readonly string[];
+    transientNodeIds?: readonly string[];
   }
 ): AtlasFlowNode[] {
-  const positions = createAtlasLayout(nodes, edges);
+  const resolvedPositions = positions ?? createAtlasLayout(nodes, edges);
+  const faded = new Set(fadedNodeIds);
+  const transient = new Set(transientNodeIds);
   const detail = resolveZoomDetail(
     detailMode === "far" ? 0.5 : detailMode === "medium" ? 1 : 1.75,
     nodes
@@ -146,7 +157,7 @@ export function buildAtlasFlowNodes(
     const dimensions = artworkDimensions(node.category);
     const selected = node.id === selectedId;
     const representative = representatives.has(node.id);
-    const position = positions[node.id] ?? { x: node.x, y: node.y };
+    const position = resolvedPositions[node.id] ?? { x: node.x, y: node.y };
     return {
       id: node.id,
       type: "artwork",
@@ -174,6 +185,8 @@ export function buildAtlasFlowNodes(
           detailMode === "far"
             ? categorySummary(node.category, categoryCounts[node.category])
             : undefined,
+        faded: faded.has(node.id),
+        transient: transient.has(node.id),
       },
     };
   });
@@ -181,10 +194,13 @@ export function buildAtlasFlowNodes(
 
 export function buildAtlasFlowEdges(
   edges: readonly MapEdge[],
-  selectedId: string | null
+  selectedId: string | null,
+  options: { transientEdgeIds?: readonly string[] } = {}
 ): AtlasFlowEdge[] {
+  const transient = new Set(options.transientEdgeIds);
   return edges.map((edge, index) => {
-    const focused =
+    const suggested = transient.has(edge.id);
+    const focused = suggested ||
       selectedId !== null &&
       (edge.source === selectedId || edge.target === selectedId);
     return {
@@ -195,12 +211,14 @@ export function buildAtlasFlowEdges(
       focusable: false,
       selectable: false,
       style: {
-        stroke: focused
+        stroke: suggested
+          ? "#D7F36A"
+          : focused
           ? index % 2 === 0
             ? "#7C5CFC"
             : "#D7F36A"
           : "rgba(244, 241, 234, 0.28)",
-        strokeWidth: focused ? 1.6 : 0.8,
+        strokeWidth: suggested ? 1.25 : focused ? 1.6 : 0.8,
       },
       ...(focused && edge.reason
         ? {
@@ -216,6 +234,7 @@ export function buildAtlasFlowEdges(
             },
           }
         : {}),
+      ...(suggested ? { animated: false } : {}),
     };
   });
 }
