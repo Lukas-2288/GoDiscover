@@ -49,6 +49,22 @@ export type UseDiscoveryControllerOptions = {
 };
 
 export type DiscoveryDecision = "save" | "skip";
+export type DiscoveryCommitResult =
+  | {
+      decision: "save";
+      confirmed: true;
+      created: boolean;
+      items: SavedItem[];
+    }
+  | {
+      decision: DiscoveryDecision;
+      confirmed: false;
+      reason: "failed" | "noop" | "unconfirmed" | "unmounted";
+    }
+  | {
+      decision: "skip";
+      confirmed: true;
+    };
 
 const DEFAULT_DEPENDENCIES: DiscoveryControllerDependencies = {
   load: loadDiscovery,
@@ -336,11 +352,16 @@ export function useDiscoveryController(
   }, [runRequest]);
 
   const commit = useCallback(
-    async (item: ResultItem, decision: DiscoveryDecision): Promise<void> => {
+    async (
+      item: ResultItem,
+      decision: DiscoveryDecision
+    ): Promise<DiscoveryCommitResult> => {
       const category = stateRef.current.selected;
-      if (!category) return;
+      if (!category) return { decision, confirmed: false, reason: "noop" };
       const session = stateRef.current.sessions[category];
-      if (activeDeckItem(session.deck)?.id !== item.id) return;
+      if (activeDeckItem(session.deck)?.id !== item.id) {
+        return { decision, confirmed: false, reason: "noop" };
+      }
 
       const safeItem = copyItem(item);
 
@@ -354,7 +375,9 @@ export function useDiscoveryController(
         if (dismissed) {
           setAnnouncement(nextCardAnnouncement("Not for me.", nextItem));
         }
-        return;
+        return dismissed
+          ? { decision: "skip", confirmed: true }
+          : { decision: "skip", confirmed: false, reason: "noop" };
       }
 
       const operation: SaveOperation = {
@@ -363,7 +386,9 @@ export function useDiscoveryController(
         item: safeItem,
       };
       const dismissed = dispatch({ type: "saveStarted", operation });
-      if (!dismissed) return;
+      if (!dismissed) {
+        return { decision: "save", confirmed: false, reason: "noop" };
+      }
 
       let saveResult: SaveSavedItemResult;
       try {
@@ -377,14 +402,20 @@ export function useDiscoveryController(
           clearUndoTimer();
           dispatch({ type: "saveFailed", operationId: operation.id, message: SAVE_ERROR });
         }
-        return;
+        return { decision: "save", confirmed: false, reason: "failed" };
       }
 
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        return { decision: "save", confirmed: false, reason: "unmounted" };
+      }
       if (!saveResult.confirmed) {
         clearUndoTimer();
         dispatch({ type: "saveFailed", operationId: operation.id, message: SAVE_ERROR });
-        return;
+        return {
+          decision: "save",
+          confirmed: false,
+          reason: "unconfirmed",
+        };
       }
 
       dispatch({
@@ -402,6 +433,12 @@ export function useDiscoveryController(
       } else {
         clearUndoTimer();
       }
+      return {
+        decision: "save",
+        confirmed: true,
+        created: saveResult.created,
+        items: saveResult.items,
+      };
     },
     [clearUndoTimer, dispatch, startUndoTimer]
   );

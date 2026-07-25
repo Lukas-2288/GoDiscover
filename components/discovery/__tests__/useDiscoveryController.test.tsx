@@ -2,7 +2,10 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import type { ContentCategory, ResultItem } from "../../../types/content";
 import type { DiscoveryLoadInput } from "../../../lib/discovery/types";
 import type { SavedItem } from "../../../lib/storage/saved";
-import { useDiscoveryController } from "../useDiscoveryController";
+import {
+  useDiscoveryController,
+  type DiscoveryCommitResult,
+} from "../useDiscoveryController";
 
 jest.mock("../../../lib/storage/saved", () => ({
   listSaved: jest.fn(),
@@ -97,7 +100,7 @@ it("advances immediately, completes Save, and restores on Undo", async () => {
   );
 
   act(() => result.current.selectCategory("movies"));
-  let pendingSave!: Promise<void>;
+  let pendingSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingSave = result.current.commit(movie, "save");
   });
@@ -151,6 +154,60 @@ it("does not offer Undo when Save finds the item was already stored", async () =
     await result.current.undo();
   });
   expect(removeSaved).not.toHaveBeenCalled();
+});
+
+it("returns the authoritative saved result when a deck save is confirmed", async () => {
+  const authoritativeItems = [savedItem(movie)];
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie] },
+      dependencies: {
+        load: jest.fn(),
+        addSaved: jest.fn(async () => authoritativeItems),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+  act(() => result.current.selectCategory("movies"));
+
+  let commitResult: unknown;
+  await act(async () => {
+    commitResult = await result.current.commit(movie, "save");
+  });
+
+  expect(commitResult).toEqual({
+    decision: "save",
+    confirmed: true,
+    created: true,
+    items: authoritativeItems,
+  });
+});
+
+it("returns an explicit failed result when a deck save is rejected", async () => {
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie] },
+      dependencies: {
+        load: jest.fn(),
+        addSaved: jest.fn(async () => {
+          throw new Error("offline");
+        }),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+  act(() => result.current.selectCategory("movies"));
+
+  let commitResult: unknown;
+  await act(async () => {
+    commitResult = await result.current.commit(movie, "save");
+  });
+
+  expect(commitResult).toEqual({
+    decision: "save",
+    confirmed: false,
+    reason: "failed",
+  });
 });
 
 it("replaces an older Undo notice when a newer Save fails", async () => {
@@ -453,7 +510,7 @@ it("processes a Save started during Undo in storage invocation order", async () 
   act(() => {
     pendingUndo = result.current.undo();
   });
-  let pendingSecondSave!: Promise<void>;
+  let pendingSecondSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingSecondSave = result.current.commit(secondMovie, "save");
   });
@@ -502,7 +559,7 @@ it("restores the exact Save being undone after a newer Save confirms", async () 
     await result.current.commit(movie, "save");
   });
 
-  let pendingSecondSave!: Promise<void>;
+  let pendingSecondSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingSecondSave = result.current.commit(secondMovie, "save");
   });
@@ -554,7 +611,7 @@ it("makes a rejected older Undo retryable after a newer Save confirms", async ()
     await result.current.commit(movie, "save");
   });
 
-  let pendingSecondSave!: Promise<void>;
+  let pendingSecondSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingSecondSave = result.current.commit(secondMovie, "save");
   });
@@ -618,7 +675,7 @@ it("retries an unconfirmed older Undo after a newer Save confirms", async () => 
     await result.current.commit(movie, "save");
   });
 
-  let pendingSecondSave!: Promise<void>;
+  let pendingSecondSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingSecondSave = result.current.commit(secondMovie, "save");
   });
@@ -685,11 +742,11 @@ it("serializes two Saves that would otherwise resolve out of order", async () =>
   );
 
   act(() => result.current.selectCategory("movies"));
-  let pendingFirstSave!: Promise<void>;
+  let pendingFirstSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingFirstSave = result.current.commit(movie, "save");
   });
-  let pendingSecondSave!: Promise<void>;
+  let pendingSecondSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingSecondSave = result.current.commit(secondMovie, "save");
   });
@@ -735,7 +792,7 @@ it("announces the current deck card after a deferred Save confirms", async () =>
   );
 
   act(() => result.current.selectCategory("movies"));
-  let pendingSave!: Promise<void>;
+  let pendingSave!: Promise<DiscoveryCommitResult>;
   act(() => {
     pendingSave = result.current.commit(movie, "save");
   });

@@ -175,6 +175,17 @@ function uniqueEvents(events: readonly TrailMutationEvent[]): TrailMutationEvent
   return [...byId.values()];
 }
 
+let eventStoreTail: Promise<void> = Promise.resolve();
+
+function withEventStoreLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = eventStoreTail.then(operation, operation);
+  eventStoreTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 function newestEventsByRelationship(
   events: readonly TrailMutationEvent[]
 ): TrailMutationEvent[] {
@@ -247,21 +258,32 @@ async function recoverMalformedStoredEvents(raw: string): Promise<void> {
 }
 
 export async function readDiscoveryTrailEvents(): Promise<TrailMutationEvent[]> {
-  return readStoredEvents();
+  return withEventStoreLock(readStoredEvents);
 }
 
 export async function writeDiscoveryTrailEvents(
   events: readonly TrailMutationEvent[]
 ): Promise<void> {
-  await writeStoredEvents(events);
+  await withEventStoreLock(() => writeStoredEvents(events));
 }
 
 export async function appendDiscoveryTrailEvents(
   events: readonly TrailMutationEvent[]
 ): Promise<TrailMutationEvent[]> {
-  const next = uniqueEvents([...await readStoredEvents(), ...events]);
-  await writeStoredEvents(next);
-  return next;
+  return updateDiscoveryTrailEvents((stored) => [...stored, ...events]);
+}
+
+export async function updateDiscoveryTrailEvents(
+  update: (
+    events: readonly TrailMutationEvent[]
+  ) => readonly TrailMutationEvent[]
+): Promise<TrailMutationEvent[]> {
+  return withEventStoreLock(async () => {
+    const stored = await readStoredEvents();
+    const next = uniqueEvents(update(stored));
+    await writeStoredEvents(next);
+    return next;
+  });
 }
 
 export function filterTrailMutationEventsForOwner(
@@ -272,17 +294,6 @@ export function filterTrailMutationEventsForOwner(
     (event) =>
       event.origin === "anonymous" ||
       (event.origin === "account" && event.userId === activeUserId)
-  );
-}
-
-function pruneEvents(
-  events: readonly TrailMutationEvent[],
-  nodeIds: ReadonlySet<string>
-): TrailMutationEvent[] {
-  return events.filter(
-    (event) =>
-      event.action === "disconnect" ||
-      (nodeIds.has(event.source) && nodeIds.has(event.target))
   );
 }
 
@@ -328,16 +339,12 @@ export async function loadMapSnapshot(
 ): Promise<MapSnapshot> {
   const nodes = deriveMapNodes(savedItems);
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const storedEvents = await readStoredEvents();
+  const storedEvents = await readDiscoveryTrailEvents();
   const ownedEvents = filterTrailMutationEventsForOwner(storedEvents, activeUserId);
-  const events = pruneEvents(ownedEvents, nodeIds);
-  if (events.length !== ownedEvents.length) {
-    await writeStoredEvents([
-      ...storedEvents.filter((event) => !ownedEvents.includes(event)),
-      ...events,
-    ]);
-  }
-  return { version: 2, nodes, edges: foldTrailMutationEvents(events), events };
+  const edges = foldTrailMutationEvents(ownedEvents).filter(
+    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+  );
+  return { version: 2, nodes, edges, events: ownedEvents };
 }
 
 export async function recordMapTrailEvent(
@@ -349,30 +356,28 @@ export async function recordMapTrailEvent(
   const nodeIds = new Set(nodes.map((node) => node.id));
   const source = nodeId(event.source);
   const target = nodeId(event.target);
-  const allStoredEvents = await readStoredEvents();
-  const ownedEvents = filterTrailMutationEventsForOwner(allStoredEvents, activeUserId);
-  let events = pruneEvents(ownedEvents, nodeIds);
-  if (source !== target && nodeIds.has(source) && nodeIds.has(target)) {
-    const relationshipId = `${source}->${target}`;
-    const trailEvent: TrailMutationEvent = {
-      id: `connect:${relationshipId}:${event.occurredAt}`,
-      relationshipId,
-      action: "connect",
-      source,
-      target,
-      occurredAt: event.occurredAt,
-      origin: activeUserId ? "account" : "anonymous",
-      userId: activeUserId,
-      reason: event.reason,
-      sessionId: event.sessionId,
-    };
-    events = uniqueEvents([...events, trailEvent]);
-  }
-
-  await writeStoredEvents([
-    ...allStoredEvents.filter((stored) => !ownedEvents.includes(stored)),
-    ...events,
-  ]);
-
-  return { version: 2, nodes, edges: foldTrailMutationEvents(events), events };
+  const relationshipId = `${source}->${target}`;
+  const trailEvent: TrailMutationEvent | null =
+    source !== target && nodeIds.has(source) && nodeIds.has(target)
+      ? {
+          id: `connect:${relationshipId}:${event.occurredAt}`,
+          relationshipId,
+          action: "connect",
+          source,
+          target,
+          occurredAt: event.occurredAt,
+          origin: activeUserId ? "account" : "anonymous",
+          userId: activeUserId,
+          reason: event.reason,
+          sessionId: event.sessionId,
+        }
+      : null;
+  const allEvents = trailEvent
+    ? await appendDiscoveryTrailEvents([trailEvent])
+    : await readDiscoveryTrailEvents();
+  const events = filterTrailMutationEventsForOwner(allEvents, activeUserId);
+  const edges = foldTrailMutationEvents(events).filter(
+    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+  );
+  return { version: 2, nodes, edges, events };
 }

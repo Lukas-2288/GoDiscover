@@ -5,6 +5,7 @@ import {
   DISCOVERY_MAP_MALFORMED_STORAGE_KEY,
   DISCOVERY_MAP_STORAGE_KEY,
   loadMapSnapshot,
+  readDiscoveryTrailEvents,
   recordMapTrailEvent,
 } from "../discoveryMap";
 
@@ -210,17 +211,20 @@ it("keeps a persisted disconnect after its target is removed and saved again", a
 
   await expect(loadMapSnapshot([arrival])).resolves.toMatchObject({
     edges: [],
-    events: [disconnectEvent],
+    events: [connectEvent, disconnectEvent],
   });
   await expect(loadMapSnapshot([arrival, kindred])).resolves.toMatchObject({
     edges: [],
-    events: [disconnectEvent],
+    events: [connectEvent, disconnectEvent],
   });
   await expect(
     AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY).then((raw) =>
       raw ? JSON.parse(raw) : null
     )
-  ).resolves.toEqual({ version: 2, events: [disconnectEvent] });
+  ).resolves.toEqual({
+    version: 2,
+    events: [connectEvent, disconnectEvent],
+  });
 });
 
 it("records an on-demand exploration edge in versioned storage", async () => {
@@ -284,7 +288,7 @@ it("keeps earlier exploration edges when a new trail event is recorded", async (
   ]);
 });
 
-it("prunes persisted edges when either saved discovery disappears", async () => {
+it("hides trails with missing endpoints without pruning append-only history", async () => {
   await recordMapTrailEvent(
     {
       source: { category: "movies", id: "arrival" },
@@ -303,8 +307,48 @@ it("prunes persisted edges when either saved discovery disappears", async () => 
     )
   ).resolves.toEqual({
     version: 2,
-    events: [],
+    events: [
+      {
+        id: "connect:movies:arrival->books:kindred:42",
+        relationshipId: "movies:arrival->books:kindred",
+        action: "connect",
+        source: "movies:arrival",
+        target: "books:kindred",
+        occurredAt: 42,
+        origin: "anonymous",
+      },
+    ],
   });
+});
+
+it("serializes concurrent connect mutations without losing either event", async () => {
+  await Promise.all([
+    recordMapTrailEvent(
+      {
+        source: { category: "movies", id: "arrival" },
+        target: { category: "books", id: "kindred" },
+        occurredAt: 42,
+      },
+      [arrival, kindred, moonlight]
+    ),
+    recordMapTrailEvent(
+      {
+        source: { category: "books", id: "kindred" },
+        target: { category: "movies", id: "moonlight" },
+        occurredAt: 43,
+      },
+      [arrival, kindred, moonlight]
+    ),
+  ]);
+
+  await expect(
+    readDiscoveryTrailEvents().then((events) =>
+      events.map((event) => event.relationshipId)
+    )
+  ).resolves.toEqual([
+    "movies:arrival->books:kindred",
+    "books:kindred->movies:moonlight",
+  ]);
 });
 
 it("falls back to a clean versioned edge store when persistence is malformed", async () => {

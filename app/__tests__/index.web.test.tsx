@@ -9,11 +9,15 @@ import {
 
 import type { MapSnapshot } from "../../lib/storage/discoveryMap";
 import type { SavedItem } from "../../lib/storage/saved";
+import type { DiscoveryCommitResult } from "../../components/discovery/useDiscoveryController";
 
 let authStateChangeHandler:
   | ((event: string, session: unknown) => void)
   | null = null;
-const mockDiscoveryCommit = jest.fn(async () => undefined);
+const mockDiscoveryCommit = jest.fn<
+  Promise<DiscoveryCommitResult>,
+  [unknown, "save" | "skip"]
+>();
 let mockLayout: "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop" = "desktop";
 let mockReducedMotion = false;
 let mockSavedAtlasProps: Record<string, unknown> = {};
@@ -207,7 +211,7 @@ jest.mock("../../lib/storage/recents", () => ({
 }));
 
 jest.mock("../../lib/storage/saved", () => ({
-  listSaved: jest.fn(),
+  listSavedForOwner: jest.fn(),
 }));
 
 jest.mock("../../lib/storage/savedMutations", () => ({
@@ -232,6 +236,7 @@ jest.mock("../../lib/storage/discoveryMap", () => ({
 
 jest.mock("../../lib/storage/discoveryTrailSync", () => ({
   disconnectSavedItemTrails: jest.fn(async () => []),
+  syncDiscoveryTrailEvents: jest.fn(async () => []),
 }));
 
 jest.mock("../../lib/discovery/mapRecommendations", () => ({
@@ -259,9 +264,12 @@ import {
   loadMapSnapshot,
   recordMapTrailEvent,
 } from "../../lib/storage/discoveryMap";
-import { listSaved } from "../../lib/storage/saved";
+import { listSavedForOwner } from "../../lib/storage/saved";
 import { removeSavedItem, saveSavedItem } from "../../lib/storage/savedMutations";
-import { disconnectSavedItemTrails } from "../../lib/storage/discoveryTrailSync";
+import {
+  disconnectSavedItemTrails,
+  syncDiscoveryTrailEvents,
+} from "../../lib/storage/discoveryTrailSync";
 import { findMapRecommendations } from "../../lib/discovery/mapRecommendations";
 import { supabase } from "../../lib/supabase";
 import WebHomeScreen from "../index.web";
@@ -349,8 +357,12 @@ beforeEach(() => {
   mockReducedMotion = false;
   mockSavedAtlasProps = {};
   mockWebHydrated = true;
-  mockDiscoveryCommit.mockReset().mockResolvedValue(undefined);
-  jest.mocked(listSaved).mockReset();
+  mockDiscoveryCommit.mockReset().mockResolvedValue({
+    decision: "save",
+    confirmed: false,
+    reason: "noop",
+  });
+  jest.mocked(listSavedForOwner).mockReset();
   jest.mocked(loadMapSnapshot).mockReset().mockResolvedValue({
     version: 1,
     nodes: [],
@@ -360,6 +372,7 @@ beforeEach(() => {
   jest.mocked(removeSavedItem).mockReset();
   jest.mocked(saveSavedItem).mockReset();
   jest.mocked(disconnectSavedItemTrails).mockReset().mockResolvedValue([]);
+  jest.mocked(syncDiscoveryTrailEvents).mockReset().mockResolvedValue([]);
   jest.mocked(findMapRecommendations).mockReset();
   jest.mocked(supabase.auth.getSession).mockReset();
 });
@@ -367,7 +380,7 @@ beforeEach(() => {
 it("keeps the responsive web application out of the hydration tree until client effects run", () => {
   mockWebHydrated = false;
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: null } } as never);
-  jest.mocked(listSaved).mockResolvedValue([]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([]);
 
   render(<WebHomeScreen />);
 
@@ -379,7 +392,7 @@ it("hands the resolved web layout and motion preference to the web-only Saved At
   mockLayout = "tabletPortrait";
   mockReducedMotion = true;
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: null } } as never);
-  jest.mocked(listSaved).mockResolvedValue([]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([]);
 
   render(<WebHomeScreen />);
   await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([], undefined));
@@ -393,6 +406,25 @@ it("hands the resolved web layout and motion preference to the web-only Saved At
   );
 });
 
+it("synchronizes the signed-in owner's trail before building the first map snapshot", async () => {
+  const items = [saved(ownerA.id)];
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest.mocked(listSavedForOwner).mockResolvedValue(items);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(snapshot(ownerA));
+
+  render(<WebHomeScreen />);
+
+  await waitFor(() =>
+    expect(loadMapSnapshot).toHaveBeenCalledWith(items, ownerA.id)
+  );
+  expect(syncDiscoveryTrailEvents).toHaveBeenCalledWith(ownerA.id);
+  expect(
+    jest.mocked(syncDiscoveryTrailEvents).mock.invocationCallOrder[0]
+  ).toBeLessThan(jest.mocked(loadMapSnapshot).mock.invocationCallOrder[0]);
+});
+
 it.each([
   { layout: "tabletPortrait" as const, presentation: "drawer" },
   { layout: "tabletLandscape" as const, presentation: "rail" },
@@ -402,7 +434,7 @@ it.each([
   mockLayout = layout;
   const source = sourceItem();
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
 
   render(<WebHomeScreen />);
@@ -428,7 +460,7 @@ it.each(["tabletPortrait", "mobile"] as const)(
     mockLayout = layout;
     const source = sourceItem();
     jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-    jest.mocked(listSaved).mockResolvedValue([source]);
+    jest.mocked(listSavedForOwner).mockResolvedValue([source]);
     jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
     jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
 
@@ -447,7 +479,7 @@ it("keeps a failed mobile atlas orbit retryable without leaving the atlas", asyn
   mockLayout = "mobile";
   const source = sourceItem();
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations).mockRejectedValue(new Error("offline"));
 
@@ -469,7 +501,7 @@ it("preserves the exact responsive orbit in the sheet and map while refresh fail
   const source = sourceItem();
   const failedRefresh = deferred<never>();
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations)
     .mockResolvedValueOnce(orbitResult("movies", "candidate", "Candidate") as never)
@@ -505,7 +537,7 @@ it("previews and skips a mobile recommendation without mutating persistence", as
   mockLayout = "mobile";
   const source = sourceItem();
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
 
@@ -537,7 +569,7 @@ it("saves a mobile recommendation through the guarded atlas persistence path", a
   const candidate: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
   const items = [source, candidate];
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot)
     .mockResolvedValueOnce(sourceSnapshot([source]))
     .mockResolvedValue(sourceSnapshot(items));
@@ -574,7 +606,7 @@ it("reseeds and focuses a portrait orbit while capping replacement results at ei
     reason: { label: `Connection ${index}` },
   }));
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations)
     .mockResolvedValueOnce(orbitResult("movies", "candidate", "Candidate") as never)
@@ -632,7 +664,7 @@ it.each([
       data: { session: session(previousOwner) },
     } as never);
     jest
-      .mocked(listSaved)
+      .mocked(listSavedForOwner)
       .mockResolvedValueOnce(previousItems)
       .mockReturnValueOnce(pendingRefresh.promise);
 
@@ -649,7 +681,7 @@ it.each([
     await act(async () => {
       authStateChangeHandler?.(event, session(nextOwner));
     });
-    await waitFor(() => expect(listSaved).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listSavedForOwner).toHaveBeenCalledTimes(2));
 
     expect(loadMapSnapshot).not.toHaveBeenCalled();
 
@@ -674,7 +706,7 @@ it("keeps same-owner hydration valid until that owner's refresh resolves", async
     data: { session: session(ownerA) },
   } as never);
   jest
-    .mocked(listSaved)
+    .mocked(listSavedForOwner)
     .mockResolvedValueOnce(currentItems)
     .mockReturnValueOnce(pendingRefresh.promise);
 
@@ -688,7 +720,7 @@ it("keeps same-owner hydration valid until that owner's refresh resolves", async
   await act(async () => {
     authStateChangeHandler?.("TOKEN_REFRESHED", session(ownerA));
   });
-  await waitFor(() => expect(listSaved).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(listSavedForOwner).toHaveBeenCalledTimes(2));
   expect(loadMapSnapshot).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -711,7 +743,7 @@ it("clears owner A immediately and stays empty when owner B map loading fails be
     data: { session: session(ownerA) },
   } as never);
   jest
-    .mocked(listSaved)
+    .mocked(listSavedForOwner)
     .mockResolvedValueOnce([saved(ownerA.id)])
     .mockReturnValueOnce(ownerBRefresh.promise)
     .mockResolvedValueOnce([saved(`${ownerB.id}-retry`)]);
@@ -751,7 +783,7 @@ it("keeps owner B visible when owner A's older map load resolves last", async ()
     data: { session: session(ownerA) },
   } as never);
   jest
-    .mocked(listSaved)
+    .mocked(listSavedForOwner)
     .mockResolvedValueOnce([saved(ownerA.id)])
     .mockResolvedValueOnce([saved(ownerB.id)]);
   jest
@@ -784,12 +816,19 @@ it("keeps owner B visible when owner A's older map load resolves last", async ()
 
 it("keeps owner B visible when owner A's older trail mutation resolves last", async () => {
   const ownerATrailMutation = deferred<MapSnapshot>();
+  const ownerAItems = [saved(ownerA.id), saved("active-discovery")];
 
+  mockDiscoveryCommit.mockResolvedValueOnce({
+    decision: "save",
+    confirmed: true,
+    created: true,
+    items: ownerAItems,
+  });
   jest.mocked(supabase.auth.getSession).mockResolvedValue({
     data: { session: session(ownerA) },
   } as never);
   jest
-    .mocked(listSaved)
+    .mocked(listSavedForOwner)
     .mockResolvedValueOnce([saved(ownerA.id)])
     .mockResolvedValueOnce([saved(ownerB.id)]);
   jest
@@ -827,7 +866,7 @@ it("keeps owner B visible when owner A's older trail mutation resolves last", as
 });
 
 it("does not record an owner A trail after its pending commit crosses an A to B to A cycle", async () => {
-  const pendingCommit = deferred<undefined>();
+  const pendingCommit = deferred<DiscoveryCommitResult>();
   const rehydratedOwnerASnapshot: MapSnapshot = {
     ...snapshot(ownerA),
     nodes: [
@@ -844,7 +883,7 @@ it("does not record an owner A trail after its pending commit crosses an A to B 
     data: { session: session(ownerA) },
   } as never);
   jest
-    .mocked(listSaved)
+    .mocked(listSavedForOwner)
     .mockResolvedValueOnce([saved(ownerA.id)])
     .mockResolvedValueOnce([saved(ownerB.id)])
     .mockResolvedValueOnce([saved(`${ownerA.id}-rehydrated`)]);
@@ -878,7 +917,11 @@ it("does not record an owner A trail after its pending commit crosses an A to B 
   );
 
   await act(async () => {
-    pendingCommit.resolve(undefined);
+    pendingCommit.resolve({
+      decision: "save",
+      confirmed: false,
+      reason: "noop",
+    });
     await pendingCommit.promise;
   });
 
@@ -889,13 +932,13 @@ it("does not record an owner A trail after its pending commit crosses an A to B 
 });
 
 it("does not record a trail after unmounting while its discovery commit is pending", async () => {
-  const pendingCommit = deferred<undefined>();
+  const pendingCommit = deferred<DiscoveryCommitResult>();
 
   mockDiscoveryCommit.mockReturnValueOnce(pendingCommit.promise);
   jest.mocked(supabase.auth.getSession).mockResolvedValue({
     data: { session: session(ownerA) },
   } as never);
-  jest.mocked(listSaved).mockResolvedValueOnce([saved(ownerA.id)]);
+  jest.mocked(listSavedForOwner).mockResolvedValueOnce([saved(ownerA.id)]);
   jest.mocked(loadMapSnapshot).mockResolvedValueOnce(snapshot(ownerA));
   jest.mocked(recordMapTrailEvent).mockResolvedValueOnce(snapshot(ownerA));
 
@@ -908,15 +951,25 @@ it("does not record a trail after unmounting while its discovery commit is pendi
   view.unmount();
 
   await act(async () => {
-    pendingCommit.resolve(undefined);
+    pendingCommit.resolve({
+      decision: "save",
+      confirmed: false,
+      reason: "noop",
+    });
     await pendingCommit.promise;
   });
 
   expect(recordMapTrailEvent).not.toHaveBeenCalled();
 });
 
-it("applies a deferred trail mutation snapshot while its owner and map generation remain current", async () => {
-  const pendingCommit = deferred<undefined>();
+it("reloads the synchronized trail snapshot while its owner and map generation remain current", async () => {
+  const ownerAItems = [saved(ownerA.id), saved("active-discovery")];
+  const pendingCommit = deferred<{
+    decision: "save";
+    confirmed: true;
+    created: true;
+    items: SavedItem[];
+  }>();
   const ownerATrailSnapshot: MapSnapshot = {
     ...snapshot(ownerA),
     nodes: [
@@ -932,8 +985,11 @@ it("applies a deferred trail mutation snapshot while its owner and map generatio
   jest.mocked(supabase.auth.getSession).mockResolvedValue({
     data: { session: session(ownerA) },
   } as never);
-  jest.mocked(listSaved).mockResolvedValueOnce([saved(ownerA.id)]);
-  jest.mocked(loadMapSnapshot).mockResolvedValueOnce(snapshot(ownerA));
+  jest.mocked(listSavedForOwner).mockResolvedValueOnce([saved(ownerA.id)]);
+  jest
+    .mocked(loadMapSnapshot)
+    .mockResolvedValueOnce(snapshot(ownerA))
+    .mockResolvedValueOnce(ownerATrailSnapshot);
   jest
     .mocked(recordMapTrailEvent)
     .mockResolvedValueOnce(ownerATrailSnapshot);
@@ -946,7 +1002,12 @@ it("applies a deferred trail mutation snapshot while its owner and map generatio
   expect(recordMapTrailEvent).not.toHaveBeenCalled();
 
   await act(async () => {
-    pendingCommit.resolve(undefined);
+    pendingCommit.resolve({
+      decision: "save",
+      confirmed: true,
+      created: true,
+      items: ownerAItems,
+    });
     await pendingCommit.promise;
   });
   openAtlas();
@@ -1003,7 +1064,7 @@ it("persists a new orbit recommendation before recording its honest connecting t
   const candidate: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
   const items = [source, candidate];
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue(source ? [source] : []);
+  jest.mocked(listSavedForOwner).mockResolvedValue(source ? [source] : []);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
   jest.mocked(saveSavedItem).mockResolvedValue({ items, confirmed: true, created: true });
@@ -1033,7 +1094,7 @@ it("turns all actual recommendation-provider failures into a retryable orbit fai
   const source = sourceItem();
   const unavailable = async (): Promise<never[]> => { throw new Error("offline"); };
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations).mockImplementation(async (seed) => {
     const actual = jest.requireActual("../../lib/discovery/mapRecommendations") as typeof import("../../lib/discovery/mapRecommendations");
@@ -1061,7 +1122,7 @@ it("records only a relationship when an orbit candidate is already saved", async
   const existing: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
   const items = [source, existing];
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue(items);
+  jest.mocked(listSavedForOwner).mockResolvedValue(items);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot(items));
   jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
   jest.mocked(recordMapTrailEvent).mockResolvedValue(sourceSnapshot(items));
@@ -1083,7 +1144,7 @@ it("records only a relationship when an orbit candidate is already saved", async
 it("does not create a trail when saving a new orbit recommendation is unconfirmed", async () => {
   const source = sourceItem();
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
   jest.mocked(saveSavedItem).mockResolvedValue({ items: [source], confirmed: false, created: true });
@@ -1103,7 +1164,7 @@ it("drops a pending orbit save when ownership changes before persistence complet
   const candidate: SavedItem = { ...source, id: "candidate", title: "Candidate", savedAt: 2 };
   const pendingSave = deferred<{ items: SavedItem[]; confirmed: boolean; created: boolean }>();
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValueOnce([source]).mockResolvedValueOnce([saved(ownerB.id)]);
+  jest.mocked(listSavedForOwner).mockResolvedValueOnce([source]).mockResolvedValueOnce([saved(ownerB.id)]);
   jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
   jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
   jest.mocked(saveSavedItem).mockReturnValue(pendingSave.promise);
@@ -1119,10 +1180,10 @@ it("drops a pending orbit save when ownership changes before persistence complet
   expect(recordMapTrailEvent).not.toHaveBeenCalled();
 });
 
-it("disconnects saved trails and reloads the atlas after unsaving from map detail", async () => {
+it("disconnects and synchronizes trails only after authoritative unsave confirmation", async () => {
   const source = sourceItem();
   jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
-  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
   jest.mocked(loadMapSnapshot).mockResolvedValueOnce(sourceSnapshot([source])).mockResolvedValueOnce(sourceSnapshot([]));
   jest.mocked(removeSavedItem).mockResolvedValue([]);
 
@@ -1136,8 +1197,34 @@ it("disconnects saved trails and reloads the atlas after unsaving from map detai
     { category: "movies", id: "source" },
     expect.objectContaining({ userId: ownerA.id })
   ));
+  expect(jest.mocked(removeSavedItem).mock.invocationCallOrder[0]).toBeLessThan(
+    jest.mocked(disconnectSavedItemTrails).mock.invocationCallOrder[0]
+  );
   expect(jest.mocked(disconnectSavedItemTrails).mock.invocationCallOrder[0]).toBeLessThan(
-    jest.mocked(removeSavedItem).mock.invocationCallOrder[0]
+    jest.mocked(syncDiscoveryTrailEvents).mock.invocationCallOrder.at(-1)!
   );
   expect(loadMapSnapshot).toHaveBeenLastCalledWith([], ownerA.id);
+});
+
+it("keeps permanent trails when the authoritative unsave rejects", async () => {
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(removeSavedItem).mockRejectedValue(new Error("remote delete failed"));
+
+  render(<WebHomeScreen />);
+  await waitFor(() =>
+    expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id)
+  );
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("detail-toggle"));
+  });
+
+  await waitFor(() => expect(removeSavedItem).toHaveBeenCalled());
+  expect(disconnectSavedItemTrails).not.toHaveBeenCalled();
 });

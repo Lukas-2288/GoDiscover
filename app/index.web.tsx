@@ -8,11 +8,11 @@ import { useDiscoveryController } from "../components/discovery/useDiscoveryCont
 import { useReducedMotion } from "../components/discovery/useReducedMotion";
 import { useClientOnlyValue } from "../components/useClientOnlyValue";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
-import { listSaved, type SavedItem } from "../lib/storage/saved";
+import { listSavedForOwner, type SavedItem } from "../lib/storage/saved";
 import { removeSavedItem, runSavedMutation, saveSavedItem, toggleSavedItem } from "../lib/storage/savedMutations";
 import { loadDetail, type ContentDetail } from "../lib/discovery/loadDetail";
 import { loadMapSnapshot, recordMapTrailEvent, type MapNode, type MapSnapshot } from "../lib/storage/discoveryMap";
-import { disconnectSavedItemTrails } from "../lib/storage/discoveryTrailSync";
+import { disconnectSavedItemTrails, syncDiscoveryTrailEvents } from "../lib/storage/discoveryTrailSync";
 import { buildCulturalProfile } from "../lib/discovery/culturalProfile";
 import { findMapRecommendations } from "../lib/discovery/mapRecommendations";
 import { defaultDiscoveryProviders } from "../lib/discovery/loadDiscovery";
@@ -84,6 +84,7 @@ function WebHomeScreen() {
       if (activeOwnerId.current !== ownerId) {
         activeOwnerId.current = ownerId;
         mapLoadSequence.current += 1;
+        setSavedItems([]);
         setMapSnapshot(EMPTY_MAP_SNAPSHOT);
         setSelectedNodeId(null);
         responsiveOrbitRequest.current += 1;
@@ -94,7 +95,7 @@ function WebHomeScreen() {
       setSavedOwnerId((hydratedOwnerId) =>
         hydratedOwnerId === ownerId ? hydratedOwnerId : undefined
       );
-      void runSavedMutation(() => listSaved())
+      void runSavedMutation(() => listSavedForOwner(ownerId))
         .then((items) => {
           if (savedRefreshSequence.current !== refreshSequence) return;
           setSavedItems(items);
@@ -125,7 +126,11 @@ function WebHomeScreen() {
     if (savedOwnerId !== ownerId) return;
     const loadSequence = ++mapLoadSequence.current;
     let cancelled = false;
-    void loadMapSnapshot(savedItems, authSession?.user.id)
+    const synchronize = ownerId
+      ? syncDiscoveryTrailEvents(ownerId)
+      : Promise.resolve([]);
+    void synchronize
+      .then(() => loadMapSnapshot(savedItems, authSession?.user.id))
       .then((snapshot) => {
         if (
           cancelled ||
@@ -139,6 +144,35 @@ function WebHomeScreen() {
       .catch(() => undefined);
     return () => {
       cancelled = true;
+    };
+  }, [authSession?.user.id, savedItems, savedOwnerId]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const retry = () => {
+      const ownerId = authSession?.user.id ?? null;
+      if (savedOwnerId !== ownerId) return;
+      const loadSequence = ++mapLoadSequence.current;
+      const synchronize = ownerId
+        ? syncDiscoveryTrailEvents(ownerId)
+        : Promise.resolve([]);
+      void synchronize
+        .then(() => loadMapSnapshot(savedItems, ownerId ?? undefined))
+        .then((snapshot) => {
+          if (
+            mapLoadSequence.current === loadSequence &&
+            activeOwnerId.current === ownerId
+          ) {
+            setMapSnapshot(snapshot);
+          }
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener("focus", retry);
+    window.addEventListener("online", retry);
+    return () => {
+      window.removeEventListener("focus", retry);
+      window.removeEventListener("online", retry);
     };
   }, [authSession?.user.id, savedItems, savedOwnerId]);
 
@@ -178,33 +212,42 @@ function WebHomeScreen() {
     const operationIsCurrent = () =>
       mapLoadSequence.current === operationMapSequence &&
       activeOwnerId.current === operationOwnerId;
-    void discovery.commit(committed, decision).then(() => {
+    void discovery.commit(committed, decision).then(async (result) => {
       if (
         decision !== "save" ||
+        !result.confirmed ||
+        result.decision !== "save" ||
         !operationCategory ||
         !operationTrailSeed ||
         !operationIsCurrent()
       ) {
         return;
       }
-      const savedTarget: SavedItem = {
-        ...committed,
-        category: operationCategory,
-        savedAt: Date.now(),
-      };
-      void recordMapTrailEvent(
+      const savedTarget = result.items.find(
+        (item) =>
+          item.category === operationCategory && item.id === committed.id
+      );
+      if (!savedTarget) return;
+      await recordMapTrailEvent(
         {
           source: operationTrailSeed,
           target: { category: operationCategory, id: committed.id },
           occurredAt: Date.now(),
         },
-        [...savedItems, savedTarget],
+        result.items,
         operationOwnerId ?? undefined
-      ).then((snapshot) => {
-        if (!operationIsCurrent()) return;
-        setMapSnapshot(snapshot);
-      }).catch(() => undefined);
-    });
+      );
+      if (!operationIsCurrent()) return;
+      if (operationOwnerId) {
+        await syncDiscoveryTrailEvents(operationOwnerId);
+      }
+      if (!operationIsCurrent()) return;
+      const snapshot = await loadMapSnapshot(
+        result.items,
+        operationOwnerId ?? undefined
+      );
+      if (operationIsCurrent()) setMapSnapshot(snapshot);
+    }).catch(() => undefined);
   };
 
   const startSimilar = (category: ContentCategory, item: ResultItem) => {
@@ -245,15 +288,28 @@ function WebHomeScreen() {
         .catch(() => undefined);
       return;
     }
-    void disconnectSavedItemTrails(
-      { category: detailSelection.category, id: detailSelection.item.id },
-      { occurredAt: Date.now(), reason: "Removed from saved atlas", userId: operationOwnerId ?? undefined }
-    )
-      .then(async () => {
+    void removeSavedItem(detailSelection.category, detailSelection.item.id)
+      .then(async (items) => {
         if (!operationIsCurrent()) return;
-        const items = await removeSavedItem(detailSelection.category, detailSelection.item.id);
-        if (!operationIsCurrent()) return;
+        if (
+          items.some(
+            (item) =>
+              item.category === detailSelection.category &&
+              item.id === detailSelection.item.id
+          )
+        ) {
+          return;
+        }
         setSavedItems(items);
+        await disconnectSavedItemTrails(
+          { category: detailSelection.category, id: detailSelection.item.id },
+          { occurredAt: Date.now(), reason: "Removed from saved atlas", userId: operationOwnerId ?? undefined }
+        );
+        if (!operationIsCurrent()) return;
+        if (operationOwnerId) {
+          await syncDiscoveryTrailEvents(operationOwnerId);
+        }
+        if (!operationIsCurrent()) return;
         const snapshot = await loadMapSnapshot(items, operationOwnerId ?? undefined);
         if (operationIsCurrent()) setMapSnapshot(snapshot);
       })
@@ -310,13 +366,22 @@ function WebHomeScreen() {
       });
     if (!operationIsCurrent()) return;
     if (!alreadySaved) setSavedItems(nextItems);
-    const snapshot = await recordMapTrailEvent(
+    await recordMapTrailEvent(
       {
         source: { category: seed.category, id: seed.item.id },
         target: { category: recommendation.category, id: recommendation.item.id },
         occurredAt: Date.now(),
         reason: recommendation.reason.label,
       },
+      nextItems,
+      operationOwnerId ?? undefined
+    );
+    if (!operationIsCurrent()) return;
+    if (operationOwnerId) {
+      await syncDiscoveryTrailEvents(operationOwnerId);
+    }
+    if (!operationIsCurrent()) return;
+    const snapshot = await loadMapSnapshot(
       nextItems,
       operationOwnerId ?? undefined
     );

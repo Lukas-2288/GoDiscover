@@ -7,7 +7,12 @@ export type SavedItem = ResultItem & {
   savedAt: number;
 };
 
-const STORAGE_KEY = 'godiscover:saved-items:v1';
+export const LEGACY_SAVED_STORAGE_KEY = 'godiscover:saved-items:v1';
+const SAVED_STORAGE_PREFIX = 'godiscover:saved-items:v2';
+const SAVED_LEGACY_MIGRATION_KEY =
+  'godiscover:saved-items:v2:legacy-migrated';
+export const SAVED_ANONYMOUS_STORAGE_KEY =
+  `${SAVED_STORAGE_PREFIX}:anonymous`;
 
 type DbRow = {
   category: ContentCategory;
@@ -36,9 +41,19 @@ async function getUserId(): Promise<string | null> {
   return data.session?.user.id ?? null;
 }
 
-async function readLocal(): Promise<SavedItem[]> {
+export function savedStorageKeyForOwner(ownerId: string): string {
+  return `${SAVED_STORAGE_PREFIX}:owner:${encodeURIComponent(ownerId)}`;
+}
+
+function storageKey(ownerId: string | null): string {
+  return ownerId
+    ? savedStorageKeyForOwner(ownerId)
+    : SAVED_ANONYMOUS_STORAGE_KEY;
+}
+
+async function readLocal(ownerId: string | null): Promise<SavedItem[]> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const raw = await AsyncStorage.getItem(storageKey(ownerId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -47,8 +62,11 @@ async function readLocal(): Promise<SavedItem[]> {
   }
 }
 
-async function writeLocal(items: SavedItem[]): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+async function writeLocal(
+  ownerId: string | null,
+  items: readonly SavedItem[]
+): Promise<void> {
+  await AsyncStorage.setItem(storageKey(ownerId), JSON.stringify(items));
 }
 
 function sortNewestFirst(items: SavedItem[]): SavedItem[] {
@@ -59,16 +77,102 @@ function key(category: ContentCategory, id: string): string {
   return `${category}:${id}`;
 }
 
+function mergeSavedItems(
+  ...collections: readonly (readonly SavedItem[])[]
+): SavedItem[] {
+  const merged = new Map<string, SavedItem>();
+  for (const items of collections) {
+    for (const item of items) {
+      const itemKey = key(item.category, item.id);
+      const previous = merged.get(itemKey);
+      if (!previous || item.savedAt > previous.savedAt) {
+        merged.set(itemKey, item);
+      }
+    }
+  }
+  return sortNewestFirst([...merged.values()]);
+}
+
+async function migrateLegacySavedItems(
+  ownerId: string | null
+): Promise<void> {
+  if (await AsyncStorage.getItem(SAVED_LEGACY_MIGRATION_KEY)) return;
+
+  const legacy = await AsyncStorage.getItem(LEGACY_SAVED_STORAGE_KEY);
+  if (legacy) {
+    try {
+      const parsed = JSON.parse(legacy);
+      if (Array.isArray(parsed)) {
+        const current = await readLocal(ownerId);
+        await writeLocal(ownerId, mergeSavedItems(current, parsed as SavedItem[]));
+        await AsyncStorage.removeItem(LEGACY_SAVED_STORAGE_KEY);
+      }
+    } catch {
+      // Keep malformed legacy data recoverable under its original key.
+    }
+  }
+  await AsyncStorage.setItem(SAVED_LEGACY_MIGRATION_KEY, '1');
+}
+
+function itemToRow(
+  userId: string,
+  item: SavedItem | (ResultItem & { category: ContentCategory })
+) {
+  return {
+    user_id: userId,
+    category: item.category,
+    item_id: item.id,
+    title: item.title,
+    subtitle: item.subtitle ?? '',
+    meta: item.meta ?? '',
+    image_url: item.imageUrl ?? null,
+  };
+}
+
 export async function listSaved(): Promise<SavedItem[]> {
   const userId = await getUserId();
-  if (!userId) return sortNewestFirst(await readLocal());
+  return listSavedForOwner(userId);
+}
+
+export async function listSavedForOwner(
+  ownerId: string | null
+): Promise<SavedItem[]> {
+  await migrateLegacySavedItems(ownerId);
+  if (!ownerId) return sortNewestFirst(await readLocal(null));
+
+  const activeUserId = await getUserId();
+  if (activeUserId !== ownerId) {
+    return sortNewestFirst(await readLocal(ownerId));
+  }
+
+  const anonymous = await readLocal(null);
+  let anonymousUploadConfirmed = anonymous.length === 0;
+  if (anonymous.length > 0) {
+    const { error } = await supabase
+      .from('saved_items')
+      .upsert(anonymous.map((item) => itemToRow(ownerId, item)), {
+        onConflict: 'user_id,category,item_id',
+        ignoreDuplicates: true,
+      });
+    anonymousUploadConfirmed = !error;
+  }
+
   const { data, error } = await supabase
     .from('saved_items')
     .select('category,item_id,title,subtitle,meta,image_url,saved_at')
     .order('saved_at', { ascending: false });
-  if (error) return sortNewestFirst(await readLocal());
-  const items = (data as DbRow[]).map(rowToItem);
-  await writeLocal(items);
+  if (error) {
+    return mergeSavedItems(await readLocal(ownerId), anonymous);
+  }
+
+  const items = mergeSavedItems(
+    (data as DbRow[]).map(rowToItem),
+    anonymousUploadConfirmed ? [] : anonymous
+  );
+  await writeLocal(ownerId, items);
+  if (anonymousUploadConfirmed && anonymous.length > 0) {
+    await AsyncStorage.removeItem(SAVED_ANONYMOUS_STORAGE_KEY);
+  }
   return items;
 }
 
@@ -77,34 +181,26 @@ export async function addSaved(
   item: ResultItem
 ): Promise<SavedItem[]> {
   const userId = await getUserId();
-  const local = await readLocal();
+  await migrateLegacySavedItems(userId);
+  const local = await readLocal(userId);
   const exists = local.some((i) => key(i.category, i.id) === key(category, item.id));
-  if (!exists) {
-    const saved: SavedItem = {
-      ...item,
-      category,
-      savedAt: Date.now(),
-    };
-    const next = [...local, saved];
-    await writeLocal(next);
-  }
+  const saved: SavedItem = {
+    ...item,
+    category,
+    savedAt: exists
+      ? local.find((candidate) => key(candidate.category, candidate.id) === key(category, item.id))!.savedAt
+      : Date.now(),
+  };
+  const next = exists ? local : [...local, saved];
   if (userId) {
     const { error } = await supabase.from('saved_items').upsert(
-      {
-        user_id: userId,
-        category,
-        item_id: item.id,
-        title: item.title,
-        subtitle: item.subtitle ?? '',
-        meta: item.meta ?? '',
-        image_url: item.imageUrl ?? null,
-      },
+      itemToRow(userId, { ...item, category }),
       { onConflict: 'user_id,category,item_id' }
     );
-    if (error) console.warn('saved_items upsert failed', error.message);
-    return listSaved();
+    if (error) throw new Error('saved_items upsert failed');
   }
-  return sortNewestFirst(await readLocal());
+  await writeLocal(userId, next);
+  return sortNewestFirst(next);
 }
 
 export async function removeSaved(
@@ -112,41 +208,35 @@ export async function removeSaved(
   id: string
 ): Promise<SavedItem[]> {
   const userId = await getUserId();
-  const local = await readLocal();
+  await migrateLegacySavedItems(userId);
+  const local = await readLocal(userId);
   const next = local.filter((i) => key(i.category, i.id) !== key(category, id));
-  await writeLocal(next);
   if (userId) {
     const { error } = await supabase
       .from('saved_items')
       .delete()
       .eq('category', category)
       .eq('item_id', id);
-    if (error) console.warn('saved_items delete failed', error.message);
-    return listSaved();
+    if (error) throw new Error('saved_items delete failed');
+    const anonymous = (await readLocal(null)).filter(
+      (item) => key(item.category, item.id) !== key(category, id)
+    );
+    if (anonymous.length === 0) {
+      await AsyncStorage.removeItem(SAVED_ANONYMOUS_STORAGE_KEY);
+    } else {
+      await writeLocal(null, anonymous);
+    }
   }
+  await writeLocal(userId, next);
   return sortNewestFirst(next);
 }
 
 export async function clearLocalSaved(): Promise<void> {
-  await AsyncStorage.removeItem(STORAGE_KEY);
+  await AsyncStorage.removeItem(SAVED_ANONYMOUS_STORAGE_KEY);
 }
 
 export async function syncLocalToCloud(): Promise<void> {
   const userId = await getUserId();
   if (!userId) return;
-  const local = await readLocal();
-  if (local.length === 0) return;
-  const rows = local.map((i) => ({
-    user_id: userId,
-    category: i.category,
-    item_id: i.id,
-    title: i.title,
-    subtitle: i.subtitle ?? '',
-    meta: i.meta ?? '',
-    image_url: i.imageUrl ?? null,
-  }));
-  const { error } = await supabase
-    .from('saved_items')
-    .upsert(rows, { onConflict: 'user_id,category,item_id', ignoreDuplicates: true });
-  if (error) console.warn('saved_items bulk sync failed', error.message);
+  await listSavedForOwner(userId);
 }

@@ -27,6 +27,7 @@ let mockCurrentUserId: string | null = "user-a";
 let mockSelectFailure: Error | null = null;
 let mockAppendFailure: Error | null = null;
 let mockAppendRequests: RemoteEvent[][] = [];
+let mockSelectGate: Promise<void> | null = null;
 
 jest.mock("../../supabase", () => ({
   supabase: {
@@ -39,6 +40,7 @@ jest.mock("../../supabase", () => ({
     },
     from: jest.fn(() => ({
       select: jest.fn(async () => {
+        if (mockSelectGate) await mockSelectGate;
         if (mockSelectFailure) throw mockSelectFailure;
         return {
           data: mockRemoteEvents.filter((event) => event.user_id === mockCurrentUserId),
@@ -76,6 +78,7 @@ beforeEach(async () => {
   mockSelectFailure = null;
   mockAppendFailure = null;
   mockAppendRequests = [];
+  mockSelectGate = null;
 });
 
 it("claims an anonymous offline event for the signed-in user and merges a cloud event", async () => {
@@ -217,11 +220,142 @@ it("folds a real persisted connection into a persisted disconnect before the end
 
   await expect(loadMapSnapshot([savedItems[1]])).resolves.toMatchObject({
     edges: [],
-    events: [expect.objectContaining({ action: "disconnect", relationshipId: "movies:arrival->books:kindred" })],
+    events: [
+      expect.objectContaining({
+        action: "connect",
+        relationshipId: "movies:arrival->books:kindred",
+      }),
+      expect.objectContaining({
+        action: "disconnect",
+        relationshipId: "movies:arrival->books:kindred",
+      }),
+    ],
   });
   await expect(AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY).then((raw) => raw ? JSON.parse(raw) : null)).resolves.toEqual({
     version: 2,
-    events: [expect.objectContaining({ action: "disconnect", relationshipId: "movies:arrival->books:kindred" })],
+    events: [
+      expect.objectContaining({
+        action: "connect",
+        relationshipId: "movies:arrival->books:kindred",
+      }),
+      expect.objectContaining({
+        action: "disconnect",
+        relationshipId: "movies:arrival->books:kindred",
+      }),
+    ],
+  });
+});
+
+it("preserves a connect recorded while cloud synchronization is awaiting its read", async () => {
+  let releaseSelect: () => void = () => undefined;
+  mockSelectGate = new Promise<void>((resolve) => {
+    releaseSelect = resolve;
+  });
+  const sync = syncDiscoveryTrailEvents();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  await recordMapTrailEvent(
+    {
+      source: { category: "movies", id: "arrival" },
+      target: { category: "books", id: "kindred" },
+      occurredAt: 50,
+    },
+    [
+      {
+        id: "arrival",
+        category: "movies",
+        title: "Arrival",
+        subtitle: "2016",
+        meta: "Science fiction",
+        savedAt: 2,
+      },
+      {
+        id: "kindred",
+        category: "books",
+        title: "Kindred",
+        subtitle: "Octavia E. Butler",
+        meta: "1979",
+        savedAt: 1,
+      },
+    ],
+    "user-a"
+  );
+  releaseSelect();
+  await sync;
+
+  await expect(
+    loadMapSnapshot(
+      [
+        {
+          id: "arrival",
+          category: "movies",
+          title: "Arrival",
+          subtitle: "2016",
+          meta: "Science fiction",
+          savedAt: 2,
+        },
+        {
+          id: "kindred",
+          category: "books",
+          title: "Kindred",
+          subtitle: "Octavia E. Butler",
+          meta: "1979",
+          savedAt: 1,
+        },
+      ],
+      "user-a"
+    )
+  ).resolves.toMatchObject({
+    edges: [
+      expect.objectContaining({
+        id: "movies:arrival->books:kindred",
+      }),
+    ],
+  });
+});
+
+it("serializes a connect followed by disconnect so the tombstone covers the new relationship", async () => {
+  const savedItems = [
+    {
+      id: "arrival",
+      category: "movies" as const,
+      title: "Arrival",
+      subtitle: "2016",
+      meta: "Science fiction",
+      savedAt: 2,
+    },
+    {
+      id: "kindred",
+      category: "books" as const,
+      title: "Kindred",
+      subtitle: "Octavia E. Butler",
+      meta: "1979",
+      savedAt: 1,
+    },
+  ];
+
+  const connect = recordMapTrailEvent(
+    {
+      source: { category: "movies", id: "arrival" },
+      target: { category: "books", id: "kindred" },
+      occurredAt: 60,
+    },
+    savedItems,
+    "user-a"
+  );
+  const disconnect = disconnectSavedItemTrails(
+    { category: "movies", id: "arrival" },
+    { occurredAt: 61, userId: "user-a" }
+  );
+  await Promise.all([connect, disconnect]);
+
+  await expect(loadMapSnapshot(savedItems, "user-a")).resolves.toMatchObject({
+    edges: [],
+    events: [
+      expect.objectContaining({ action: "connect", occurredAt: 60 }),
+      expect.objectContaining({ action: "disconnect", occurredAt: 61 }),
+    ],
   });
 });
 
