@@ -362,8 +362,10 @@ export default function WebHomeScreen() {
             onStart={() => setSection("archive")}
             onFindSimilar={findOrbitRecommendations}
             onSaveRecommendation={saveOrbitRecommendation}
+            layout={layout}
+            reducedMotion={reducedMotion}
           />
-          {panelSelection && layout !== "mobile" ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
+          {panelSelection && (layout === "tabletLandscape" || layout === "desktop") ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
         </View>
       ) : null}
       {section === "account" ? (

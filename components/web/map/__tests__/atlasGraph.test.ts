@@ -3,6 +3,7 @@ import {
   buildAtlasFlowEdges,
   buildAtlasFlowNodes,
   filterAtlasSearchMatches,
+  findNearestAtlasNodeInDirection,
   findAtlasSearchMatch,
 } from "../atlasGraph";
 
@@ -164,5 +165,23 @@ describe("Saved Atlas graph presentation", () => {
     expect(filterAtlasSearchMatches(nodes, "bjork").map((node) => node.id)).toEqual([
       "albums:vespertine",
     ]);
+  });
+
+  it("moves keyboard focus to the nearest visible artwork in the requested direction", () => {
+    const flowNodes = buildAtlasFlowNodes(nodes, edges, {
+      detailMode: "close",
+      selectedId: null,
+      positions: {
+        "movies:arrival": { x: 0.5, y: 0.5 },
+        "movies:moonlight": { x: 0.58, y: 0.49 },
+        "albums:vespertine": { x: 0.51, y: 0.8 },
+      },
+      fadedNodeIds: ["albums:vespertine"],
+    });
+
+    expect(findNearestAtlasNodeInDirection(flowNodes, "movies:arrival", "right")?.id).toBe(
+      "movies:moonlight"
+    );
+    expect(findNearestAtlasNodeInDirection(flowNodes, "movies:arrival", "down")).toBeNull();
   });
 });

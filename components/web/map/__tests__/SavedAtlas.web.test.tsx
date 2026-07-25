@@ -340,4 +340,99 @@ describe("Saved Atlas React Flow canvas", () => {
       expect.any(Object)
     );
   });
+
+  it("uses the current layout modes to keep desktop rails persistent and leaves mobile detail to its modal sheet", () => {
+    const desktop = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        layout="desktop"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+    expect(desktop.getByLabelText("Discovery Orbit").props.accessibilityViewIsModal).toBeFalsy();
+
+    const mobile = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        layout="mobile"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+    expect(mobile.queryByLabelText("Discovery Orbit")).toBeNull();
+  });
+
+  it("keeps only the selected context in the graph tab order and supports keyboard focus alternatives", () => {
+    const orbitNodes: MapNode[] = [
+      ...nodes,
+      { ...nodes[0], id: "movies:moonlight", itemId: "moonlight", title: "Moonlight", x: 0.4, y: 0.3 },
+    ];
+    const onSelect = jest.fn();
+    const { getByLabelText } = render(
+      <SavedAtlas
+        nodes={orbitNodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        layout="tabletLandscape"
+        onSelect={onSelect}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+
+    expect(mockFlowProps.nodesFocusable).toBe(false);
+    expect(mockFlowProps.nodes.map((node: any) => ({ id: node.id, focusable: node.focusable }))).toEqual([
+      { id: "movies:arrival", focusable: true },
+      { id: "movies:moonlight", focusable: false },
+    ]);
+
+    fireEvent(getByLabelText("Atlas spatial navigation"), "keyDown", { key: "Enter", preventDefault: jest.fn() });
+    expect(onSelect).toHaveBeenLastCalledWith(expect.objectContaining({ id: orbitNodes[0].id }));
+  });
+
+  it("preserves the atlas while giving failed discovery a retryable connectivity explanation", async () => {
+    const onFindSimilar = jest.fn(async () => {
+      throw new Error("offline");
+    });
+    const { getByLabelText, getByText } = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onFindSimilar={onFindSimilar}
+      />
+    );
+
+    fireEvent.press(getByLabelText("Find similar to Arrival"));
+    await act(async () => undefined);
+    expect(getByText("Discovery is offline. Your saved atlas and trails are still available.")).toBeTruthy();
+    expect(getByLabelText("Retry recommendations")).toBeTruthy();
+  });
+
+  it("uses immediate camera feedback and disables animated paths when reduced motion is requested", () => {
+    render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={[{ id: "trail", source: nodes[0].id, target: nodes[0].id, createdAt: 1, reason: "same" }]}
+        selectedId={nodes[0].id}
+        reducedMotion
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+
+    expect(mockSetCenter).toHaveBeenCalledWith(800, 500, { duration: 0, zoom: 1.15 });
+    expect(mockFlowProps.edges[0].animated).toBe(false);
+  });
 });

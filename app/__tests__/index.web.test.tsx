@@ -14,6 +14,9 @@ let authStateChangeHandler:
   | ((event: string, session: unknown) => void)
   | null = null;
 const mockDiscoveryCommit = jest.fn(async () => undefined);
+let mockLayout: "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop" = "desktop";
+let mockReducedMotion = false;
+let mockSavedAtlasProps: Record<string, unknown> = {};
 
 jest.mock("../../components/web/WebHomeScreen", () => {
   const React = require("react");
@@ -62,7 +65,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
         }),
         children
       ),
-    resolveWebLayout: () => "desktop",
+    resolveWebLayout: () => mockLayout,
     webPalette: {
       bg: "#000",
       border: "#111",
@@ -84,12 +87,14 @@ jest.mock("../../components/web/map/SavedAtlas.web", () => {
       onFindSimilar,
       onSaveRecommendation,
       onSelect,
+      ...props
     }: {
       nodes: Array<{ id: string; title: string }>;
       onFindSimilar?(seed: unknown): Promise<Array<unknown>>;
       onSaveRecommendation?(seed: unknown, recommendation: unknown): Promise<void>;
       onSelect?(node: unknown): void;
     }) => {
+      mockSavedAtlasProps = props;
       const [orbitError, setOrbitError] = React.useState(false);
       const seed = {
         id: "movies:source",
@@ -143,7 +148,7 @@ jest.mock("../../components/discovery/useDiscoveryController", () => ({
 }));
 
 jest.mock("../../components/discovery/useReducedMotion", () => ({
-  useReducedMotion: () => false,
+  useReducedMotion: () => mockReducedMotion,
 }));
 
 jest.mock("../../lib/storage/recents", () => ({
@@ -290,6 +295,9 @@ function expectVisibleAtlas(expected: Owner | "empty") {
 beforeEach(() => {
   jest.clearAllMocks();
   authStateChangeHandler = null;
+  mockLayout = "desktop";
+  mockReducedMotion = false;
+  mockSavedAtlasProps = {};
   mockDiscoveryCommit.mockReset().mockResolvedValue(undefined);
   jest.mocked(listSaved).mockReset();
   jest.mocked(loadMapSnapshot).mockReset().mockResolvedValue({
@@ -303,6 +311,23 @@ beforeEach(() => {
   jest.mocked(disconnectSavedItemTrails).mockReset().mockResolvedValue([]);
   jest.mocked(findMapRecommendations).mockReset();
   jest.mocked(supabase.auth.getSession).mockReset();
+});
+
+it("hands the resolved web layout and motion preference to the web-only Saved Atlas", async () => {
+  mockLayout = "tabletPortrait";
+  mockReducedMotion = true;
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: null } } as never);
+  jest.mocked(listSaved).mockResolvedValue([]);
+
+  render(<WebHomeScreen />);
+  openAtlas();
+
+  await waitFor(() =>
+    expect(mockSavedAtlasProps).toEqual(expect.objectContaining({
+      layout: "tabletPortrait",
+      reducedMotion: true,
+    }))
+  );
 });
 
 it.each([

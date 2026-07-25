@@ -20,7 +20,9 @@ import {
   buildAtlasFlowEdges,
   buildAtlasFlowNodes,
   filterAtlasSearchMatches,
+  findNearestAtlasNodeInDirection,
   findAtlasSearchMatch,
+  type AtlasDirection,
 } from "./atlasGraph";
 import {
   buildOrbitGraph,
@@ -55,6 +57,8 @@ const mapTheme = `
     background: #211B2A;
     border-bottom-color: rgba(244, 241, 234, 0.12);
     color: #F4F1EA;
+    height: 44px;
+    width: 44px;
   }
   .saved-atlas-flow .react-flow__controls-button:hover { background: #2A2235; }
   .saved-atlas-flow .react-flow__controls-button svg { fill: #F4F1EA; }
@@ -87,6 +91,8 @@ type SavedAtlasProps = {
   onStart(): void;
   onFindSimilar?(seed: OrbitSeed): Promise<OrbitRecommendation[]>;
   onSaveRecommendation?(seed: OrbitSeed, recommendation: OrbitRecommendation): Promise<void> | void;
+  layout?: "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop";
+  reducedMotion?: boolean;
 };
 
 export type OrbitSeed = {
@@ -110,6 +116,8 @@ function SavedAtlasInner({
   onStart,
   onFindSimilar,
   onSaveRecommendation,
+  layout = "desktop",
+  reducedMotion = false,
 }: SavedAtlasProps) {
   const { width, height } = useWindowDimensions();
   const { getViewport, setCenter, setViewport } = useReactFlow<AtlasArtworkNodeDefinition, Edge>();
@@ -121,6 +129,8 @@ function SavedAtlasInner({
   const [recommendations, setRecommendations] = useState<OrbitRecommendation[]>([]);
   const [recommendationError, setRecommendationError] = useState(false);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [spatialNodeId, setSpatialNodeId] = useState<string | null>(selectedId);
+  const [detailExpanded, setDetailExpanded] = useState(false);
   const overviewViewport = useRef<Viewport | null>(null);
   const orbitRequest = useRef(0);
   const activeOrbitSeedId = useRef<string | null>(selectedId);
@@ -140,6 +150,8 @@ function SavedAtlasInner({
     previousSelectedId.current = selectedId;
     if (selectedId) {
       setOrbitSeedId(selectedId);
+      setSpatialNodeId(selectedId);
+      setDetailExpanded(false);
       setTransientOrbitSeed(null);
       setRecommendations([]);
       setRecommendationError(false);
@@ -147,6 +159,7 @@ function SavedAtlasInner({
       return;
     }
     setOrbitSeedId(null);
+    setSpatialNodeId(null);
     setTransientOrbitSeed(null);
     setRecommendations([]);
     setRecommendationError(false);
@@ -172,16 +185,18 @@ function SavedAtlasInner({
         (node): AtlasArtworkNodeDefinition => ({
           ...node,
           ariaLabel: `${node.data.node.title}, ${node.data.node.category}`,
+          focusable: node.id === spatialNodeId,
           style: { height: node.height, width: node.width },
         })
       ),
-    [detailMode, displayedEdges, displayedNodes, orbitGraph?.nodes, orbitGraph?.positions, orbitSeedId, selectedId]
+    [detailMode, displayedEdges, displayedNodes, orbitGraph?.nodes, orbitGraph?.positions, orbitSeedId, selectedId, spatialNodeId]
   );
   const flowEdges = useMemo(
     () => buildAtlasFlowEdges(displayedEdges, orbitSeedId ?? selectedId, {
       transientEdgeIds: orbitGraph?.edges.filter((edge) => edge.transient).map((edge) => edge.id),
+      reducedMotion,
     }) as Edge[],
-    [displayedEdges, orbitGraph?.edges, orbitSeedId, selectedId]
+    [displayedEdges, orbitGraph?.edges, orbitSeedId, reducedMotion, selectedId]
   );
   const filteredListNodes = useMemo(() => {
     return filterAtlasSearchMatches(nodes, query);
@@ -193,12 +208,13 @@ function SavedAtlasInner({
     if (!match) return;
     captureOverviewViewport();
     onSelect(match);
+    setSpatialNodeId(match.id);
     const flowNode = flowNodes.find((node) => node.id === match.id);
     if (!flowNode) return;
     void setCenter(
       flowNode.position.x + (flowNode.width ?? 0) / 2,
       flowNode.position.y + (flowNode.height ?? 0) / 2,
-      { duration: 420, zoom: 1.7 }
+      { duration: reducedMotion ? 0 : 420, zoom: 1.7 }
     );
   };
 
@@ -208,6 +224,7 @@ function SavedAtlasInner({
   ) => {
     if (!node.data.transient) {
       captureOverviewViewport();
+      setSpatialNodeId(node.id);
       onSelect(node.data.node);
     }
   };
@@ -275,8 +292,8 @@ function SavedAtlasInner({
 
   useEffect(() => {
     if (!orbitSeedId) return;
-    void setCenter(800, 500, { duration: 220, zoom: 1.15 });
-  }, [orbitSeedId, setCenter]);
+    void setCenter(800, 500, { duration: reducedMotion ? 0 : 220, zoom: 1.15 });
+  }, [orbitSeedId, reducedMotion, setCenter]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
@@ -293,6 +310,42 @@ function SavedAtlasInner({
     const nextMode = resolveZoomDetail(viewport.zoom, nodes).mode;
     setDetailMode((current) => (current === nextMode ? current : nextMode));
   };
+
+  const handleSpatialKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const directionByKey: Partial<Record<string, AtlasDirection>> = {
+      ArrowUp: "up",
+      ArrowDown: "down",
+      ArrowLeft: "left",
+      ArrowRight: "right",
+    };
+    const direction = directionByKey[event.key];
+    if (direction) {
+      const next = findNearestAtlasNodeInDirection(
+        flowNodes,
+        spatialNodeId ?? selectedId ?? flowNodes.find((node) => !node.hidden && !node.data.faded)?.id ?? "",
+        direction
+      );
+      if (next) setSpatialNodeId(next.id);
+      event.preventDefault();
+      return;
+    }
+    if ((event.key === "Enter" || event.key === " ") && spatialNodeId) {
+      const selectedNode = flowNodes.find((node) => node.id === spatialNodeId);
+      if (selectedNode && !selectedNode.data.transient) {
+        captureOverviewViewport();
+        onSelect(selectedNode.data.node);
+      }
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Escape" && orbitSeedId) {
+      restoreOverview();
+      event.preventDefault();
+    }
+  };
+
+  const isPortraitDrawer = layout === "tabletPortrait";
+  const isMobileSheet = layout === "mobile";
 
   return (
     <View style={styles.root}>
@@ -317,6 +370,11 @@ function SavedAtlasInner({
       ) : (
         <div
           className="saved-atlas-flow"
+          aria-description="Use search, map and list controls, zoom buttons, fit view, or arrow keys to explore the atlas."
+          aria-label="Atlas spatial navigation"
+          onKeyDown={handleSpatialKeyDown}
+          role="application"
+          tabIndex={0}
           style={{
             background: "#15111F",
             flex: 1,
@@ -334,7 +392,7 @@ function SavedAtlasInner({
             nodesConnectable={false}
             edgesReconnectable={false}
             elementsSelectable
-            nodesFocusable
+            nodesFocusable={false}
             edgesFocusable={false}
             deleteKeyCode={null}
             selectionKeyCode={null}
@@ -357,6 +415,7 @@ function SavedAtlasInner({
           >
             <Controls
               position="bottom-left"
+              showFitView
               showInteractive={false}
               aria-label="Atlas zoom and fit controls"
             />
@@ -372,10 +431,27 @@ function SavedAtlasInner({
               />
             ) : null}
           </ReactFlow>
-          {currentSeed ? (
-            <View style={styles.orbitPanel} accessibilityLabel="Discovery Orbit">
+          {currentSeed && !isMobileSheet ? (
+            <View
+              accessibilityLabel="Discovery Orbit"
+              style={[
+                styles.orbitPanel,
+                isPortraitDrawer && styles.orbitPanelPortrait,
+                isPortraitDrawer && detailExpanded && styles.orbitPanelPortraitExpanded,
+              ]}
+            >
               <Text style={styles.orbitKicker}>DISCOVERY ORBIT</Text>
               <Text style={styles.orbitTitle}>{currentSeed.title}</Text>
+              {isPortraitDrawer ? (
+                <Pressable
+                  accessibilityLabel={detailExpanded ? "Collapse detail drawer" : "Expand detail drawer"}
+                  accessibilityRole="button"
+                  onPress={() => setDetailExpanded((expanded) => !expanded)}
+                  style={styles.drawerToggle}
+                >
+                  <Text style={styles.drawerToggleText}>{detailExpanded ? "Show preview" : "Expand details"}</Text>
+                </Pressable>
+              ) : null}
               <View style={styles.orbitActions}>
                 <Pressable accessibilityLabel="Back to atlas" accessibilityRole="button" onPress={restoreOverview} style={styles.orbitButton}>
                   <Text style={styles.orbitButtonText}>Back</Text>
@@ -398,7 +474,8 @@ function SavedAtlasInner({
               {recommendationError ? (
                 <View style={styles.orbitError}>
                   <Text style={styles.orbitErrorText}>Recommendations are unavailable right now.</Text>
-                  <Pressable accessibilityLabel="Retry recommendations" accessibilityRole="button" onPress={() => void requestRecommendations(seedFromNode(currentSeed))}>
+                  <Text style={styles.orbitErrorText}>Discovery is offline. Your saved atlas and trails are still available.</Text>
+                  <Pressable accessibilityLabel="Retry recommendations" accessibilityRole="button" onPress={() => void requestRecommendations(seedFromNode(currentSeed))} style={styles.retryButton}>
                     <Text style={styles.retryText}>Retry</Text>
                   </Pressable>
                 </View>
@@ -452,21 +529,26 @@ const styles = StyleSheet.create({
     minHeight: 620,
   },
   orbitPanel: { backgroundColor: "rgba(33, 27, 42, 0.96)", borderColor: "rgba(244, 241, 234, 0.18)", borderRadius: 8, borderWidth: 1, maxWidth: 390, padding: 15, position: "absolute", right: 20, top: 18, width: "42%" as any },
+  orbitPanelPortrait: { bottom: 16, maxWidth: "none" as any, right: 16, top: undefined, width: "calc(100% - 32px)" as any },
+  orbitPanelPortraitExpanded: { minHeight: 300 },
   orbitKicker: { color: "#D7F36A", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1.4 },
   orbitTitle: { color: "#F4F1EA", fontFamily: "Bricolage Grotesque", fontSize: 21, fontWeight: "900", marginTop: 4 },
   orbitActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
-  orbitButton: { alignItems: "center", borderColor: "rgba(244, 241, 234, 0.22)", borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 40, paddingHorizontal: 11 },
+  orbitButton: { alignItems: "center", borderColor: "rgba(244, 241, 234, 0.22)", borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 11 },
   orbitPrimary: { backgroundColor: "#D7F36A", borderColor: "#D7F36A" },
   orbitButtonText: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 12, fontWeight: "800" },
   orbitPrimaryText: { color: "#15111F", fontFamily: "DM Sans", fontSize: 12, fontWeight: "900" },
   orbitError: { borderTopColor: "rgba(244, 241, 234, 0.13)", borderTopWidth: 1, marginTop: 12, paddingTop: 11 },
   orbitErrorText: { color: "#F4C7A1", fontFamily: "DM Sans", fontSize: 12 },
+  retryButton: { justifyContent: "center", minHeight: 44 },
   retryText: { color: "#D7F36A", fontFamily: "DM Sans", fontSize: 12, fontWeight: "900", marginTop: 7 },
   recommendationRow: { alignItems: "center", borderTopColor: "rgba(244, 241, 234, 0.12)", borderTopWidth: 1, flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 11, paddingTop: 11 },
   recommendationCopy: { flexGrow: 1, minWidth: 150 },
   recommendationTitle: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" },
   recommendationReason: { color: "#A59EAE", fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 3 },
-  recommendationAction: { borderColor: "rgba(244, 241, 234, 0.2)", borderRadius: 4, borderWidth: 1, minHeight: 32, justifyContent: "center", paddingHorizontal: 8 },
+  recommendationAction: { borderColor: "rgba(244, 241, 234, 0.2)", borderRadius: 4, borderWidth: 1, minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
+  drawerToggle: { alignSelf: "flex-start", justifyContent: "center", minHeight: 44, marginTop: 4 },
+  drawerToggleText: { color: "#D7F36A", fontFamily: "DM Sans", fontSize: 12, fontWeight: "900" },
   recommendationSave: { backgroundColor: "#7C5CFC", borderColor: "#7C5CFC" },
   recommendationSaveText: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 11, fontWeight: "900" },
   recommendationSkipText: { color: "#D7D1DC", fontFamily: "DM Sans", fontSize: 11, fontWeight: "800" },

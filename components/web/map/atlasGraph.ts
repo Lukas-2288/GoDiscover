@@ -31,7 +31,13 @@ export type AtlasFlowNode = {
   draggable: false;
   connectable: false;
   selectable: true;
+  focusable?: boolean;
   data: AtlasArtworkData;
+};
+
+export type AtlasDirection = "up" | "down" | "left" | "right";
+type SpatialAtlasNode = Pick<AtlasFlowNode, "id" | "position" | "data"> & {
+  hidden?: boolean;
 };
 
 export type AtlasFlowEdge = {
@@ -119,6 +125,44 @@ export function findAtlasSearchMatch(
   return nodes.find((node) => matchesAtlasSearch(node, normalizedQuery)) ?? null;
 }
 
+/**
+ * Returns the nearest visible artwork in a cardinal direction. This stays
+ * independent of React Flow so keyboard travel follows the same settled map
+ * positions as pointer navigation.
+ */
+export function findNearestAtlasNodeInDirection<
+  T extends SpatialAtlasNode
+>(
+  nodes: readonly T[],
+  fromId: string,
+  direction: AtlasDirection
+): T | null {
+  const origin = nodes.find((node) => node.id === fromId);
+  if (!origin) return null;
+
+  const directionVector = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  }[direction];
+  let nearest: T | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const node of nodes) {
+    if (node.id === origin.id || node.hidden || node.data.faded) continue;
+    const deltaX = node.position.x - origin.position.x;
+    const deltaY = node.position.y - origin.position.y;
+    if (deltaX * directionVector.x + deltaY * directionVector.y <= 0) continue;
+    const distance = deltaX ** 2 + deltaY ** 2;
+    if (distance < nearestDistance) {
+      nearest = node;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
 export function buildAtlasFlowNodes(
   nodes: readonly MapNode[],
   edges: readonly MapEdge[],
@@ -195,7 +239,7 @@ export function buildAtlasFlowNodes(
 export function buildAtlasFlowEdges(
   edges: readonly MapEdge[],
   selectedId: string | null,
-  options: { transientEdgeIds?: readonly string[] } = {}
+  options: { transientEdgeIds?: readonly string[]; reducedMotion?: boolean } = {}
 ): AtlasFlowEdge[] {
   const transient = new Set(options.transientEdgeIds);
   return edges.map((edge, index) => {
@@ -234,7 +278,7 @@ export function buildAtlasFlowEdges(
             },
           }
         : {}),
-      ...(suggested ? { animated: false } : {}),
+      ...(options.reducedMotion || suggested ? { animated: false } : {}),
     };
   });
 }
