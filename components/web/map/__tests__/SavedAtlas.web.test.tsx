@@ -32,13 +32,7 @@ jest.mock("@xyflow/react", () => {
 
 jest.mock("@xyflow/react/dist/style.css", () => ({}));
 
-function loadSavedAtlas(): React.ComponentType<any> {
-  try {
-    return require("../SavedAtlas.web").SavedAtlas as React.ComponentType<any>;
-  } catch {
-    return () => React.createElement(React.Fragment);
-  }
-}
+import { SavedAtlas } from "../SavedAtlas.web";
 
 const nodes: MapNode[] = [
   {
@@ -63,7 +57,6 @@ describe("Saved Atlas React Flow canvas", () => {
   });
 
   it("keeps artwork fixed while preserving pan and zoom navigation", () => {
-    const SavedAtlas = loadSavedAtlas();
     render(
       <SavedAtlas
         nodes={nodes}
@@ -90,7 +83,6 @@ describe("Saved Atlas React Flow canvas", () => {
 
   it("selects artwork for detail and moves search matches into focus", () => {
     const onSelect = jest.fn();
-    const SavedAtlas = loadSavedAtlas();
     const { getByLabelText } = render(
       <SavedAtlas
         nodes={nodes}

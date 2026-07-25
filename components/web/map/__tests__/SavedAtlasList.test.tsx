@@ -2,14 +2,7 @@ import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
 
 import type { MapNode } from "../../../../lib/storage/discoveryMap";
-
-function loadSavedAtlasList(): Record<string, React.ComponentType<any>> {
-  try {
-    return require("../SavedAtlasList") as Record<string, React.ComponentType<any>>;
-  } catch {
-    return {};
-  }
-}
+import { SavedAtlasList } from "../SavedAtlasList";
 
 const savedNodes: MapNode[] = [
   {
@@ -39,8 +32,6 @@ const savedNodes: MapNode[] = [
 describe("Saved Atlas list", () => {
   it("offers every saved discovery as a detail selection", () => {
     const onSelect = jest.fn();
-    const SavedAtlasList =
-      loadSavedAtlasList().SavedAtlasList ?? (() => React.createElement(React.Fragment));
     const { getByLabelText, getByText } = render(
       <SavedAtlasList
         nodes={savedNodes}
@@ -56,8 +47,6 @@ describe("Saved Atlas list", () => {
   });
 
   it("marks the selected discovery without making the list editable", () => {
-    const SavedAtlasList =
-      loadSavedAtlasList().SavedAtlasList ?? (() => React.createElement(React.Fragment));
     const { getByLabelText, queryByLabelText } = render(
       <SavedAtlasList
         nodes={savedNodes}

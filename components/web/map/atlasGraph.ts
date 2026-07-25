@@ -84,7 +84,7 @@ function categorySummary(category: ContentCategory, count: number): string {
   return `${count} ${labels[count === 1 ? 0 : 1]}`;
 }
 
-function normalizeSearchText(value: string): string {
+export function normalizeAtlasSearchText(value: string): string {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -92,19 +92,28 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
+export function matchesAtlasSearch(node: MapNode, query: string): boolean {
+  const normalizedQuery = normalizeAtlasSearchText(query);
+  if (!normalizedQuery) return true;
+  return [node.title, node.subtitle, node.meta].some((value) =>
+    normalizeAtlasSearchText(value).includes(normalizedQuery)
+  );
+}
+
+export function filterAtlasSearchMatches(
+  nodes: readonly MapNode[],
+  query: string
+): MapNode[] {
+  return nodes.filter((node) => matchesAtlasSearch(node, query));
+}
+
 export function findAtlasSearchMatch(
   nodes: readonly MapNode[],
   query: string
 ): MapNode | null {
-  const normalizedQuery = normalizeSearchText(query);
+  const normalizedQuery = normalizeAtlasSearchText(query);
   if (!normalizedQuery) return null;
-  return (
-    nodes.find((node) =>
-      [node.title, node.subtitle, node.meta].some((value) =>
-        normalizeSearchText(value).includes(normalizedQuery)
-      )
-    ) ?? null
-  );
+  return nodes.find((node) => matchesAtlasSearch(node, normalizedQuery)) ?? null;
 }
 
 export function buildAtlasFlowNodes(

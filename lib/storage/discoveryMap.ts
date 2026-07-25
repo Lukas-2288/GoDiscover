@@ -292,6 +292,7 @@ function eventToEdge(event: TrailMutationEvent): MapEdge {
     source: event.source,
     target: event.target,
     createdAt: event.occurredAt,
+    ...(event.reason !== undefined ? { reason: event.reason } : {}),
   };
 }
 

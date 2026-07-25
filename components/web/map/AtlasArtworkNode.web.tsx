@@ -1,6 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { Node, NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
 import type { AtlasArtworkData } from "./atlasGraph";
 
@@ -24,12 +24,27 @@ export function AtlasArtworkNode({
 
   return (
     <View
+      aria-selected={selected}
+      accessibilityState={{ selected }}
       style={[
         styles.frame,
         shape === "circle" && styles.circle,
         selected && styles.selected,
       ]}
+      testID={`atlas-artwork-${node.id}`}
     >
+      <Handle
+        isConnectable={false}
+        position={Position.Left}
+        style={hiddenHandleStyle}
+        type="target"
+      />
+      <Handle
+        isConnectable={false}
+        position={Position.Right}
+        style={hiddenHandleStyle}
+        type="source"
+      />
       {imageUrl ? (
         <View
           style={[
@@ -69,6 +84,16 @@ export function AtlasArtworkNode({
     </View>
   );
 }
+
+const hiddenHandleStyle: React.CSSProperties = {
+  border: 0,
+  height: 1,
+  minHeight: 1,
+  minWidth: 1,
+  opacity: 0,
+  pointerEvents: "none",
+  width: 1,
+};
 
 const styles = StyleSheet.create({
   frame: {

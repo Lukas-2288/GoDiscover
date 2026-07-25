@@ -20,6 +20,7 @@ export default function WebHomeScreen() {
   const reducedMotion = useReducedMotion();
   const [section, setSection] = useState<WebSection>("archive");
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
+  const [savedHydrated, setSavedHydrated] = useState(false);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>({ version: 1, nodes: [], edges: [] });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -40,7 +41,12 @@ export default function WebHomeScreen() {
   const nextItem = activeSession?.deck.queue[1] ?? null;
 
   useEffect(() => {
-    void runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => undefined);
+    void runSavedMutation(() => listSaved())
+      .then((items) => {
+        setSavedItems(items);
+        setSavedHydrated(true);
+      })
+      .catch(() => undefined);
     void listRecents().then(setRecentItems).catch(() => undefined);
     supabase.auth.getSession().then(({ data }) => setAuthSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
@@ -51,10 +57,11 @@ export default function WebHomeScreen() {
   }, []);
 
   useEffect(() => {
+    if (!savedHydrated) return;
     void loadMapSnapshot(savedItems, authSession?.user.id)
       .then(setMapSnapshot)
       .catch(() => undefined);
-  }, [authSession?.user.id, savedItems]);
+  }, [authSession?.user.id, savedHydrated, savedItems]);
 
   useEffect(() => {
     if (!detailSelection) {

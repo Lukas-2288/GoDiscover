@@ -19,6 +19,7 @@ import { AtlasArtworkNode, type AtlasArtworkNodeDefinition } from "./AtlasArtwor
 import {
   buildAtlasFlowEdges,
   buildAtlasFlowNodes,
+  filterAtlasSearchMatches,
   findAtlasSearchMatch,
 } from "./atlasGraph";
 import {
@@ -112,13 +113,7 @@ function SavedAtlasInner({
     [edges, selectedId]
   );
   const filteredListNodes = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return nodes;
-    return nodes.filter((node) =>
-      `${node.title} ${node.subtitle} ${node.meta}`
-        .toLocaleLowerCase()
-        .includes(normalized)
-    );
+    return filterAtlasSearchMatches(nodes, query);
   }, [nodes, query]);
 
   const focusSearchMatch = (nextQuery: string) => {

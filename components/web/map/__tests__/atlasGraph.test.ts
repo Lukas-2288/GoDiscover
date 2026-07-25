@@ -1,12 +1,10 @@
 import type { MapEdge, MapNode } from "../../../../lib/storage/discoveryMap";
-
-function loadAtlasGraph(): Record<string, unknown> {
-  try {
-    return require("../atlasGraph") as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
+import {
+  buildAtlasFlowEdges,
+  buildAtlasFlowNodes,
+  filterAtlasSearchMatches,
+  findAtlasSearchMatch,
+} from "../atlasGraph";
 
 const nodes: MapNode[] = [
   {
@@ -57,11 +55,7 @@ const edges: MapEdge[] = [
 
 describe("Saved Atlas graph presentation", () => {
   it("uses native artwork geometry and typographic fallback details", () => {
-    const buildAtlasFlowNodes = loadAtlasGraph().buildAtlasFlowNodes as
-      | ((nodes: MapNode[], edges: MapEdge[], options: unknown) => any[])
-      | undefined;
-
-    const flowNodes = buildAtlasFlowNodes?.(nodes, edges, {
+    const flowNodes = buildAtlasFlowNodes(nodes, edges, {
       detailMode: "close",
       selectedId: null,
     });
@@ -106,11 +100,7 @@ describe("Saved Atlas graph presentation", () => {
   });
 
   it("reduces a far atlas to one representative and summary per category", () => {
-    const buildAtlasFlowNodes = loadAtlasGraph().buildAtlasFlowNodes as
-      | ((nodes: MapNode[], edges: MapEdge[], options: unknown) => any[])
-      | undefined;
-
-    const flowNodes = buildAtlasFlowNodes?.(nodes, edges, {
+    const flowNodes = buildAtlasFlowNodes(nodes, edges, {
       detailMode: "far",
       selectedId: null,
     });
@@ -143,18 +133,14 @@ describe("Saved Atlas graph presentation", () => {
   });
 
   it("keeps global paths quiet and labels only paths focused by selection", () => {
-    const buildAtlasFlowEdges = loadAtlasGraph().buildAtlasFlowEdges as
-      | ((edges: MapEdge[], selectedId: string | null) => any[])
-      | undefined;
-
-    expect(buildAtlasFlowEdges?.(edges, null)).toEqual([
+    expect(buildAtlasFlowEdges(edges, null)).toEqual([
       expect.objectContaining({
         id: "arrival-to-vespertine",
         label: undefined,
         style: expect.objectContaining({ stroke: "rgba(244, 241, 234, 0.28)" }),
       }),
     ]);
-    expect(buildAtlasFlowEdges?.(edges, "movies:arrival")).toEqual([
+    expect(buildAtlasFlowEdges(edges, "movies:arrival")).toEqual([
       expect.objectContaining({
         id: "arrival-to-vespertine",
         label: "Otherworldly intimacy",
@@ -164,17 +150,19 @@ describe("Saved Atlas graph presentation", () => {
   });
 
   it("finds a saved work by title, creator, or metadata for map focus", () => {
-    const findAtlasSearchMatch = loadAtlasGraph().findAtlasSearchMatch as
-      | ((nodes: MapNode[], query: string) => MapNode | null)
-      | undefined;
-
-    expect(findAtlasSearchMatch?.(nodes, "arrival")?.id).toBe("movies:arrival");
-    expect(findAtlasSearchMatch?.(nodes, "bjork")?.id).toBe(
+    expect(findAtlasSearchMatch(nodes, "arrival")?.id).toBe("movies:arrival");
+    expect(findAtlasSearchMatch(nodes, "bjork")?.id).toBe(
       "albums:vespertine"
     );
-    expect(findAtlasSearchMatch?.(nodes, "science fiction")?.id).toBe(
+    expect(findAtlasSearchMatch(nodes, "science fiction")?.id).toBe(
       "movies:arrival"
     );
-    expect(findAtlasSearchMatch?.(nodes, "not in the atlas")).toBeNull();
+    expect(findAtlasSearchMatch(nodes, "not in the atlas")).toBeNull();
+  });
+
+  it("uses the same accent-insensitive matching for list filtering", () => {
+    expect(filterAtlasSearchMatches(nodes, "bjork").map((node) => node.id)).toEqual([
+      "albums:vespertine",
+    ]);
   });
 });
