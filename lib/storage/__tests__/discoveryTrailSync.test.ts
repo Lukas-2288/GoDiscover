@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { DISCOVERY_MAP_STORAGE_KEY } from "../discoveryMap";
+import { DISCOVERY_MAP_STORAGE_KEY, recordMapTrailEvent } from "../discoveryMap";
 import {
   disconnectSavedItemTrails,
   syncDiscoveryTrailEvents,
@@ -66,6 +66,7 @@ const localConnect = {
   source: "movies:arrival",
   target: "books:kindred",
   occurredAt: 10,
+  origin: "anonymous" as const,
 };
 
 beforeEach(async () => {
@@ -129,7 +130,7 @@ it("claims an anonymous offline event for the signed-in user and merges a cloud 
   ).resolves.toEqual({
     version: 2,
     events: [
-      { ...localConnect, userId: "user-a" },
+      { ...localConnect, origin: "account", userId: "user-a" },
       {
         id: "connect:books:kindred->movies:moonlight:20",
         relationshipId: "books:kindred->movies:moonlight",
@@ -137,6 +138,7 @@ it("claims an anonymous offline event for the signed-in user and merges a cloud 
         source: "books:kindred",
         target: "movies:moonlight",
         occurredAt: 20,
+        origin: "account",
         reason: "shared creator",
         sessionId: "session-1",
         userId: "user-a",
@@ -153,6 +155,7 @@ it("appends stable disconnect tombstones for every active trail attached to an u
     source: "movies:arrival",
     target: "movies:moonlight",
     occurredAt: 11,
+    origin: "anonymous" as const,
   };
   await AsyncStorage.setItem(
     DISCOVERY_MAP_STORAGE_KEY,
@@ -174,8 +177,10 @@ it("appends stable disconnect tombstones for every active trail attached to an u
       source: "movies:arrival",
       target: "books:kindred",
       occurredAt: 30,
+      origin: "anonymous",
       reason: "unsaved",
       sessionId: "session-2",
+      userId: undefined,
     },
     {
       id: "disconnect:movies:arrival->movies:moonlight:30",
@@ -184,8 +189,10 @@ it("appends stable disconnect tombstones for every active trail attached to an u
       source: "movies:arrival",
       target: "movies:moonlight",
       occurredAt: 30,
+      origin: "anonymous",
       reason: "unsaved",
       sessionId: "session-2",
+      userId: undefined,
     },
   ]);
 });
@@ -228,6 +235,7 @@ it("preserves another user's local trail events while syncing the current user",
     source: "movies:arrival",
     target: "books:kindred",
     occurredAt: 20,
+    origin: "account" as const,
     userId: "user-b",
   };
   await AsyncStorage.setItem(
@@ -256,7 +264,7 @@ it("preserves another user's local trail events while syncing the current user",
     )
   ).resolves.toEqual({
     version: 2,
-    events: [otherUsersDisconnect, { ...localConnect, userId: "user-a" }],
+    events: [otherUsersDisconnect, { ...localConnect, origin: "account", userId: "user-a" }],
   });
 });
 
@@ -285,4 +293,92 @@ it("does not append an already-synchronized event on a repeated sync", async () 
     ],
   ]);
   expect(mockRemoteEvents).toHaveLength(1);
+});
+
+it("disconnects only the active owner's relationship when another account disconnected the same ID", async () => {
+  const accountAConnect = {
+    ...localConnect,
+    origin: "account" as const,
+    userId: "user-a",
+  };
+  const accountBDisconnect = {
+    id: "disconnect:movies:arrival->books:kindred:20",
+    relationshipId: "movies:arrival->books:kindred",
+    action: "disconnect" as const,
+    source: "movies:arrival",
+    target: "books:kindred",
+    occurredAt: 20,
+    origin: "account" as const,
+    userId: "user-b",
+  };
+  await AsyncStorage.setItem(
+    DISCOVERY_MAP_STORAGE_KEY,
+    JSON.stringify({ version: 2, events: [accountAConnect, accountBDisconnect] })
+  );
+
+  const events = await disconnectSavedItemTrails(
+    { category: "movies", id: "arrival" },
+    { occurredAt: 30, userId: "user-a" }
+  );
+
+  expect(events).toContainEqual({
+    id: "disconnect:movies:arrival->books:kindred:30",
+    relationshipId: "movies:arrival->books:kindred",
+    action: "disconnect",
+    source: "movies:arrival",
+    target: "books:kindred",
+    occurredAt: 30,
+    origin: "account",
+    userId: "user-a",
+  });
+  expect(events).toContainEqual(accountBDisconnect);
+});
+
+it("does not let a second account claim signed-in offline history", async () => {
+  const savedItems = [
+    {
+      id: "arrival",
+      category: "movies" as const,
+      title: "Arrival",
+      subtitle: "2016",
+      meta: "Science fiction",
+      savedAt: 10,
+    },
+    {
+      id: "kindred",
+      category: "books" as const,
+      title: "Kindred",
+      subtitle: "Octavia E. Butler",
+      meta: "1979",
+      savedAt: 9,
+    },
+  ];
+  await recordMapTrailEvent(
+    {
+      source: { category: "movies", id: "arrival" },
+      target: { category: "books", id: "kindred" },
+      occurredAt: 10,
+    },
+    savedItems,
+    "user-a"
+  );
+  mockCurrentUserId = "user-b";
+
+  await syncDiscoveryTrailEvents();
+
+  expect(mockRemoteEvents).toEqual([]);
+  await expect(
+    AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY).then((raw) =>
+      raw ? JSON.parse(raw) : null
+    )
+  ).resolves.toEqual({
+    version: 2,
+    events: [
+      {
+        ...localConnect,
+        origin: "account",
+        userId: "user-a",
+      },
+    ],
+  });
 });

@@ -122,6 +122,7 @@ it("migrates duplicate legacy directed edges into their newest deterministic con
     source: "movies:arrival",
     target: "books:kindred",
     occurredAt: 84,
+    origin: "anonymous",
   };
 
   await AsyncStorage.setItem(
@@ -191,6 +192,7 @@ it("keeps a persisted disconnect after its target is removed and saved again", a
     source: "movies:arrival",
     target: "books:kindred",
     occurredAt: 10,
+    origin: "anonymous",
   } as const;
   const disconnectEvent = {
     id: "disconnect:movies:arrival->books:kindred:20",
@@ -199,6 +201,7 @@ it("keeps a persisted disconnect after its target is removed and saved again", a
     source: "movies:arrival",
     target: "books:kindred",
     occurredAt: 20,
+    origin: "anonymous",
   } as const;
   await AsyncStorage.setItem(
     DISCOVERY_MAP_STORAGE_KEY,
@@ -242,6 +245,7 @@ it("records an on-demand exploration edge in versioned storage", async () => {
     source: "movies:arrival",
     target: "books:kindred",
     occurredAt: 42,
+    origin: "anonymous",
   };
 
   expect(snapshot.edges).toEqual([expectedEdge]);
@@ -329,3 +333,75 @@ it("keeps malformed persistence recoverable while resetting the active trail sto
     AsyncStorage.getItem(DISCOVERY_MAP_MALFORMED_STORAGE_KEY)
   ).resolves.toBe("{not-json");
 });
+
+it("folds only the active account's trail events when relationship IDs overlap", async () => {
+  const accountAConnect = {
+    id: "connect:movies:arrival->books:kindred:10",
+    relationshipId: "movies:arrival->books:kindred",
+    action: "connect" as const,
+    source: "movies:arrival",
+    target: "books:kindred",
+    occurredAt: 10,
+    origin: "account" as const,
+    userId: "user-a",
+  };
+  const accountBDisconnect = {
+    id: "disconnect:movies:arrival->books:kindred:20",
+    relationshipId: "movies:arrival->books:kindred",
+    action: "disconnect" as const,
+    source: "movies:arrival",
+    target: "books:kindred",
+    occurredAt: 20,
+    origin: "account" as const,
+    userId: "user-b",
+  };
+  await AsyncStorage.setItem(
+    DISCOVERY_MAP_STORAGE_KEY,
+    JSON.stringify({ version: 2, events: [accountAConnect, accountBDisconnect] })
+  );
+
+  const snapshot = await loadMapSnapshot([arrival, kindred], "user-a");
+
+  expect(snapshot.events).toEqual([accountAConnect]);
+  expect(snapshot.edges).toEqual([
+    {
+      id: "movies:arrival->books:kindred",
+      source: "movies:arrival",
+      target: "books:kindred",
+      createdAt: 10,
+    },
+  ]);
+  await expect(
+    AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY).then((raw) =>
+      raw ? JSON.parse(raw) : null
+    )
+  ).resolves.toEqual({ version: 2, events: [accountAConnect, accountBDisconnect] });
+});
+
+it.each(["reason", "sessionId", "userId"])(
+  "recovers a v2 payload with a malformed optional %s field",
+  async (field) => {
+    const malformedEvent = {
+      id: "connect:movies:arrival->books:kindred:10",
+      relationshipId: "movies:arrival->books:kindred",
+      action: "connect",
+      source: "movies:arrival",
+      target: "books:kindred",
+      occurredAt: 10,
+      origin: "anonymous",
+      [field]: 17,
+    };
+    await AsyncStorage.setItem(
+      DISCOVERY_MAP_STORAGE_KEY,
+      JSON.stringify({ version: 2, events: [malformedEvent] })
+    );
+
+    await expect(loadMapSnapshot([arrival, kindred])).resolves.toMatchObject({
+      events: [],
+      edges: [],
+    });
+    await expect(
+      AsyncStorage.getItem(DISCOVERY_MAP_MALFORMED_STORAGE_KEY)
+    ).resolves.toBe(JSON.stringify({ version: 2, events: [malformedEvent] }));
+  }
+);

@@ -50,8 +50,10 @@ export default function WebHomeScreen() {
   }, []);
 
   useEffect(() => {
-    void loadMapSnapshot(savedItems).then(setMapSnapshot).catch(() => undefined);
-  }, [savedItems]);
+    void loadMapSnapshot(savedItems, authSession?.user.id)
+      .then(setMapSnapshot)
+      .catch(() => undefined);
+  }, [authSession?.user.id, savedItems]);
 
   useEffect(() => {
     if (!detailSelection) {
@@ -87,7 +89,8 @@ export default function WebHomeScreen() {
       const savedTarget: SavedItem = { ...committed, category: selected, savedAt: Date.now() };
       void recordMapTrailEvent(
         { source: trailSeed.current, target: { category: selected, id: committed.id }, occurredAt: Date.now() },
-        [...savedItems, savedTarget]
+        [...savedItems, savedTarget],
+        authSession?.user.id
       ).then(setMapSnapshot).catch(() => undefined);
     });
   };

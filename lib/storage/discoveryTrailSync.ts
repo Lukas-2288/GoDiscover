@@ -2,6 +2,7 @@ import type { ContentCategory } from "../../types/content";
 import { supabase } from "../supabase";
 import {
   appendDiscoveryTrailEvents,
+  filterTrailMutationEventsForOwner,
   foldTrailMutationEvents,
   readDiscoveryTrailEvents,
   writeDiscoveryTrailEvents,
@@ -28,7 +29,7 @@ export type DisconnectSavedItemTrailsOptions = {
 };
 
 function eventKey(event: TrailMutationEvent): string {
-  return `${event.userId ?? "anonymous"}:${event.id}`;
+  return `${event.origin}:${event.userId ?? "anonymous"}:${event.id}`;
 }
 
 function uniqueEvents(events: readonly TrailMutationEvent[]): TrailMutationEvent[] {
@@ -57,6 +58,7 @@ function rowToEvent(row: DiscoveryTrailEventRow): TrailMutationEvent | null {
     source: row.source,
     target: row.target,
     occurredAt,
+    origin: "account",
     reason: row.reason ?? undefined,
     sessionId: row.session_id ?? undefined,
     userId: row.user_id,
@@ -106,12 +108,13 @@ export async function syncDiscoveryTrailEvents(): Promise<TrailMutationEvent[]> 
     .map(rowToEvent)
     .filter((event): event is TrailMutationEvent => event !== null && event.userId === userId);
   const cloudEventIds = new Set(cloudEvents.map((event) => event.id));
-  const currentUserEvents = localEvents
-    .filter((event) => !event.userId || event.userId === userId)
-    .map((event) => ({ ...event, userId }));
-  const foreignEvents = localEvents.filter(
-    (event) => event.userId && event.userId !== userId
+  const ownedEvents = filterTrailMutationEventsForOwner(localEvents, userId);
+  const currentUserEvents = ownedEvents.map((event) =>
+    event.origin === "anonymous"
+      ? { ...event, origin: "account" as const, userId }
+      : event
   );
+  const foreignEvents = localEvents.filter((event) => !ownedEvents.includes(event));
   const eventsToAppend = currentUserEvents.filter(
     (event) => !cloudEventIds.has(event.id)
   );
@@ -142,7 +145,8 @@ export async function disconnectSavedItemTrails(
 ): Promise<TrailMutationEvent[]> {
   const itemNodeId = `${item.category}:${item.id}`;
   const events = await readDiscoveryTrailEvents();
-  const disconnects = foldTrailMutationEvents(events)
+  const ownedEvents = filterTrailMutationEventsForOwner(events, options.userId);
+  const disconnects = foldTrailMutationEvents(ownedEvents)
     .filter((edge) => edge.source === itemNodeId || edge.target === itemNodeId)
     .map((edge) => ({
       id: `disconnect:${edge.id}:${options.occurredAt}`,
@@ -151,6 +155,7 @@ export async function disconnectSavedItemTrails(
       source: edge.source,
       target: edge.target,
       occurredAt: options.occurredAt,
+      origin: options.userId ? ("account" as const) : ("anonymous" as const),
       reason: options.reason,
       sessionId: options.sessionId,
       userId: options.userId,

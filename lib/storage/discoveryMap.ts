@@ -43,7 +43,11 @@ export type MapTrailEvent = {
   source: Pick<SavedItem, "category" | "id">;
   target: Pick<SavedItem, "category" | "id">;
   occurredAt: number;
+  reason?: string;
+  sessionId?: string;
 };
+
+export type TrailEventOrigin = "anonymous" | "account";
 
 export type TrailMutationEvent = {
   id: string;
@@ -52,6 +56,7 @@ export type TrailMutationEvent = {
   source: string;
   target: string;
   occurredAt: number;
+  origin: TrailEventOrigin;
   reason?: string;
   sessionId?: string;
   userId?: string;
@@ -102,9 +107,16 @@ function isMapEdge(value: unknown): value is MapEdge {
   );
 }
 
-function isTrailMutationEvent(value: unknown): value is TrailMutationEvent {
+function hasOptionalString(
+  event: Record<string, unknown>,
+  key: "reason" | "sessionId" | "userId"
+): boolean {
+  return event[key] === undefined || typeof event[key] === "string";
+}
+
+function hasTrailEventCore(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object") return false;
-  const event = value as Partial<TrailMutationEvent>;
+  const event = value as Record<string, unknown>;
   return (
     typeof event.id === "string" &&
     typeof event.relationshipId === "string" &&
@@ -112,8 +124,35 @@ function isTrailMutationEvent(value: unknown): value is TrailMutationEvent {
     typeof event.source === "string" &&
     typeof event.target === "string" &&
     typeof event.occurredAt === "number" &&
-    Number.isFinite(event.occurredAt)
+    Number.isFinite(event.occurredAt) &&
+    hasOptionalString(event, "reason") &&
+    hasOptionalString(event, "sessionId") &&
+    hasOptionalString(event, "userId")
   );
+}
+
+function isTrailMutationEvent(value: unknown): value is TrailMutationEvent {
+  if (!hasTrailEventCore(value)) return false;
+  return (
+    (value.origin === "anonymous" && value.userId === undefined) ||
+    (value.origin === "account" &&
+      typeof value.userId === "string" &&
+      value.userId.length > 0)
+  );
+}
+
+function normalizeStoredTrailMutationEvent(
+  value: unknown
+): TrailMutationEvent | null {
+  if (!hasTrailEventCore(value)) return null;
+  if ("origin" in value) return isTrailMutationEvent(value) ? value : null;
+  if (value.userId === undefined) {
+    return { ...value, origin: "anonymous" } as TrailMutationEvent;
+  }
+  if (typeof value.userId === "string" && value.userId.length > 0) {
+    return { ...value, origin: "account" } as TrailMutationEvent;
+  }
+  return null;
 }
 
 function legacyEvent(edge: MapEdge): TrailMutationEvent {
@@ -124,13 +163,14 @@ function legacyEvent(edge: MapEdge): TrailMutationEvent {
     source: edge.source,
     target: edge.target,
     occurredAt: edge.createdAt,
+    origin: "anonymous",
   };
 }
 
 function uniqueEvents(events: readonly TrailMutationEvent[]): TrailMutationEvent[] {
   const byId = new Map<string, TrailMutationEvent>();
   for (const event of events) {
-    byId.set(`${event.userId ?? "anonymous"}:${event.id}`, event);
+    byId.set(`${event.origin}:${event.userId ?? "anonymous"}:${event.id}`, event);
   }
   return [...byId.values()];
 }
@@ -169,8 +209,13 @@ async function readStoredEvents(): Promise<TrailMutationEvent[]> {
     return [];
   }
 
-  if (parsed.version === 2 && Array.isArray(parsed.events) && parsed.events.every(isTrailMutationEvent)) {
-    return uniqueEvents(parsed.events);
+  if (parsed.version === 2 && Array.isArray(parsed.events)) {
+    const events = parsed.events.map(normalizeStoredTrailMutationEvent);
+    if (events.every((event): event is TrailMutationEvent => event !== null)) {
+      const normalized = uniqueEvents(events);
+      if (!parsed.events.every(isTrailMutationEvent)) await writeStoredEvents(normalized);
+      return normalized;
+    }
   }
 
   if (parsed.version === 1 && Array.isArray(parsed.edges) && parsed.edges.every(isMapEdge)) {
@@ -217,6 +262,17 @@ export async function appendDiscoveryTrailEvents(
   const next = uniqueEvents([...await readStoredEvents(), ...events]);
   await writeStoredEvents(next);
   return next;
+}
+
+export function filterTrailMutationEventsForOwner(
+  events: readonly TrailMutationEvent[],
+  activeUserId?: string
+): TrailMutationEvent[] {
+  return events.filter(
+    (event) =>
+      event.origin === "anonymous" ||
+      (event.origin === "account" && event.userId === activeUserId)
+  );
 }
 
 function pruneEvents(
@@ -266,26 +322,35 @@ export function deriveMapNodes(savedItems: readonly SavedItem[]): MapNode[] {
 }
 
 export async function loadMapSnapshot(
-  savedItems: readonly SavedItem[]
+  savedItems: readonly SavedItem[],
+  activeUserId?: string
 ): Promise<MapSnapshot> {
   const nodes = deriveMapNodes(savedItems);
   const nodeIds = new Set(nodes.map((node) => node.id));
   const storedEvents = await readStoredEvents();
-  const events = pruneEvents(storedEvents, nodeIds);
-  if (events.length !== storedEvents.length) await writeStoredEvents(events);
+  const ownedEvents = filterTrailMutationEventsForOwner(storedEvents, activeUserId);
+  const events = pruneEvents(ownedEvents, nodeIds);
+  if (events.length !== ownedEvents.length) {
+    await writeStoredEvents([
+      ...storedEvents.filter((event) => !ownedEvents.includes(event)),
+      ...events,
+    ]);
+  }
   return { version: 2, nodes, edges: foldTrailMutationEvents(events), events };
 }
 
 export async function recordMapTrailEvent(
   event: MapTrailEvent,
-  savedItems: readonly SavedItem[]
+  savedItems: readonly SavedItem[],
+  activeUserId?: string
 ): Promise<MapSnapshot> {
   const nodes = deriveMapNodes(savedItems);
   const nodeIds = new Set(nodes.map((node) => node.id));
   const source = nodeId(event.source);
   const target = nodeId(event.target);
-  const storedEvents = pruneEvents(await readStoredEvents(), nodeIds);
-  let events = storedEvents;
+  const allStoredEvents = await readStoredEvents();
+  const ownedEvents = filterTrailMutationEventsForOwner(allStoredEvents, activeUserId);
+  let events = pruneEvents(ownedEvents, nodeIds);
   if (source !== target && nodeIds.has(source) && nodeIds.has(target)) {
     const relationshipId = `${source}->${target}`;
     const trailEvent: TrailMutationEvent = {
@@ -295,11 +360,18 @@ export async function recordMapTrailEvent(
       source,
       target,
       occurredAt: event.occurredAt,
+      origin: activeUserId ? "account" : "anonymous",
+      userId: activeUserId,
+      reason: event.reason,
+      sessionId: event.sessionId,
     };
-    events = uniqueEvents([...storedEvents, trailEvent]);
+    events = uniqueEvents([...events, trailEvent]);
   }
 
-  await writeStoredEvents(events);
+  await writeStoredEvents([
+    ...allStoredEvents.filter((stored) => !ownedEvents.includes(stored)),
+    ...events,
+  ]);
 
   return { version: 2, nodes, edges: foldTrailMutationEvents(events), events };
 }
