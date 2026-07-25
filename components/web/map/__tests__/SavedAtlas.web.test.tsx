@@ -495,6 +495,34 @@ describe("Saved Atlas React Flow canvas", () => {
     expect(getByLabelText("Retry recommendations")).toBeTruthy();
   });
 
+  it("projects responsive drawer recommendations into the same mobile atlas orbit", () => {
+    render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={nodes[0].id}
+        layout="mobile"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        {...({
+          responsiveRecommendations: [{
+            category: "books",
+            item: { id: "story", title: "Story of Your Life", subtitle: "Ted Chiang", meta: "1998" },
+            reason: { label: "Shared speculative language" },
+          }],
+        } as any)}
+      />
+    );
+
+    expect(mockFlowProps.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "books:story",
+        data: expect.objectContaining({ transient: true }),
+      }),
+    ]));
+  });
+
   it("uses immediate camera feedback and disables animated paths when reduced motion is requested", () => {
     render(
       <SavedAtlas

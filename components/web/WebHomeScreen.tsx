@@ -1,4 +1,5 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import React, { useEffect, useRef } from "react";
 import {
   Pressable,
   ScrollView,
@@ -267,6 +268,10 @@ export function WebDetailPanel({
   expanded = true,
   onToggleExpanded,
   similarLabel = "Find similar",
+  onFindSimilarInAtlas,
+  atlasRecommendations = [],
+  atlasRecommendationsLoading = false,
+  atlasRecommendationsError = false,
 }: {
   item: ResultItem | null;
   category: ContentCategory | null;
@@ -281,14 +286,27 @@ export function WebDetailPanel({
   expanded?: boolean;
   onToggleExpanded?(): void;
   similarLabel?: string;
+  onFindSimilarInAtlas?(): void;
+  atlasRecommendations?: readonly { id: string; title: string; reason: string }[];
+  atlasRecommendationsLoading?: boolean;
+  atlasRecommendationsError?: boolean;
 }) {
   const { width } = useWindowDimensions();
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef<{ focus?(): void } | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (presentation !== "sheet" || typeof document === "undefined") return;
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus?.();
+    return () => returnFocusRef.current?.focus?.();
+  }, [presentation]);
   if (!item || !category) return null;
   const theme = getCategoryTheme(category);
   const description = detail ? detailDescription(detail) : "Open the full detail card to see why this one belongs in your orbit.";
-  return (
-    <View style={[styles.detailPanel, presentation === "drawer" && styles.detailPanelDrawer, (presentation === "sheet" || width < 700) && styles.detailPanelMobile]} accessibilityViewIsModal={presentation === "sheet"} accessibilityLabel={`${item.title} details`}>
-      <View style={styles.detailTop}><Text style={[styles.sectionKicker, { color: theme.accent }]}>{theme.label.toUpperCase()} / FIELD NOTE</Text><Pressable accessibilityRole="button" accessibilityLabel="Close details" onPress={onClose} style={styles.closeButton}><Text style={styles.closeText}>×</Text></Pressable></View>
+  const panel = (
+    <View style={[styles.detailPanel, presentation === "drawer" && styles.detailPanelDrawer, (presentation === "sheet" || width < 700) && styles.detailPanelMobile]} accessibilityLabel={presentation === "sheet" ? undefined : `${item.title} details`}>
+      <View style={styles.detailTop}><Text style={[styles.sectionKicker, { color: theme.accent }]}>{theme.label.toUpperCase()} / FIELD NOTE</Text><Pressable ref={closeRef as any} accessibilityRole="button" accessibilityLabel="Close details" onPress={onClose} style={styles.closeButton}><Text style={styles.closeText}>×</Text></Pressable></View>
       <Text style={styles.detailTitle}>{item.title}</Text>
       <Text style={styles.detailSubtitle}>{item.subtitle}</Text>
       <Text style={styles.detailMeta}>{item.meta}</Text>
@@ -298,10 +316,52 @@ export function WebDetailPanel({
         <View style={styles.detailActions}>
           <Pressable accessibilityRole="button" onPress={onSave} style={[styles.primaryAction, { backgroundColor: theme.accent }]}><Text style={[styles.primaryActionText, { color: theme.onAccent }]}>{saved ? "Remove from map" : "Save to map"}</Text></Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={similarLabel} onPress={onSimilar} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>{similarLabel}</Text></Pressable>
+          {onFindSimilarInAtlas ? <Pressable accessibilityRole="button" accessibilityLabel="Find similar in atlas" onPress={onFindSimilarInAtlas} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>{atlasRecommendationsError ? "Retry atlas recommendations" : atlasRecommendationsLoading ? "Looking in atlas…" : "Find similar in atlas"}</Text></Pressable> : null}
           {onShare ? <Pressable accessibilityRole="button" onPress={onShare} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Share</Text></Pressable> : null}
         </View>
+        {atlasRecommendationsError ? <Text style={styles.atlasOrbitError}>Discovery is offline. Your saved atlas and trails are still available.</Text> : null}
+        {atlasRecommendations.map((recommendation) => <View key={recommendation.id} style={styles.atlasOrbitResult}><Text style={styles.atlasOrbitTitle}>{recommendation.title}</Text><Text style={styles.atlasOrbitReason}>{recommendation.reason}</Text></View>)}
       </> : null}
     </View>
+  );
+  if (presentation !== "sheet") return panel;
+  const handleSheetKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && event.target === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && event.target === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  return (
+    <div
+      aria-label={`${item.title} details`}
+      aria-modal="true"
+      onKeyDown={handleSheetKeyDown}
+      ref={sheetRef}
+      role="dialog"
+      style={{ width: "100%" }}
+    >
+      {panel}
+    </div>
   );
 }
 
@@ -319,5 +379,5 @@ const styles = StyleSheet.create({
   sectionHeading: { gap: 5 }, sectionHeadingInline: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionKicker: { color: webPalette.mint, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.6 }, sectionTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 30, fontWeight: "900", marginTop: 4 }, sectionAside: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, atlasGrid: { flexDirection: "row", flexWrap: "wrap", gap: 13 }, atlasTile: { borderRadius: 22, borderWidth: 1, minHeight: 190, overflow: "hidden", padding: 19, position: "relative", width: "23.5%" }, atlasTilePressed: { opacity: 0.75, transform: [{ scale: 0.98 }] }, atlasOrb: { borderRadius: 999, height: 120, opacity: 0.16, position: "absolute", right: -18, top: -25, width: 120 }, atlasNumber: { fontFamily: "IBM Plex Mono", fontSize: 10, marginBottom: 26 }, atlasLabel: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 25, fontWeight: "900", marginTop: 12 }, atlasHint: { bottom: 17, fontFamily: "IBM Plex Mono", fontSize: 9, position: "absolute" }, recentSection: { gap: 17 }, recentRow: { gap: 13 }, recentTile: { width: 150 }, recentImage: { alignItems: "center", borderRadius: 14, height: 112, justifyContent: "center", overflow: "hidden", width: 150 }, recentImageFill: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, width: "100%" as any }, recentCategory: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 10 }, recentTitle: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 14, fontWeight: "800", lineHeight: 18, marginTop: 4 },
   discoveryStage: { alignSelf: "center", maxWidth: 1040, padding: 34, width: "100%" }, discoveryHeader: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between" }, discoveryHeading: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 34, fontWeight: "900", marginTop: 6 }, portalTag: { borderRadius: 999, borderWidth: 1, fontFamily: "IBM Plex Mono", fontSize: 9, paddingHorizontal: 10, paddingVertical: 8 }, cardStage: { alignItems: "center", justifyContent: "center", minHeight: 610, position: "relative" }, peekCard: { borderRadius: 26, borderWidth: 1, height: 430, opacity: 0.55, padding: 20, position: "absolute", right: "12%" as any, top: 75, transform: [{ rotate: "5deg" }], width: 360 }, peekLabel: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, peekTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 23, fontWeight: "900", marginTop: 20 }, webCard: { backgroundColor: webPalette.surface, borderRadius: 28, maxWidth: 470, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 26, transform: [{ rotate: "-2deg" }], width: "100%" }, cardArt: { alignItems: "center", height: 310, justifyContent: "center", overflow: "hidden", position: "relative" }, cardArtImage: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, position: "absolute", width: "100%" as any }, cardBadge: { borderRadius: 999, left: 17, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", top: 17 }, cardBadgeText: { fontFamily: "IBM Plex Mono", fontSize: 9, fontWeight: "800" }, cardCopy: { padding: 22 }, cardCategory: { color: "#6D5B88", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1 }, cardTitle: { color: "#171225", fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", lineHeight: 35, marginTop: 10 }, cardSubtitle: { color: "#4A4057", fontFamily: "DM Sans", fontSize: 15, marginTop: 7 }, cardMeta: { color: "#857896", fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 14 }, actionRow: { alignItems: "stretch", flexDirection: "row", gap: 10, justifyContent: "center" }, primaryAction: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, primaryActionText: { fontFamily: "DM Sans", fontSize: 14, fontWeight: "900" }, secondaryAction: { alignItems: "center", borderColor: webPalette.border, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, secondaryActionText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "800" }, keyboardHint: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 18, textAlign: "center" }, emptyStage: { alignItems: "center", flex: 1, gap: 14, justifyContent: "center", minHeight: 520, padding: 34 }, stageKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.5 }, stageTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", textAlign: "center" }, loadingBar: { backgroundColor: webPalette.border, borderRadius: 999, height: 6, marginTop: 10, overflow: "hidden", width: 240 }, loadingFill: { height: "100%" as any, width: "55%" as any },
   atlasTileGrow: { flexGrow: 1 }, heroTitleMobile: { fontSize: 40, lineHeight: 43 }, webCardReduced: { transform: [] },
-  actionRowMobile: { flexDirection: "column" }, detailPanel: { backgroundColor: "#241B35", borderLeftColor: webPalette.border, borderLeftWidth: 1, minHeight: 300, padding: 28, width: 360 }, detailPanelDrawer: { borderLeftWidth: 0, borderTopColor: webPalette.border, borderTopWidth: 1, maxHeight: "80%" as any, width: "100%" as any }, detailPanelMobile: { borderLeftWidth: 0, width: "100%" as any }, detailTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, closeButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 }, closeText: { color: webPalette.muted, fontSize: 28, lineHeight: 30 }, drawerToggle: { alignSelf: "flex-start", justifyContent: "center", minHeight: 44, marginTop: 8 }, drawerToggleText: { color: webPalette.lime, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" }, detailTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 35, fontWeight: "900", lineHeight: 38, marginTop: 22 }, detailSubtitle: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 15, marginTop: 9 }, detailMeta: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 15 }, detailLoading: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 14, marginTop: 34 }, detailDescription: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 15, lineHeight: 23, marginTop: 28 }, detailActions: { gap: 10, marginTop: 30 },
+  actionRowMobile: { flexDirection: "column" }, detailPanel: { backgroundColor: "#241B35", borderLeftColor: webPalette.border, borderLeftWidth: 1, minHeight: 300, padding: 28, width: 360 }, detailPanelDrawer: { borderLeftWidth: 0, borderTopColor: webPalette.border, borderTopWidth: 1, maxHeight: "80%" as any, width: "100%" as any }, detailPanelMobile: { borderLeftWidth: 0, width: "100%" as any }, detailTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, closeButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 }, closeText: { color: webPalette.muted, fontSize: 28, lineHeight: 30 }, drawerToggle: { alignSelf: "flex-start", justifyContent: "center", minHeight: 44, marginTop: 8 }, drawerToggleText: { color: webPalette.lime, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" }, detailTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 35, fontWeight: "900", lineHeight: 38, marginTop: 22 }, detailSubtitle: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 15, marginTop: 9 }, detailMeta: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 15 }, detailLoading: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 14, marginTop: 34 }, detailDescription: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 15, lineHeight: 23, marginTop: 28 }, detailActions: { gap: 10, marginTop: 30 }, atlasOrbitError: { color: "#F4C7A1", fontFamily: "DM Sans", fontSize: 12, marginTop: 14 }, atlasOrbitResult: { borderTopColor: webPalette.border, borderTopWidth: 1, marginTop: 12, paddingTop: 12 }, atlasOrbitTitle: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" }, atlasOrbitReason: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 4 },
 });

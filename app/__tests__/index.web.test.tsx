@@ -29,6 +29,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       item,
       onSave,
       onToggleExpanded,
+      onFindSimilarInAtlas,
       presentation = "rail",
       expanded = true,
       similarLabel,
@@ -36,6 +37,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       item?: { title: string; meta: string } | null;
       onSave(): void;
       onToggleExpanded?(): void;
+      onFindSimilarInAtlas?(): void;
       presentation?: "drawer" | "rail" | "sheet";
       expanded?: boolean;
       similarLabel?: string;
@@ -44,6 +46,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       { accessibilityLabel: `${presentation} detail` },
       item ? React.createElement(MockText, null, item.title) : null,
       React.createElement(Pressable, { onPress: onSave, testID: "detail-toggle" }),
+      onFindSimilarInAtlas ? React.createElement(Pressable, { onPress: onFindSimilarInAtlas, testID: "atlas-find-similar" }) : null,
       onToggleExpanded ? React.createElement(Pressable, { onPress: onToggleExpanded, testID: "drawer-expand" }) : null,
       expanded ? React.createElement(MockText, { testID: "drawer-expanded" }, similarLabel ?? "Find similar") : null
     ),
@@ -379,6 +382,48 @@ it.each([
   if (presentation === "rail") {
     expect(screen.getByTestId("drawer-expanded")).toHaveTextContent("Open discovery deck");
   }
+});
+
+it.each(["tabletPortrait", "mobile"] as const)(
+  "keeps direct atlas recommendations in the %s app-owned detail surface",
+  async (layout) => {
+    mockLayout = layout;
+    const source = sourceItem();
+    jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+    jest.mocked(listSaved).mockResolvedValue([source]);
+    jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+    jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+
+    render(<WebHomeScreen />);
+    await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+    openAtlas();
+    fireEvent.press(screen.getByTestId("atlas-select"));
+    fireEvent.press(await screen.findByTestId("atlas-find-similar"));
+
+    await waitFor(() => expect(findMapRecommendations).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("saved-atlas")).toBeTruthy();
+  }
+);
+
+it("keeps a failed mobile atlas orbit retryable without leaving the atlas", async () => {
+  mockLayout = "mobile";
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSaved).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockRejectedValue(new Error("offline"));
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(await screen.findByTestId("atlas-find-similar"));
+  await waitFor(() => expect(findMapRecommendations).toHaveBeenCalledTimes(1));
+
+  expect(screen.getByTestId("saved-atlas")).toBeTruthy();
+  fireEvent.press(screen.getByTestId("atlas-find-similar"));
+  await waitFor(() => expect(findMapRecommendations).toHaveBeenCalledTimes(2));
+  expect(screen.getByTestId("saved-atlas")).toBeTruthy();
 });
 
 it.each([

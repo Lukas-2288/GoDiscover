@@ -39,6 +39,12 @@ export default function WebHomeScreen() {
   const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>(EMPTY_MAP_SNAPSHOT);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [atlasDrawerExpanded, setAtlasDrawerExpanded] = useState(false);
+  const [responsiveOrbit, setResponsiveOrbit] = useState<{
+    seedId: string | null;
+    loading: boolean;
+    error: boolean;
+    recommendations: OrbitRecommendation[];
+  }>({ seedId: null, loading: false, error: false, recommendations: [] });
   const [detailSelection, setDetailSelection] = useState<{ category: ContentCategory; item: ResultItem } | null>(null);
   const [detail, setDetail] = useState<ContentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -52,6 +58,7 @@ export default function WebHomeScreen() {
   const mapLoadSequence = useRef(0);
   const savedRefreshSequence = useRef(0);
   const trailSeed = useRef<{ category: ContentCategory; id: string } | null>(null);
+  const responsiveOrbitRequest = useRef(0);
   const discovery = useDiscoveryController({ onSavedItemsChange: setSavedItems });
   const { selected } = discovery.state;
   const { activeItem } = discovery;
@@ -68,6 +75,8 @@ export default function WebHomeScreen() {
         mapLoadSequence.current += 1;
         setMapSnapshot(EMPTY_MAP_SNAPSHOT);
         setSelectedNodeId(null);
+        responsiveOrbitRequest.current += 1;
+        setResponsiveOrbit({ seedId: null, loading: false, error: false, recommendations: [] });
         setDetailSelection(null);
       }
       setAuthSession(next);
@@ -196,6 +205,8 @@ export default function WebHomeScreen() {
   };
 
   const selectMapNode = (node: MapNode) => {
+    responsiveOrbitRequest.current += 1;
+    setResponsiveOrbit({ seedId: node.id, loading: false, error: false, recommendations: [] });
     setSelectedNodeId(node.id);
     setAtlasDrawerExpanded(false);
     setDetailSelection({ category: node.category, item: selectedNodeToItem(node) });
@@ -325,6 +336,34 @@ export default function WebHomeScreen() {
 
   const selectedNode = useMemo<MapNode | null>(() => mapSnapshot.nodes.find((node) => node.id === selectedNodeId) ?? null, [mapSnapshot.nodes, selectedNodeId]);
   const panelSelection = detailSelection ?? (selectedNode ? { category: selectedNode.category, item: selectedNodeToItem(selectedNode) } : null);
+  const requestResponsiveOrbit = async () => {
+    if (!selectedNode) return;
+    const requestId = ++responsiveOrbitRequest.current;
+    const seed: OrbitSeed = {
+      id: selectedNode.id,
+      category: selectedNode.category,
+      item: selectedNodeToItem(selectedNode),
+    };
+    setResponsiveOrbit({ seedId: seed.id, loading: true, error: false, recommendations: [] });
+    try {
+      const recommendations = await findOrbitRecommendations(seed);
+      if (responsiveOrbitRequest.current !== requestId) return;
+      setResponsiveOrbit({ seedId: seed.id, loading: false, error: false, recommendations });
+    } catch {
+      if (responsiveOrbitRequest.current !== requestId) return;
+      setResponsiveOrbit({ seedId: seed.id, loading: false, error: true, recommendations: [] });
+    }
+  };
+  const responsiveOrbitProps = selectedNode && responsiveOrbit.seedId === selectedNode.id ? {
+    atlasRecommendations: responsiveOrbit.recommendations.map((recommendation) => ({
+      id: `${recommendation.category}:${recommendation.item.id}`,
+      title: recommendation.item.title,
+      reason: recommendation.reason.label,
+    })),
+    atlasRecommendationsLoading: responsiveOrbit.loading,
+    atlasRecommendationsError: responsiveOrbit.error,
+    onFindSimilarInAtlas: () => void requestResponsiveOrbit(),
+  } : {};
 
   const submitAuth = async () => {
     setAuthMessage(null);
@@ -358,6 +397,8 @@ export default function WebHomeScreen() {
             selectedId={selectedNodeId}
             onSelect={selectMapNode}
             onClearSelection={() => {
+              responsiveOrbitRequest.current += 1;
+              setResponsiveOrbit({ seedId: null, loading: false, error: false, recommendations: [] });
               setSelectedNodeId(null);
               setDetailSelection(null);
             }}
@@ -366,9 +407,10 @@ export default function WebHomeScreen() {
             onSaveRecommendation={saveOrbitRecommendation}
             layout={layout}
             reducedMotion={reducedMotion}
+            responsiveRecommendations={(layout === "mobile" || layout === "tabletPortrait") && responsiveOrbit.seedId === selectedNodeId ? responsiveOrbit.recommendations : undefined}
           />
           {panelSelection && (layout === "tabletLandscape" || layout === "desktop") ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} presentation="rail" onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} similarLabel="Open discovery deck" onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
-          {panelSelection && layout === "tabletPortrait" ? <View style={styles.atlasPortraitDrawer}><WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} presentation="drawer" expanded={atlasDrawerExpanded} onToggleExpanded={() => setAtlasDrawerExpanded((expanded) => !expanded)} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} similarLabel="Open discovery deck" onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /></View> : null}
+          {panelSelection && layout === "tabletPortrait" ? <View style={styles.atlasPortraitDrawer}><WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} presentation="drawer" expanded={atlasDrawerExpanded} onToggleExpanded={() => setAtlasDrawerExpanded((expanded) => !expanded)} onClose={() => { responsiveOrbitRequest.current += 1; setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} similarLabel="Open discovery deck" onShare={() => void shareItem(panelSelection.category, panelSelection.item)} {...responsiveOrbitProps} /></View> : null}
         </View>
       ) : null}
       {section === "account" ? (
@@ -378,7 +420,7 @@ export default function WebHomeScreen() {
           {authSession ? <><Text style={styles.accountBody}>{authSession.user.email}</Text><Pressable accessibilityRole="button" onPress={() => void supabase.auth.signOut()} style={styles.authButton}><Text style={styles.authButtonText}>Sign out</Text></Pressable></> : <View style={styles.authCard}><Text style={styles.accountBody}>Sign in to keep your saved discoveries available across devices.</Text><TextInput accessibilityLabel="Email" autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={webPalette.muted} value={authEmail} onChangeText={setAuthEmail} style={styles.authInput} /><TextInput accessibilityLabel="Password" secureTextEntry placeholder="Password" placeholderTextColor={webPalette.muted} value={authPassword} onChangeText={setAuthPassword} style={styles.authInput} /><Pressable accessibilityRole="button" onPress={() => void submitAuth()} style={styles.authButton}><Text style={styles.authButtonText}>{authMode === "signin" ? "Sign in" : "Create account"}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setAuthMode((mode) => mode === "signin" ? "signup" : "signin")}><Text style={styles.authSwitch}>{authMode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}</Text></Pressable>{authMessage ? <Text style={styles.authMessage}>{authMessage}</Text> : null}</View>}
         </View>
       ) : null}
-      {detailSelection && layout === "mobile" ? <View style={styles.mobileDetail}><WebDetailPanel item={detailSelection.item} category={detailSelection.category} detail={detail} saved={savedItems.some((item) => item.category === detailSelection.category && item.id === detailSelection.item.id)} loading={detailLoading} presentation="sheet" onClose={() => setDetailSelection(null)} onSave={toggleDetailSave} onSimilar={() => startSimilar(detailSelection.category, detailSelection.item)} onShare={() => void shareItem(detailSelection.category, detailSelection.item)} /></View> : null}
+      {detailSelection && layout === "mobile" ? <View style={styles.mobileDetail}><WebDetailPanel item={detailSelection.item} category={detailSelection.category} detail={detail} saved={savedItems.some((item) => item.category === detailSelection.category && item.id === detailSelection.item.id)} loading={detailLoading} presentation="sheet" onClose={() => setDetailSelection(null)} onSave={toggleDetailSave} onSimilar={() => startSimilar(detailSelection.category, detailSelection.item)} onShare={() => void shareItem(detailSelection.category, detailSelection.item)} {...responsiveOrbitProps} /></View> : null}
     </WebShell>
   );
 }

@@ -93,6 +93,7 @@ type SavedAtlasProps = {
   onSaveRecommendation?(seed: OrbitSeed, recommendation: OrbitRecommendation): Promise<void> | void;
   layout?: "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop";
   reducedMotion?: boolean;
+  responsiveRecommendations?: readonly OrbitRecommendation[];
 };
 
 export type OrbitSeed = {
@@ -118,6 +119,7 @@ function SavedAtlasInner({
   onSaveRecommendation,
   layout = "desktop",
   reducedMotion = false,
+  responsiveRecommendations,
 }: SavedAtlasProps) {
   const { width, height } = useWindowDimensions();
   const { getViewport, setCenter, setViewport } = useReactFlow<AtlasArtworkNodeDefinition, Edge>();
@@ -164,9 +166,10 @@ function SavedAtlasInner({
     setRecommendationsLoading(false);
   }, [getViewport, selectedId]);
 
+  const graphRecommendations = responsiveRecommendations ?? recommendations;
   const orbitGraph = useMemo(
-    () => (orbitSeedId ? buildOrbitGraph(nodes, edges, orbitSeedId, recommendations, transientOrbitSeed ?? undefined) : null),
-    [edges, nodes, orbitSeedId, recommendations, transientOrbitSeed]
+    () => (orbitSeedId ? buildOrbitGraph(nodes, edges, orbitSeedId, graphRecommendations, transientOrbitSeed ?? undefined) : null),
+    [edges, graphRecommendations, nodes, orbitSeedId, transientOrbitSeed]
   );
   const displayedNodes = orbitGraph?.nodes ?? nodes;
   const displayedEdges = orbitGraph?.edges ?? edges;
