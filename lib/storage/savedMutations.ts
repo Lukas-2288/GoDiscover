@@ -1,8 +1,11 @@
 import type { ContentCategory, ResultItem } from "../../types/content";
 import {
   addSaved,
+  addSavedForOwner,
   listSaved,
+  listSavedForOwner,
   removeSaved,
+  removeSavedForOwner,
   type SavedItem,
 } from "./saved";
 
@@ -26,6 +29,21 @@ const DEFAULT_DEPENDENCIES: SavedMutationDependencies = {
   addSaved,
   removeSaved,
 };
+
+/**
+ * Binds every storage call to one owner captured at the moment the user acted,
+ * rather than letting each call resolve whoever is signed in when it runs. Pass
+ * the result as the `dependencies` argument to the mutations below.
+ */
+export function savedMutationsForOwner(
+  ownerId: string | null
+): SavedMutationDependencies {
+  return {
+    listSaved: () => listSavedForOwner(ownerId),
+    addSaved: (category, item) => addSavedForOwner(ownerId, category, item),
+    removeSaved: (category, id) => removeSavedForOwner(ownerId, category, id),
+  };
+}
 
 let mutationTail: Promise<void> | null = null;
 

@@ -29,6 +29,12 @@ export type SaveOperation = {
   id: number;
   category: ContentCategory;
   item: ResultItem;
+  /**
+   * The account signed in when the save happened. Undo must act on this owner,
+   * not on whoever is signed in when Undo fires — otherwise undoing a save made
+   * under one account deletes another account's copy of the same item.
+   */
+  ownerId?: string | null;
 };
 
 export type DiscoveryDeckState = {

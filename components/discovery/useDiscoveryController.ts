@@ -46,6 +46,11 @@ export type UseDiscoveryControllerOptions = {
   initialItems?: Partial<Record<ContentCategory, ResultItem[]>>;
   dependencies?: DiscoveryControllerDependencies;
   onSavedItemsChange?(items: SavedItem[]): void;
+  /**
+   * The signed-in account, or null when signed out. Saves record the owner that
+   * created them so Undo can refuse to run against a different account.
+   */
+  ownerId?: string | null;
 };
 
 export type DiscoveryDecision = "save" | "skip";
@@ -184,6 +189,7 @@ export function useDiscoveryController(
   const stateRef = useRef(deckState);
   const dependenciesRef = useRef(options.dependencies ?? DEFAULT_DEPENDENCIES);
   const onSavedItemsChangeRef = useRef(options.onSavedItemsChange);
+  const ownerIdRef = useRef(options.ownerId ?? null);
   const requestTrackerRef = useRef(createDiscoveryRequestTracker());
   const saveOperationSequenceRef = useRef(0);
   const undoTimerRef = useRef<UndoTimer | null>(null);
@@ -193,6 +199,7 @@ export function useDiscoveryController(
   stateRef.current = deckState;
   dependenciesRef.current = options.dependencies ?? DEFAULT_DEPENDENCIES;
   onSavedItemsChangeRef.current = options.onSavedItemsChange;
+  ownerIdRef.current = options.ownerId ?? null;
 
   const dispatch = useCallback((action: DiscoveryDeckAction): boolean => {
     const previous = stateRef.current;
@@ -384,6 +391,7 @@ export function useDiscoveryController(
         id: ++saveOperationSequenceRef.current,
         category,
         item: safeItem,
+        ownerId: ownerIdRef.current,
       };
       const dismissed = dispatch({ type: "saveStarted", operation });
       if (!dismissed) {
@@ -459,6 +467,15 @@ export function useDiscoveryController(
   const undo = useCallback(async (): Promise<void> => {
     const operation = stateRef.current.lastSave;
     if (!operation || undoInFlightRef.current.has(operation.id)) return;
+
+    // The account changed since this save. Removing now would delete the
+    // current account's copy of an item they never saved here, so drop the
+    // Undo instead of running it against the wrong owner.
+    if ((operation.ownerId ?? null) !== ownerIdRef.current) {
+      clearUndoTimer(operation.id);
+      dispatch({ type: "clearUndo", operationId: operation.id });
+      return;
+    }
 
     undoInFlightRef.current.add(operation.id);
     dispatch({ type: "clearActionError" });

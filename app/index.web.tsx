@@ -9,7 +9,7 @@ import { useReducedMotion } from "../components/discovery/useReducedMotion";
 import { useClientOnlyValue } from "../components/useClientOnlyValue";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
 import { listSavedForOwner, type SavedItem } from "../lib/storage/saved";
-import { removeSavedItem, runSavedMutation, saveSavedItem, toggleSavedItem } from "../lib/storage/savedMutations";
+import { removeSavedItem, runSavedMutation, savedMutationsForOwner, saveSavedItem, toggleSavedItem } from "../lib/storage/savedMutations";
 import { loadDetail, type ContentDetail } from "../lib/discovery/loadDetail";
 import { loadMapSnapshot, recordMapTrailEvent, type MapNode, type MapSnapshot } from "../lib/storage/discoveryMap";
 import { disconnectSavedItemTrails, syncDiscoveryTrailEvents } from "../lib/storage/discoveryTrailSync";
@@ -89,7 +89,10 @@ function WebHomeScreen() {
   const culturalProfileCache = useRef(
     new Map<string, ReturnType<typeof buildCulturalProfile>>()
   );
-  const discovery = useDiscoveryController({ onSavedItemsChange: setSavedItems });
+  const discovery = useDiscoveryController({
+    onSavedItemsChange: setSavedItems,
+    ownerId: authSession?.user.id ?? null,
+  });
   const { selected } = discovery.state;
   const { activeItem } = discovery;
   const activeSession = selected ? discovery.state.sessions[selected] : null;
@@ -314,12 +317,22 @@ function WebHomeScreen() {
       (item) => item.category === detailSelection.category && item.id === detailSelection.item.id
     );
     if (!isSaved) {
-      void runSavedMutation(() => toggleSavedItem(detailSelection.category, detailSelection.item))
+      void runSavedMutation(() =>
+        toggleSavedItem(
+          detailSelection.category,
+          detailSelection.item,
+          savedMutationsForOwner(operationOwnerId)
+        )
+      )
         .then((items) => { if (operationIsCurrent()) setSavedItems(items); })
         .catch(() => undefined);
       return;
     }
-    void removeSavedItem(detailSelection.category, detailSelection.item.id)
+    void removeSavedItem(
+      detailSelection.category,
+      detailSelection.item.id,
+      savedMutationsForOwner(operationOwnerId)
+    )
       .then(async (items) => {
         if (!operationIsCurrent()) return;
         if (
@@ -415,10 +428,14 @@ function WebHomeScreen() {
     );
     const nextItems = alreadySaved
       ? savedItems
-      : await saveSavedItem(recommendation.category, recommendation.item).then((result) => {
-        if (!result.confirmed) throw new Error("The recommendation was not saved.");
-        return result.items;
-      });
+      : await saveSavedItem(
+          recommendation.category,
+          recommendation.item,
+          savedMutationsForOwner(operationOwnerId)
+        ).then((result) => {
+          if (!result.confirmed) throw new Error("The recommendation was not saved.");
+          return result.items;
+        });
     if (!operationIsCurrent()) return;
     if (!alreadySaved) setSavedItems(nextItems);
     await recordMapTrailEvent(

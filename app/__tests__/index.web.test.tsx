@@ -226,6 +226,11 @@ jest.mock("../../lib/storage/saved", () => ({
 jest.mock("../../lib/storage/savedMutations", () => ({
   removeSavedItem: jest.fn(),
   runSavedMutation: jest.fn((mutation: () => Promise<unknown>) => mutation()),
+  // Binds storage calls to the owner captured when the user acted. Returned as
+  // an identifiable marker so assertions can show the owner was threaded.
+  savedMutationsForOwner: jest.fn((ownerId: string | null) => ({
+    boundOwnerId: ownerId,
+  })),
   saveSavedItem: jest.fn(),
   toggleSavedItem: jest.fn(),
 }));
@@ -798,7 +803,7 @@ it("saves a mobile recommendation through the guarded atlas persistence path", a
     items,
     ownerA.id
   ));
-  expect(saveSavedItem).toHaveBeenCalledWith("movies", expect.objectContaining({ id: "candidate" }));
+  expect(saveSavedItem).toHaveBeenCalledWith("movies", expect.objectContaining({ id: "candidate" }), { boundOwnerId: "owner-a" });
   expect(mockSavedAtlasProps.responsiveRecommendations).toEqual([]);
   await waitFor(() => expect(screen.getByTestId("saved-atlas").props.accessibilityLabel).toContain("movies:candidate:Candidate"));
 });
@@ -1284,7 +1289,7 @@ it("persists a new orbit recommendation before recording its honest connecting t
   await waitFor(() => expect(mockSavedAtlasProps.responsiveRecommendations).toHaveLength(1));
   await act(async () => { fireEvent.press(screen.getByTestId("orbit-save")); });
 
-  await waitFor(() => expect(saveSavedItem).toHaveBeenCalledWith("movies", expect.objectContaining({ id: "candidate" })));
+  await waitFor(() => expect(saveSavedItem).toHaveBeenCalledWith("movies", expect.objectContaining({ id: "candidate" }), { boundOwnerId: "owner-a" }));
   expect(recordMapTrailEvent).toHaveBeenCalledWith(
     expect.objectContaining({
       source: { category: "movies", id: "source" },

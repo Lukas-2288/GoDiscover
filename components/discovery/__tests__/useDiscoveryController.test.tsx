@@ -879,3 +879,60 @@ it("reports request failures with safe UI copy and metadata-only diagnostics", a
   expect(JSON.stringify(warn.mock.calls)).not.toContain("401");
   expect(JSON.stringify(warn.mock.calls)).not.toContain("token");
 });
+
+// An Undo offered while one account was signed in must not act after the user
+// switches accounts: both accounts can hold the same item id, so the removal
+// would delete the new account's copy of something they never undid.
+it("refuses an Undo once the account has changed since the save", async () => {
+  const addSaved = jest.fn(async () => [savedItem(movie)]);
+  const removeSaved = jest.fn(async () => [] as SavedItem[]);
+  const onSavedItemsChange = jest.fn();
+  let ownerId: string | null = "owner-a";
+  const { result, rerender } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie] },
+      dependencies: { load: jest.fn(), addSaved, removeSaved },
+      onSavedItemsChange,
+      ownerId,
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+  expect(result.current.state.lastSave?.ownerId).toBe("owner-a");
+
+  ownerId = "owner-b";
+  rerender({});
+
+  await act(async () => {
+    await result.current.undo();
+  });
+
+  expect(removeSaved).not.toHaveBeenCalled();
+  expect(result.current.activeItem).toBeNull();
+});
+
+it("still allows Undo while the same account stays signed in", async () => {
+  const addSaved = jest.fn(async () => [savedItem(movie)]);
+  const removeSaved = jest.fn(async () => [] as SavedItem[]);
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie] },
+      dependencies: { load: jest.fn(), addSaved, removeSaved },
+      ownerId: "owner-a",
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "save");
+  });
+  await act(async () => {
+    await result.current.undo();
+  });
+
+  expect(removeSaved).toHaveBeenCalledWith("movies", movie.id);
+  expect(result.current.activeItem).toEqual(movie);
+});

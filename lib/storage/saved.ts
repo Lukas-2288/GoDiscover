@@ -41,6 +41,49 @@ async function getUserId(): Promise<string | null> {
   return data.session?.user.id ?? null;
 }
 
+/**
+ * Raised when the signed-in account changed while an operation was in flight.
+ * The operation is abandoned rather than completed against whoever is now
+ * active — an Undo raised under owner A must not delete owner B's copy of the
+ * same item, and owner A's results must never be published as owner B's.
+ */
+export class SavedOwnerChangedError extends Error {
+  readonly name = 'SavedOwnerChangedError';
+
+  constructor(
+    readonly expectedOwnerId: string | null,
+    readonly activeOwnerId: string | null
+  ) {
+    super('Saved-item owner changed while the operation was in flight');
+  }
+}
+
+/**
+ * Revalidates the owner an operation was started for. Call after every awaited
+ * storage or Supabase boundary and before any write — checking once on entry
+ * leaves every later await as a window for the account to change underneath.
+ */
+async function assertOwnerUnchanged(expectedOwnerId: string | null): Promise<void> {
+  const activeOwnerId = await getUserId();
+  if (activeOwnerId !== expectedOwnerId) {
+    throw new SavedOwnerChangedError(expectedOwnerId, activeOwnerId);
+  }
+}
+
+// The anonymous bucket is one shared resource that any sign-in wants to claim.
+// Serializing claims keeps two overlapping hydrations from uploading the same
+// signed-out saves into two different accounts.
+let anonymousClaimTail: Promise<unknown> = Promise.resolve();
+
+function claimAnonymousBucket<T>(claim: () => Promise<T>): Promise<T> {
+  const result = anonymousClaimTail.then(claim, claim);
+  anonymousClaimTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 export function savedStorageKeyForOwner(ownerId: string): string {
   return `${SAVED_STORAGE_PREFIX}:owner:${encodeURIComponent(ownerId)}`;
 }
@@ -145,17 +188,35 @@ export async function listSavedForOwner(
     return sortNewestFirst(await readLocal(ownerId));
   }
 
-  const anonymous = await readLocal(null);
-  let anonymousUploadConfirmed = anonymous.length === 0;
-  if (anonymous.length > 0) {
-    const { error } = await supabase
-      .from('saved_items')
-      .upsert(anonymous.map((item) => itemToRow(ownerId, item)), {
-        onConflict: 'user_id,category,item_id',
-        ignoreDuplicates: true,
-      });
-    anonymousUploadConfirmed = !error;
-  }
+  // Read and upload the anonymous bucket under a single claim so two
+  // overlapping hydrations cannot both push the same signed-out saves — either
+  // into two different accounts, or twice into this one.
+  const { anonymous, anonymousUploadConfirmed } = await claimAnonymousBucket(
+    async () => {
+      const pending = await readLocal(null);
+      if (pending.length === 0) {
+        return { anonymous: pending, anonymousUploadConfirmed: true };
+      }
+      // The claim may have waited behind another hydration; make sure this
+      // owner is still the active one before uploading their data to it.
+      const activeDuringClaim = await getUserId();
+      if (activeDuringClaim !== ownerId) {
+        return { anonymous: pending, anonymousUploadConfirmed: false };
+      }
+      const { error } = await supabase
+        .from('saved_items')
+        .upsert(pending.map((item) => itemToRow(ownerId, item)), {
+          onConflict: 'user_id,category,item_id',
+          ignoreDuplicates: true,
+        });
+      if (!error) {
+        // Retire the bucket inside the claim so a queued hydration observes it
+        // as already taken rather than re-reading and re-uploading it.
+        await AsyncStorage.removeItem(SAVED_ANONYMOUS_STORAGE_KEY);
+      }
+      return { anonymous: pending, anonymousUploadConfirmed: !error };
+    }
+  );
 
   const { data, error } = await supabase
     .from('saved_items')
@@ -170,10 +231,90 @@ export async function listSavedForOwner(
     anonymousUploadConfirmed ? [] : anonymous
   );
   await writeLocal(ownerId, items);
-  if (anonymousUploadConfirmed && anonymous.length > 0) {
-    await AsyncStorage.removeItem(SAVED_ANONYMOUS_STORAGE_KEY);
-  }
+  // The anonymous bucket was already retired inside the claim above.
   return items;
+}
+
+/**
+ * Save on behalf of a specific owner. The owner is bound by the caller at the
+ * moment the user acted, and revalidated after every await, so a mid-flight
+ * account switch aborts instead of writing owner A's item into owner B.
+ */
+export async function addSavedForOwner(
+  ownerId: string | null,
+  category: ContentCategory,
+  item: ResultItem
+): Promise<SavedItem[]> {
+  await assertOwnerUnchanged(ownerId);
+  await migrateLegacySavedItems(ownerId);
+  await assertOwnerUnchanged(ownerId);
+  const local = await readLocal(ownerId);
+  await assertOwnerUnchanged(ownerId);
+
+  const exists = local.some(
+    (i) => key(i.category, i.id) === key(category, item.id)
+  );
+  const saved: SavedItem = {
+    ...item,
+    category,
+    savedAt: exists
+      ? local.find(
+          (candidate) => key(candidate.category, candidate.id) === key(category, item.id)
+        )!.savedAt
+      : Date.now(),
+  };
+  const next = exists ? local : [...local, saved];
+
+  if (ownerId) {
+    const { error } = await supabase.from('saved_items').upsert(
+      itemToRow(ownerId, { ...item, category }),
+      { onConflict: 'user_id,category,item_id' }
+    );
+    if (error) throw new Error('saved_items upsert failed');
+    // The write may have landed after the account changed; do not publish it.
+    await assertOwnerUnchanged(ownerId);
+  }
+  await writeLocal(ownerId, next);
+  return sortNewestFirst(next);
+}
+
+/**
+ * Remove on behalf of a specific owner. Undo relies on this: the owner is the
+ * one that created the save, not whoever happens to be signed in when Undo
+ * fires, so an Undo cannot delete a different account's copy of the same item.
+ */
+export async function removeSavedForOwner(
+  ownerId: string | null,
+  category: ContentCategory,
+  id: string
+): Promise<SavedItem[]> {
+  await assertOwnerUnchanged(ownerId);
+  await migrateLegacySavedItems(ownerId);
+  await assertOwnerUnchanged(ownerId);
+  const local = await readLocal(ownerId);
+  await assertOwnerUnchanged(ownerId);
+
+  const next = local.filter((i) => key(i.category, i.id) !== key(category, id));
+  if (ownerId) {
+    const { error } = await supabase
+      .from('saved_items')
+      .delete()
+      .eq('category', category)
+      .eq('item_id', id);
+    if (error) throw new Error('saved_items delete failed');
+    await assertOwnerUnchanged(ownerId);
+    const anonymous = (await readLocal(null)).filter(
+      (item) => key(item.category, item.id) !== key(category, id)
+    );
+    await assertOwnerUnchanged(ownerId);
+    if (anonymous.length === 0) {
+      await AsyncStorage.removeItem(SAVED_ANONYMOUS_STORAGE_KEY);
+    } else {
+      await writeLocal(null, anonymous);
+    }
+  }
+  await writeLocal(ownerId, next);
+  return sortNewestFirst(next);
 }
 
 export async function addSaved(

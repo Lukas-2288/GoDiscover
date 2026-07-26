@@ -80,8 +80,12 @@ export default function HomeScreen() {
   const [accountSavedMutationError, setAccountSavedMutationError] = useState<
     string | null
   >(null);
+  // Declared ahead of the controller so saves can record the owner that made
+  // them; Undo refuses to run once the account changes.
+  const [authSession, setAuthSession] = useState<Session | null>(null);
   const discoveryController = useDiscoveryController({
     onSavedItemsChange: setSavedItems,
+    ownerId: authSession?.user.id ?? null,
   });
   const {
     state: discovery,
@@ -109,7 +113,6 @@ export default function HomeScreen() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
-  const [authSession, setAuthSession] = useState<Session | null>(null);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
