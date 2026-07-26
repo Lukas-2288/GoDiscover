@@ -6,7 +6,6 @@ WebBrowser.maybeCompleteAuthSession();
 
 export async function signInWithGoogle(): Promise<void> {
   const redirectTo = AuthSession.makeRedirectUri();
-  console.log('[oauth] redirectTo =', redirectTo);
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
@@ -19,8 +18,10 @@ export async function signInWithGoogle(): Promise<void> {
   if (error) throw error;
   if (!data?.url) throw new Error('No OAuth URL returned from Supabase');
 
+  // Never log `result` or `result.url`: on the PKCE path the URL carries the
+  // authorization `code`, and on the implicit path it carries `access_token`
+  // and `refresh_token` in the fragment.
   const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-  console.log('[oauth] result =', result);
 
   if (result.type !== 'success' || !result.url) {
     throw new Error('Sign-in cancelled');

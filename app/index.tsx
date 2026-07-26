@@ -254,16 +254,17 @@ export default function HomeScreen() {
   };
 
   const handleSignOut = async () => {
-    console.log("[auth] signOut tapped");
     setAccountOpen(false);
     try {
       const { error } = await supabase.auth.signOut();
-      console.log("[auth] signOut result", error ? `error: ${error.message}` : "ok");
       if (error) {
         await supabase.auth.signOut({ scope: "local" });
       }
-    } catch (e: any) {
-      console.warn("[auth] signOut threw", e?.message ?? e);
+    } catch (error: unknown) {
+      console.warn({
+        action: "signOut",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
       await supabase.auth.signOut({ scope: "local" });
     }
   };
