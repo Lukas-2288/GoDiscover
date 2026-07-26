@@ -584,17 +584,28 @@ it("loads tagged detail without a related request until Similar is explicit", as
     )
   );
   expect(loadDetail).toHaveBeenCalledTimes(1);
-  expect(loadDiscovery).toHaveBeenCalledTimes(1);
-  expect(loadDiscovery).toHaveBeenLastCalledWith({
-    category: "movies",
-    mode: "randomize",
-  });
+  // Counting calls is not meaningful now that the deck tops itself up in the
+  // background; what matters is that no Similar request happened unprompted.
+  expect(
+    jest.mocked(loadDiscovery).mock.calls.map(([input]) => input)
+  ).toContainEqual({ category: "movies", mode: "randomize" });
+  expect(
+    jest.mocked(loadDiscovery).mock.calls.filter(([input]) => input.mode === "similar")
+  ).toHaveLength(0);
   expect(getSimilarMovies).not.toHaveBeenCalled();
 
   fireEvent.press(screen.getByRole("button", { name: "Similar" }));
 
-  await waitFor(() => expect(loadDiscovery).toHaveBeenCalledTimes(2));
-  expect(loadDiscovery).toHaveBeenLastCalledWith({
+  await waitFor(() =>
+    expect(
+      jest.mocked(loadDiscovery).mock.calls.filter(([input]) => input.mode === "similar")
+    ).not.toHaveLength(0)
+  );
+  expect(
+    jest.mocked(loadDiscovery).mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.mode === "similar")
+  ).toContainEqual({
     category: "movies",
     mode: "similar",
     seed: expect.objectContaining({ id: "329865", title: "Arrival" }),
@@ -922,7 +933,13 @@ it("does not restore focus from a slow Similar request after category navigation
 
   const sheet = await screen.findByTestId("detail-sheet-surface");
   fireEvent.press(within(sheet).getByRole("button", { name: "Similar" }));
-  await waitFor(() => expect(loadDiscovery).toHaveBeenCalledTimes(2));
+  // Background top-ups also call loadDiscovery, so wait on the Similar request
+  // itself rather than a total count.
+  await waitFor(() =>
+    expect(
+      jest.mocked(loadDiscovery).mock.calls.filter(([input]) => input.mode === "similar")
+    ).not.toHaveLength(0)
+  );
 
   fireEvent.press(
     screen.getByRole("button", { name: "Change category. Movies selected" })

@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { act, renderHook, waitFor } from "@testing-library/react-native";
 import type { ContentCategory, ResultItem } from "../../../types/content";
 import type { DiscoveryLoadInput } from "../../../lib/discovery/types";
@@ -11,6 +12,18 @@ jest.mock("../../../lib/storage/saved", () => ({
   listSaved: jest.fn(),
   addSaved: jest.fn(),
   removeSaved: jest.fn(),
+}));
+
+// The controller records rejections through lib/storage/rejections, which is
+// backed by AsyncStorage.
+jest.mock("@react-native-async-storage/async-storage", () =>
+  require("@react-native-async-storage/async-storage/jest/async-storage-mock")
+);
+
+jest.mock("../../../lib/supabase", () => ({
+  supabase: {
+    auth: { getSession: jest.fn(async () => ({ data: { session: null } })) },
+  },
 }));
 
 const movie: ResultItem = {
@@ -43,6 +56,12 @@ function deferred<T>() {
   });
   return { promise, reject, resolve };
 }
+
+beforeEach(async () => {
+  // Rejections persist in AsyncStorage, so without this one test's skips would
+  // damp another's deck.
+  await AsyncStorage.clear();
+});
 
 afterEach(() => {
   jest.useRealTimers();
@@ -291,7 +310,7 @@ it("keeps Similar category scoped and leaves no seed in a later Randomize", asyn
     category: "movies",
     mode: "similar",
     seed: movie,
-  });
+  }, expect.anything());
   expect(Object.keys(load.mock.calls[0][0]).sort()).toEqual([
     "category",
     "mode",
@@ -303,11 +322,19 @@ it("keeps Similar category scoped and leaves no seed in a later Randomize", asyn
     await result.current.submit("randomize");
   });
 
-  expect(load).toHaveBeenNthCalledWith(2, {
-    category: "movies",
-    mode: "randomize",
-  });
-  expect(Object.keys(load.mock.calls[1][0]).sort()).toEqual(["category", "mode"]);
+  // Position-independent: background top-ups also call `load`, continuing
+  // whichever request is current, so the randomize is not necessarily call 2.
+  expect(load).toHaveBeenCalledWith(
+    { category: "movies", mode: "randomize" },
+    expect.anything()
+  );
+  const randomizeCall = load.mock.calls.find(
+    ([input]) => (input as DiscoveryLoadInput).mode === "randomize"
+  );
+  expect(Object.keys(randomizeCall![0] as object).sort()).toEqual([
+    "category",
+    "mode",
+  ]);
   expect(result.current.session?.deck.similarContext).toBeNull();
 });
 
@@ -353,7 +380,7 @@ it("builds trimmed Search and cloned Filter request snapshots", async () => {
     category: "movies",
     mode: "search",
     query: "arrival",
-  });
+  }, expect.anything());
 
   act(() => result.current.toggleFilter("Sci-Fi"));
   let pending!: Promise<void>;
@@ -363,12 +390,14 @@ it("builds trimmed Search and cloned Filter request snapshots", async () => {
   act(() => result.current.toggleFilter("Drama"));
   await act(async () => pending);
 
-  expect(load).toHaveBeenNthCalledWith(2, {
-    category: "movies",
-    mode: "filter",
-    filters: ["Sci-Fi"],
-  });
-  const filterInput = load.mock.calls[1][0];
+  // Position-independent: background top-ups call `load` too.
+  expect(load).toHaveBeenCalledWith(
+    { category: "movies", mode: "filter", filters: ["Sci-Fi"] },
+    expect.anything()
+  );
+  const filterInput = load.mock.calls.find(
+    ([input]) => (input as DiscoveryLoadInput).mode === "filter"
+  )![0];
   expect(filterInput.mode).toBe("filter");
   if (filterInput.mode !== "filter") throw new Error("Expected a Filter request");
   expect(filterInput.filters).not.toBe(result.current.state.sessions.movies.selectedFilters);
@@ -401,7 +430,7 @@ it("routes only the visible Era and Rating choices", async () => {
     category: "movies",
     mode: "filter",
     filters: ["90s", "4+"],
-  });
+  }, expect.anything());
 });
 
 it("keeps a failed Undo available and shows only safe action copy", async () => {
@@ -935,4 +964,165 @@ it("still allows Undo while the same account stays signed in", async () => {
 
   expect(removeSaved).toHaveBeenCalledWith("movies", movie.id);
   expect(result.current.activeItem).toEqual(movie);
+});
+
+// The deck used to dead-end after five swipes: providers return five items and
+// nothing ever refilled the queue.
+it("tops up in the background before the deck runs out", async () => {
+  const load = jest
+    .fn<Promise<ResultItem[]>, [DiscoveryLoadInput, unknown]>()
+    .mockResolvedValueOnce([movie, secondMovie])
+    .mockResolvedValue([
+      { id: "m3", title: "Third", subtitle: "", meta: "" },
+    ]);
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      dependencies: {
+        load,
+        addSaved: jest.fn(async () => []),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.submit("randomize");
+  });
+
+  await waitFor(() =>
+    expect(result.current.session?.deck.queue.map((item) => item.id)).toEqual([
+      "m1",
+      "m2",
+      "m3",
+    ])
+  );
+  // The top-up asks for the next page, otherwise it would refetch the same five.
+  expect(load).toHaveBeenLastCalledWith(
+    expect.anything(),
+    expect.objectContaining({ page: 2 })
+  );
+  expect(result.current.deckExhausted).toBe(false);
+});
+
+it("marks the deck exhausted only once a top-up returns nothing new", async () => {
+  const load = jest
+    .fn<Promise<ResultItem[]>, [DiscoveryLoadInput, unknown]>()
+    .mockResolvedValueOnce([movie])
+    .mockResolvedValue([]);
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      dependencies: {
+        load,
+        addSaved: jest.fn(async () => []),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.submit("randomize");
+  });
+
+  await waitFor(() => expect(result.current.deckExhausted).toBe(true));
+  // Exhaustion must not stampede the provider once it is known.
+  const callsAtExhaustion = load.mock.calls.length;
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(load.mock.calls.length).toBe(callsAtExhaustion);
+});
+
+it("does not keep retrying a top-up against a failing provider", async () => {
+  const load = jest
+    .fn<Promise<ResultItem[]>, [DiscoveryLoadInput, unknown]>()
+    .mockResolvedValueOnce([movie])
+    .mockRejectedValue(new Error("offline"));
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      dependencies: {
+        load,
+        addSaved: jest.fn(async () => []),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.submit("randomize");
+  });
+  await waitFor(() => expect(load.mock.calls.length).toBeGreaterThan(1));
+
+  const afterFailure = load.mock.calls.length;
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(load.mock.calls.length).toBe(afterFailure);
+  // The card already loaded is still usable.
+  expect(result.current.activeItem).toEqual(movie);
+});
+
+// A mis-tapped "Not for me" was unrecoverable — Undo existed only for saves.
+it("restores a skipped card and forgets the rejection", async () => {
+  const load = jest.fn(async () => [movie, secondMovie]);
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie, secondMovie] },
+      dependencies: {
+        load,
+        addSaved: jest.fn(async () => []),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "skip");
+  });
+  expect(result.current.activeItem).toEqual(secondMovie);
+  expect(result.current.state.lastSkip?.item).toEqual(movie);
+
+  await act(async () => {
+    await result.current.undoSkip();
+  });
+
+  expect(result.current.activeItem).toEqual(movie);
+  expect(result.current.announcement).toBe("Arrival returned to your deck.");
+  expect(result.current.state.lastSkip).toBeNull();
+
+  const { listRejections } = require("../../../lib/storage/rejections");
+  await expect(listRejections(null)).resolves.toEqual([]);
+});
+
+it("refuses a skip Undo once the account has changed", async () => {
+  let ownerId: string | null = "owner-a";
+  const { result, rerender } = renderHook(() =>
+    useDiscoveryController({
+      initialItems: { movies: [movie, secondMovie] },
+      dependencies: {
+        load: jest.fn(async () => []),
+        addSaved: jest.fn(async () => []),
+        removeSaved: jest.fn(async () => []),
+      },
+      ownerId,
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  await act(async () => {
+    await result.current.commit(movie, "skip");
+  });
+
+  ownerId = "owner-b";
+  rerender({});
+
+  await act(async () => {
+    await result.current.undoSkip();
+  });
+
+  expect(result.current.activeItem).toEqual(secondMovie);
+  expect(result.current.state.lastSkip).toBeNull();
 });

@@ -15,13 +15,23 @@ import type {
   DiscoveryDeckAction,
   DiscoveryDeckState,
   SaveOperation,
+  SkipOperation,
 } from "../../lib/discovery/deckState";
 import { loadDiscovery, toDiscoveryError } from "../../lib/discovery/loadDiscovery";
 import { createDiscoveryRequestTracker } from "../../lib/discovery/requestTracker";
 import type {
   DiscoveryActionMode,
+  DiscoveryLoadContext,
   DiscoveryLoadInput,
 } from "../../lib/discovery/types";
+import {
+  dampedTraitsFor,
+  listRejections,
+  recordRejection,
+  rejectedIdsFor,
+  removeRejection,
+  type Rejection,
+} from "../../lib/storage/rejections";
 import {
   addSaved,
   listSaved,
@@ -36,7 +46,16 @@ import {
 } from "../../lib/storage/savedMutations";
 
 export type DiscoveryControllerDependencies = {
-  load: typeof loadDiscovery;
+  /**
+   * Narrower than `typeof loadDiscovery`: the controller supplies the load
+   * context as the second argument and never the provider registry, so the
+   * real function still satisfies this while test doubles stay a two-argument
+   * shape.
+   */
+  load: (
+    input: DiscoveryLoadInput,
+    context?: DiscoveryLoadContext
+  ) => Promise<ResultItem[]>;
   listSaved?: typeof listSaved;
   addSaved: typeof addSaved;
   removeSaved: typeof removeSaved;
@@ -72,7 +91,8 @@ export type DiscoveryCommitResult =
     };
 
 const DEFAULT_DEPENDENCIES: DiscoveryControllerDependencies = {
-  load: loadDiscovery,
+  // Drops the provider-registry argument so the default registry applies.
+  load: (input, context) => loadDiscovery(input, undefined, context),
   listSaved,
   addSaved,
   removeSaved,
@@ -176,6 +196,13 @@ function savedMutationDependencies(
   };
 }
 
+/**
+ * Top up once the deck is down to its last couple of cards, so the fetch has
+ * landed before the user swipes through them. Providers return five at a time,
+ * so waiting for empty would show a gap on every fifth swipe.
+ */
+const TOP_UP_THRESHOLD = 2;
+
 export function useDiscoveryController(
   options: UseDiscoveryControllerOptions = {}
 ) {
@@ -192,8 +219,10 @@ export function useDiscoveryController(
   const ownerIdRef = useRef(options.ownerId ?? null);
   const requestTrackerRef = useRef(createDiscoveryRequestTracker());
   const saveOperationSequenceRef = useRef(0);
+  const skipOperationSequenceRef = useRef(0);
   const undoTimerRef = useRef<UndoTimer | null>(null);
   const undoInFlightRef = useRef(new Set<number>());
+  const rejectionsRef = useRef<readonly Rejection[]>([]);
   const mountedRef = useRef(true);
 
   stateRef.current = deckState;
@@ -250,6 +279,37 @@ export function useDiscoveryController(
     };
   }, [clearUndoTimer]);
 
+  // Rejections are the memory behind "Not for me". Reload them whenever the
+  // account changes so one user's dislikes never shape another's deck.
+  useEffect(() => {
+    const ownerId = options.ownerId ?? null;
+    let cancelled = false;
+    listRejections(ownerId)
+      .then((rejections) => {
+        if (!cancelled) rejectionsRef.current = rejections;
+      })
+      .catch(() => {
+        if (!cancelled) rejectionsRef.current = [];
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [options.ownerId]);
+
+  const buildLoadContext = useCallback(
+    (category: ContentCategory, page?: number): DiscoveryLoadContext => {
+      const rejections = rejectionsRef.current;
+      const deck = stateRef.current.sessions[category].deck;
+      return {
+        rejectedIds: rejectedIdsFor(rejections, category),
+        dampedTraits: dampedTraitsFor(rejections, category),
+        presentIds: new Set(deck.queue.map((item) => item.id)),
+        page,
+      };
+    },
+    []
+  );
+
   const runRequest = useCallback(
     async (requestedInput: DiscoveryLoadInput): Promise<void> => {
       const input = copyRequestInput(requestedInput);
@@ -257,7 +317,11 @@ export function useDiscoveryController(
       dispatch({ type: "requestStarted", request, input });
 
       try {
-        const items = await dependenciesRef.current.load(input);
+        const items = await dependenciesRef.current.load(
+          input,
+          // A fresh request replaces the deck, so nothing is "present" yet.
+          { ...buildLoadContext(input.category), presentIds: undefined }
+        );
         if (!mountedRef.current || !requestTrackerRef.current.isCurrent(request)) {
           return;
         }
@@ -286,7 +350,50 @@ export function useDiscoveryController(
         });
       }
     },
-    [dispatch]
+    [buildLoadContext, dispatch]
+  );
+
+  /**
+   * Fetches the next page and appends it, so the deck keeps going instead of
+   * dead-ending after five swipes. Runs in the background: failures leave the
+   * remaining cards untouched and are not surfaced, because the user did not
+   * ask for this request.
+   */
+  const topUpDeck = useCallback(
+    async (category: ContentCategory): Promise<void> => {
+      const session = stateRef.current.sessions[category];
+      const { deck, retryInput } = session;
+      if (!retryInput || deck.toppingUp || deck.exhausted || deck.topUpBlocked) {
+        return;
+      }
+      if (deck.queue.length > TOP_UP_THRESHOLD) return;
+      if (session.status === "loading" || session.status === "error") return;
+      if (session.activeRequest) return;
+
+      const cursor = deck.cursor;
+      dispatch({ type: "topUpStarted", category });
+      try {
+        const items = await dependenciesRef.current.load(
+          copyRequestInput(retryInput),
+          buildLoadContext(category, cursor)
+        );
+        if (!mountedRef.current) return;
+        // A category switch or a new explicit request supersedes this.
+        if (stateRef.current.selected !== category) {
+          dispatch({ type: "topUpFailed", category });
+          return;
+        }
+        dispatch({
+          type: "deckToppedUp",
+          category,
+          items: [...items],
+          cursor: cursor + 1,
+        });
+      } catch {
+        if (mountedRef.current) dispatch({ type: "topUpFailed", category });
+      }
+    },
+    [buildLoadContext, dispatch]
   );
 
   const selectCategory = useCallback(
@@ -374,13 +481,27 @@ export function useDiscoveryController(
 
       if (decision === "skip") {
         const nextItem = session.deck.queue[1] ?? null;
+        const operation: SkipOperation = {
+          id: ++skipOperationSequenceRef.current,
+          category,
+          item: safeItem,
+          ownerId: ownerIdRef.current,
+        };
         const dismissed = dispatch({
           type: "skipCurrent",
           category,
           itemId: safeItem.id,
+          operation,
         });
         if (dismissed) {
           setAnnouncement(nextCardAnnouncement("Not for me.", nextItem));
+          // Remembered so this title never returns and its genres lose weight.
+          // Fire-and-forget: a storage failure must not block the swipe.
+          void recordRejection(ownerIdRef.current, category, safeItem)
+            .then((rejections) => {
+              rejectionsRef.current = rejections;
+            })
+            .catch(() => undefined);
         }
         return dismissed
           ? { decision: "skip", confirmed: true }
@@ -507,6 +628,36 @@ export function useDiscoveryController(
     setAnnouncement(`${operation.item.title} returned to your deck.`);
   }, [clearUndoTimer, dispatch, makeUndoRetryable]);
 
+  /**
+   * Puts back a card dismissed by mistake. The rejection is removed too —
+   * otherwise the card returns while its exclusion keeps quietly steering
+   * everything that follows.
+   */
+  const undoSkip = useCallback(async (): Promise<void> => {
+    const operation = stateRef.current.lastSkip;
+    if (!operation) return;
+    // Same rule as save Undo: an action raised under one account must not be
+    // applied to another's data.
+    if ((operation.ownerId ?? null) !== ownerIdRef.current) {
+      dispatch({ type: "clearSkipUndo", operationId: operation.id });
+      return;
+    }
+
+    const restored = dispatch({ type: "undoSkip", operation });
+    if (!restored) return;
+    setAnnouncement(`${operation.item.title} returned to your deck.`);
+    try {
+      rejectionsRef.current = await removeRejection(
+        operation.ownerId ?? null,
+        operation.category,
+        operation.item.id
+      );
+    } catch {
+      // The card is back either way; the stale rejection is corrected on the
+      // next successful write rather than blocking the undo.
+    }
+  }, [dispatch]);
+
   const clearActionError = useCallback(() => {
     dispatch({ type: "clearActionError" });
   }, [dispatch]);
@@ -515,10 +666,36 @@ export function useDiscoveryController(
   const session = state.selected ? state.sessions[state.selected] : null;
   const activeItem = session ? activeDeckItem(session.deck) : null;
 
+  // Keep the queue stocked as the user works through it. Depends on the queue
+  // length rather than each swipe so a save, a skip and a restored card all
+  // trigger the same check.
+  const selectedCategory = state.selected;
+  const remaining = session?.deck.queue.length ?? 0;
+  const canTopUp = Boolean(
+    session &&
+      session.retryInput &&
+      !session.deck.exhausted &&
+      !session.deck.toppingUp &&
+      !session.deck.topUpBlocked &&
+      session.status !== "loading" &&
+      // A failed explicit request already surfaced an error and a Retry; adding
+      // background attempts on top would hammer a provider that is clearly down.
+      session.status !== "error"
+  );
+  useEffect(() => {
+    if (!selectedCategory || !canTopUp) return;
+    if (remaining > TOP_UP_THRESHOLD) return;
+    void topUpDeck(selectedCategory);
+  }, [canTopUp, remaining, selectedCategory, topUpDeck]);
+
   return {
     state,
     session,
     activeItem,
+    /** True once a top-up came back empty — the archive really is finished. */
+    deckExhausted: session?.deck.exhausted ?? false,
+    lastSkip: state.lastSkip,
+    undoSkip,
     announcement,
     actionErrorAnnouncement: state.actionError,
     selectCategory,
