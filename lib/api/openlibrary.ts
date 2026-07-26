@@ -55,7 +55,52 @@ function toResultItem(doc: OLSearchDoc): ResultItem {
     subtitle: author,
     meta: rating,
     imageUrl: coverUrl(doc.cover_i, 'M'),
+    traits: bookTraits(doc.subject),
   };
+}
+
+// Open Library subjects are free text and a single work can carry hundreds, so
+// only phrasings that map cleanly onto the filter vocabulary become traits.
+// Matching is exact after normalisation — a substring rule would file every
+// "Science fiction" under plain "Fiction" and make damping wrong rather than
+// merely incomplete.
+const OL_SUBJECT_ALIASES: Readonly<Record<string, string>> = {
+  fiction: 'Fiction',
+  nonfiction: 'Non-Fiction',
+  non_fiction: 'Non-Fiction',
+  mystery: 'Mystery / Thriller',
+  detective_and_mystery_stories: 'Mystery / Thriller',
+  thriller: 'Mystery / Thriller',
+  science_fiction: 'Sci-Fi',
+  fantasy: 'Fantasy',
+  fantasy_fiction: 'Fantasy',
+  romance: 'Romance',
+  love_stories: 'Romance',
+  historical_fiction: 'Historical Fiction',
+  biography: 'Biography / Memoir',
+  autobiography: 'Biography / Memoir',
+  self_help: 'Self-Help',
+  horror: 'Horror',
+  horror_tales: 'Horror',
+  young_adult_fiction: 'Young Adult',
+  juvenile_fiction: 'Young Adult',
+  literary_fiction: 'Literary Fiction',
+  graphic_novel: 'Graphic Novel',
+  comics_and_graphic_novels: 'Graphic Novel',
+};
+
+const MAX_BOOK_TRAITS = 4;
+
+function bookTraits(subjects?: string[]): string[] | undefined {
+  if (!subjects?.length) return undefined;
+  const labels = new Set<string>();
+  for (const subject of subjects) {
+    const normalized = subject.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const label = OL_SUBJECT_ALIASES[normalized];
+    if (label) labels.add(label);
+    if (labels.size === MAX_BOOK_TRAITS) break;
+  }
+  return labels.size > 0 ? [...labels] : undefined;
 }
 
 export async function searchBooks(query: string): Promise<ResultItem[]> {
@@ -63,7 +108,7 @@ export async function searchBooks(query: string): Promise<ResultItem[]> {
   const data = await ol<OLSearchResponse>('/search.json', {
     q: query,
     limit: 5,
-    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average',
+    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
   });
   return data.docs.slice(0, 5).map(toResultItem);
 }
@@ -81,7 +126,7 @@ export async function randomBooks(): Promise<ResultItem[]> {
     limit: 20,
     offset,
     sort: 'rating',
-    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average',
+    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
   });
   const withCovers = data.docs.filter((d) => d.cover_i);
   const shuffled = [...withCovers].sort(() => Math.random() - 0.5);
@@ -110,7 +155,7 @@ export async function filterBooks(params: BookFilterParams): Promise<ResultItem[
     q,
     limit: 20,
     sort: 'rating',
-    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average',
+    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
   });
   let docs = data.docs.filter((d) => d.cover_i);
   if (params.minRating) {
@@ -156,7 +201,7 @@ export async function getSimilarBooks(id: string): Promise<ResultItem[]> {
     q: `(${subjectQuery})`,
     limit: 20,
     sort: 'rating',
-    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average',
+    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
   });
   return data.docs
     .filter((d) => d.cover_i && workId(d.key) !== id)

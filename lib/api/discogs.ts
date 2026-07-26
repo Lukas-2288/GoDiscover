@@ -66,7 +66,33 @@ function releaseToResult(r: SearchReleaseItem): ResultItem {
     subtitle: artist,
     meta: r.year ? String(r.year) : '—',
     imageUrl: cleanImage(r.cover_image || r.thumb),
+    traits: musicTraits(r.genre, r.style),
   };
+}
+
+/**
+ * Discogs returns its own genre and style vocabularies ("Funk / Soul",
+ * "Heavy Metal"). Fold both back onto the filter labels via the existing
+ * DISCOGS_GENRE_MAP so a rejected album damps the same label the UI offers.
+ */
+export function musicTraits(
+  genres?: string[],
+  styles?: string[]
+): string[] | undefined {
+  const labels = new Set<string>();
+  for (const [label, mapping] of Object.entries(DISCOGS_GENRE_MAP)) {
+    const styleMatches = mapping.style
+      ? styles?.some((style) => style === mapping.style)
+      : false;
+    // A genre-only mapping matches on genre alone; a mapping that names a style
+    // needs that style too, so "Rock" does not silently claim every metal or
+    // indie release.
+    const genreMatches = mapping.genre
+      ? genres?.some((genre) => genre === mapping.genre)
+      : false;
+    if (mapping.style ? styleMatches : genreMatches) labels.add(label);
+  }
+  return labels.size > 0 ? [...labels] : undefined;
 }
 
 function artistItemToResult(a: SearchArtistItem): ResultItem {

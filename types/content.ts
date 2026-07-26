@@ -6,6 +6,17 @@ export type ResultItem = {
   subtitle: string;
   meta: string;
   imageUrl?: string;
+  /**
+   * Genre/subject/style labels for this item, in the same vocabulary the filter
+   * UI uses (`constants/Filters.ts`), so they can be fed straight back into a
+   * provider query. Populated by the API adapters where the provider gives them
+   * away for free — TMDB returns `genre_ids` on every search and discover row.
+   *
+   * Recording these on a rejected card is what lets "Not for me" steer away
+   * from a genre instead of only hiding one title. Optional because search
+   * results and lightweight saved rows do not always carry them.
+   */
+  traits?: string[];
 };
 
 export type ArtistDetail = {

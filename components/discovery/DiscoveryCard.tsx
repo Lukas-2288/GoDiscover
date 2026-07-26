@@ -11,6 +11,7 @@ import {
 
 import {
   getCategoryTheme,
+  resolveCategorySecondary,
   type CategoryPattern,
 } from "../../lib/discovery/categoryThemes";
 import type { Palette } from "../../lib/theme";
@@ -136,7 +137,12 @@ export const DiscoveryCard = forwardRef<DiscoveryCardHandle, DiscoveryCardProps>
         ]}
       >
         <CardPattern pattern={theme.pattern} color={theme.accent} />
-        <HiddenDecoration style={[styles.tape, { backgroundColor: theme.secondary }]} />
+        <HiddenDecoration
+          style={[
+            styles.tape,
+            { backgroundColor: resolveCategorySecondary(theme, palette.isDark) },
+          ]}
+        />
         <HiddenDecoration style={[styles.stamp, { borderColor: theme.accent }]}>
           <FontAwesome name={theme.icon} size={17} color={theme.accent} />
         </HiddenDecoration>

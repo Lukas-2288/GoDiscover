@@ -3,6 +3,7 @@ import {
   CATEGORY_ORDER,
   CATEGORY_THEMES,
   getCategoryTheme,
+  resolveCategorySecondary,
 } from "../categoryThemes";
 
 function luminance(hex: string): number {
@@ -35,6 +36,37 @@ describe("category themes", () => {
     for (const category of CATEGORY_ORDER) {
       const theme = getCategoryTheme(category);
       expect(contrast(theme.accent, theme.onAccent)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  // The secondary colour labels the second external-link button, so it has to
+  // clear AA as text. No single hex manages that on both the dark surface and
+  // the cream card — #0095D8 reaches only 2.96 on cream, #006FA3 only 3.34 on
+  // dark — which is why the theme carries a light/dark pair.
+  const DARK_SURFACE = "#141414";
+  const LIGHT_SURFACE = "#ffffff";
+  const CREAM_CARD = "#F4F1EA";
+
+  it("keeps the secondary accent at AA on the surface it is resolved for", () => {
+    for (const category of CATEGORY_ORDER) {
+      const theme = getCategoryTheme(category);
+      expect(
+        contrast(resolveCategorySecondary(theme, true), DARK_SURFACE)
+      ).toBeGreaterThanOrEqual(4.5);
+      for (const surface of [LIGHT_SURFACE, CREAM_CARD]) {
+        expect(
+          contrast(resolveCategorySecondary(theme, false), surface)
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("resolves the secondary accent by active scheme", () => {
+    for (const category of CATEGORY_ORDER) {
+      const theme = getCategoryTheme(category);
+      expect(resolveCategorySecondary(theme, true)).toBe(theme.secondaryDark);
+      expect(resolveCategorySecondary(theme, false)).toBe(theme.secondaryLight);
+      expect(theme.secondaryDark).not.toBe(theme.secondaryLight);
     }
   });
 });

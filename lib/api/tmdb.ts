@@ -46,7 +46,24 @@ function toResultItem(m: TMDBMovie): ResultItem {
     subtitle: year,
     meta: m.vote_average ? `★ ${m.vote_average.toFixed(1)}` : '',
     imageUrl: posterUrl(m.poster_path),
+    traits: movieTraits(m),
   };
+}
+
+/**
+ * TMDB returns `genre_ids` on search/discover rows and a richer `genres` array
+ * on detail rows. Map either back to the labels the filter UI uses so a
+ * rejection can be turned into a `without_genres` query later.
+ */
+function movieTraits(m: TMDBMovie): string[] | undefined {
+  const ids = m.genres?.length
+    ? m.genres.map((genre) => genre.id)
+    : m.genre_ids ?? [];
+  if (ids.length === 0) return undefined;
+  const labels = ids
+    .map((id) => TMDB_GENRE_LABELS.get(id))
+    .filter((label): label is string => label !== undefined);
+  return labels.length > 0 ? labels : undefined;
 }
 
 export async function searchMovies(query: string, page = 1): Promise<ResultItem[]> {
@@ -156,6 +173,14 @@ export const TMDB_GENRES: Record<string, number> = {
   Thriller: 53,
   Western: 37,
 };
+
+/**
+ * Reverse of TMDB_GENRES. Ids TMDB returns but the filter UI has no label for
+ * (Family, Music, War, …) are simply absent, so they never become traits.
+ */
+const TMDB_GENRE_LABELS: ReadonlyMap<number, string> = new Map(
+  Object.entries(TMDB_GENRES).map(([label, id]) => [id, label])
+);
 
 export const TMDB_LANGUAGES: Record<string, string> = {
   English: 'en',

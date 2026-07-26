@@ -14,7 +14,10 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-import { getCategoryTheme } from "../../lib/discovery/categoryThemes";
+import {
+  getCategoryTheme,
+  resolveCategorySecondary,
+} from "../../lib/discovery/categoryThemes";
 import type { ContentDetail } from "../../lib/discovery/loadDetail";
 import { getMotionSpec } from "../../lib/discovery/motion";
 import type { Palette } from "../../lib/theme";
@@ -247,7 +250,7 @@ function ExternalLinks({
             label="TMDB"
             url={`https://www.themoviedb.org/movie/${encodeURIComponent(item.id)}`}
             palette={palette}
-            accent={theme.secondary}
+            accent={resolveCategorySecondary(theme, palette.isDark)}
           />
         </View>
       </View>
@@ -269,7 +272,7 @@ function ExternalLinks({
             label="Goodreads"
             url={`https://www.goodreads.com/search?q=${encodeURIComponent(item.title)}`}
             palette={palette}
-            accent={theme.secondary}
+            accent={resolveCategorySecondary(theme, palette.isDark)}
           />
         </View>
       </View>
@@ -294,7 +297,7 @@ function ExternalLinks({
           label="Apple Music"
           url={`https://music.apple.com/us/search?term=${encodeURIComponent(searchTerm)}`}
           palette={palette}
-          accent={theme.secondary}
+          accent={resolveCategorySecondary(theme, palette.isDark)}
         />
         {providerUrl ? (
           <ExternalLink
