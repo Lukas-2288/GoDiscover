@@ -4,6 +4,63 @@ Newest entries first. Format is defined in `AGENTS.md`.
 
 <!-- Entries appended below -->
 
+## 2026-07-26 — All three Saved Atlas residual blockers closed
+
+**Did:** Closed residual blockers 1 and 2 after the user chose to proceed from
+`e1311c2` rather than wait for the unpushed local work. Blocker 3, the security
+port, and the scaffolding are in the entry below.
+
+- **Blocker 1 — owner-bound saved operations.** `addSaved`/`removeSaved`
+  resolved `getUserId()` at call time and never revalidated, leaving every
+  later await open to an account switch. Worst case was Undo, which resolved
+  the owner when Undo *fired* rather than when the save happened, so undoing a
+  save made under account A after switching to B deleted B's copy of the same
+  item id. Added `addSavedForOwner`/`removeSavedForOwner` that take a bound
+  owner and revalidate after every await — including after the cloud write, so
+  a late response is not published — raising `SavedOwnerChangedError` instead
+  of completing against the wrong account. The anonymous bucket is now read,
+  uploaded, and retired inside a serialized claim; previously two overlapping
+  hydrations both read and both uploaded it, landing one signed-out user's
+  saves in two accounts. `SaveOperation` carries its `ownerId` and `undo()`
+  refuses on mismatch. Both entry points pass the signed-in owner into
+  `useDiscoveryController`.
+- **Blocker 2 — atomic anonymous trail claiming.** `syncDiscoveryTrailEvents`
+  checked the owner once on entry, then ran a cloud read, an upsert, and a
+  final merge without rechecking, and converted anonymous events to
+  account-owned only in memory. The new test proved two overlapping syncs
+  uploaded the same event to both `user-a` and `user-b`. Syncs are now
+  serialized, the claim is written to the local store before any cloud call so
+  a later sync sees those events as owned, the owner is revalidated after the
+  read and after the upsert, and every abandoned path releases the claim —
+  otherwise a failed sync strands events owned by an account that never
+  uploaded them and no longer anonymous for anyone else.
+
+**Why:** User chose "go ahead without it" when the local `f11568d` still had
+not reached GitHub after blocker 3 was finished.
+
+**Files:** `lib/storage/saved.ts`, `lib/storage/savedMutations.ts`,
+`lib/storage/discoveryTrailSync.ts`, `lib/discovery/deckState.ts`,
+`components/discovery/useDiscoveryController.ts`, `app/index.tsx`,
+`app/index.web.tsx`, plus `lib/storage/__tests__/savedOwnership.test.ts` and
+additions to the trail-sync, controller, and web-app suites.
+
+**Verification:** 295 tests (293 pass — the two failures are the pre-existing
+ones described below), typecheck clean, web/iOS/Android exports pass, browser
+matrix 12/12 on the shipped export.
+
+**Follow-ups:**
+
+- **`f11568d` is still unpushed and now genuinely divergent.** Blockers 1 and 2
+  are implemented here independently. Whoever reconciles the two should expect
+  real conflicts in `savedMutations.ts`, `discoveryTrailSync.ts`, and
+  `useDiscoveryController.ts`, and should treat them as competing
+  implementations of the same contract rather than merging both.
+- Everything in the entry below still stands: two pre-existing test failures,
+  map code in native bundles, unapplied Supabase policies, and the `output`
+  mode question.
+
+---
+
 ## 2026-07-26 — Saved Atlas residual blocker 3, security port, handoff scaffolding
 
 **Did:**
