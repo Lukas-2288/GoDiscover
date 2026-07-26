@@ -14,6 +14,10 @@ export type ArtistDetail = {
   imageUrl?: string;
   albums: { id: string; name: string; releaseDate: string; imageUrl?: string }[];
   spotifyUrl: string;
+  genres?: string[];
+  styles?: string[];
+  description?: string;
+  releaseYear?: string;
 };
 
 export type AlbumDetail = {

@@ -76,6 +76,7 @@ export type MovieFilterParams = {
   yearTo?: number;
   minRating?: number;
   language?: string;
+  page?: number;
 };
 
 export async function filterMovies(params: MovieFilterParams): Promise<ResultItem[]> {
@@ -83,7 +84,7 @@ export async function filterMovies(params: MovieFilterParams): Promise<ResultIte
     sort_by: 'popularity.desc',
     include_adult: 'false',
     'vote_count.gte': 50,
-    page: Math.floor(Math.random() * 5) + 1,
+    page: params.page ?? Math.floor(Math.random() * 5) + 1,
   };
   if (params.genreIds?.length) q.with_genres = params.genreIds.join('|');
   if (params.yearFrom) q['primary_release_date.gte'] = `${params.yearFrom}-01-01`;

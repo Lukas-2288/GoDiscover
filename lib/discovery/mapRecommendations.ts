@@ -11,7 +11,13 @@ const CONFIDENCE_THRESHOLD = 0.6;
 const MAX_RECOMMENDATIONS = 8;
 
 export type RecommendationReason = {
-  kind: "provider-similar" | "shared-genre" | "shared-style" | "shared-subject" | "shared-era";
+  kind:
+    | "provider-similar"
+    | "shared-genre"
+    | "shared-style"
+    | "shared-subject"
+    | "shared-creator"
+    | "shared-era";
   label: string;
   evidence: string[];
 };
@@ -47,7 +53,8 @@ export type MapRecommendationResult = {
 type TraitEvidence = {
   kind: Exclude<RecommendationReason["kind"], "provider-similar">;
   value: string;
-  filter: string;
+  query: string;
+  mode: "filter" | "search";
   score: number;
 };
 
@@ -58,13 +65,76 @@ const PROVIDER_TRAIT_FILTERS: Record<ContentCategory, ReadonlySet<string>> = {
   albums: new Set(Object.keys(SPOTIFY_GENRE_MAP)),
 };
 
+const STYLE_FILTERS: Partial<
+  Record<string, Partial<Record<ContentCategory, string>>>
+> = {
+  "Trip-Hop": {
+    artists: "Electronic / EDM",
+    albums: "Electronic / EDM",
+  },
+  Downtempo: {
+    artists: "Electronic / EDM",
+    albums: "Electronic / EDM",
+  },
+  Epic: {
+    movies: "Adventure",
+    books: "Fantasy",
+  },
+  "Coming-of-age": {
+    movies: "Drama",
+    books: "Young Adult",
+  },
+  Noir: {
+    movies: "Crime",
+    books: "Mystery / Thriller",
+  },
+};
+
 function traitEvidence(profile: CulturalProfile, category: ContentCategory): TraitEvidence | null {
   const filters = PROVIDER_TRAIT_FILTERS[category];
   for (const genre of profile.genres) {
-    if (filters.has(genre)) return { kind: "shared-genre", value: genre, filter: genre, score: 0.68 };
+    if (filters.has(genre)) {
+      return {
+        kind: "shared-genre",
+        value: genre,
+        query: genre,
+        mode: "filter",
+        score: 0.68,
+      };
+    }
   }
   for (const subject of profile.subjects) {
-    if (filters.has(subject)) return { kind: "shared-subject", value: subject, filter: subject, score: 0.66 };
+    if (filters.has(subject)) {
+      return {
+        kind: "shared-subject",
+        value: subject,
+        query: subject,
+        mode: "filter",
+        score: 0.66,
+      };
+    }
+  }
+  for (const style of profile.styles) {
+    const filter = STYLE_FILTERS[style]?.[category];
+    if (filter && filters.has(filter)) {
+      return {
+        kind: "shared-style",
+        value: style,
+        query: filter,
+        mode: "filter",
+        score: 0.67,
+      };
+    }
+  }
+  const creator = profile.creators[0];
+  if (creator) {
+    return {
+      kind: "shared-creator",
+      value: creator,
+      query: creator.replace(/-/g, " "),
+      mode: "search",
+      score: 0.7,
+    };
   }
   return null;
 }
@@ -79,7 +149,7 @@ function providerDecade(era?: string): string | undefined {
 }
 
 function traitFilters(evidence: TraitEvidence, profile: CulturalProfile): string[] {
-  return [evidence.filter, providerDecade(profile.era)].filter(
+  return [evidence.query, providerDecade(profile.era)].filter(
     (value): value is string => Boolean(value)
   );
 }
@@ -89,9 +159,35 @@ function traitReason(evidence: TraitEvidence): RecommendationReason {
     "shared-genre": "Shared genre",
     "shared-style": "Shared style",
     "shared-subject": "Shared subject",
+    "shared-creator": "Shared creator",
     "shared-era": "Shared era",
   }[evidence.kind];
-  return { kind: evidence.kind, label: `${label}: ${evidence.value}`, evidence: [evidence.value] };
+  const displayValue =
+    evidence.kind === "shared-creator"
+      ? evidence.value
+          .split("-")
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ")
+      : evidence.value;
+  return {
+    kind: evidence.kind,
+    label: `${label}: ${displayValue}`,
+    evidence: [evidence.value],
+  };
+}
+
+function providerSeed(
+  seed: MapRecommendationSeed,
+  category: ContentCategory,
+  evidence?: TraitEvidence
+): string {
+  return [
+    `${seed.category}:${seed.item.id}`,
+    category,
+    evidence?.kind ?? "similar",
+    evidence?.value ?? "",
+    seed.profile.era ?? "",
+  ].join("|");
 }
 
 function candidateKey(candidate: Pick<MapRecommendation, "category" | "item">): string {
@@ -134,7 +230,12 @@ export async function findMapRecommendations(
 
   let similarStatus: RecommendationSourceStatus;
   try {
-    const similar = await dependencies.providers[seed.category].similar(seed.item);
+    const similarProvider = dependencies.providers[seed.category];
+    const similar = similarProvider.mapSimilar
+      ? await similarProvider.mapSimilar(seed.item, {
+          seed: providerSeed(seed, seed.category),
+        })
+      : await similarProvider.similar(seed.item);
     similarStatus = { category: seed.category, source: "similar", status: "available" };
     for (const item of similar) {
       add({
@@ -158,7 +259,15 @@ export async function findMapRecommendations(
       return { category, status: "not-applicable" as const, candidates: [] };
     }
     try {
-      const items = await dependencies.providers[category].filter(traitFilters(evidence, seed.profile));
+      const provider = dependencies.providers[category];
+      const items =
+        evidence.mode === "search"
+          ? await provider.search(evidence.query)
+          : provider.mapFilter
+            ? await provider.mapFilter(traitFilters(evidence, seed.profile), {
+                seed: providerSeed(seed, category, evidence),
+              })
+            : await provider.filter(traitFilters(evidence, seed.profile));
       return {
         category,
         status: "available" as const,

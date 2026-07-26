@@ -14,6 +14,7 @@ import { loadDetail, type ContentDetail } from "../lib/discovery/loadDetail";
 import { loadMapSnapshot, recordMapTrailEvent, type MapNode, type MapSnapshot } from "../lib/storage/discoveryMap";
 import { disconnectSavedItemTrails, syncDiscoveryTrailEvents } from "../lib/storage/discoveryTrailSync";
 import { buildCulturalProfile } from "../lib/discovery/culturalProfile";
+import { loadMapRecommendationSeed } from "../lib/discovery/mapRecommendationAdapters";
 import { findMapRecommendations } from "../lib/discovery/mapRecommendations";
 import { defaultDiscoveryProviders } from "../lib/discovery/loadDiscovery";
 import type { OrbitSeed } from "../components/web/map/SavedAtlas.web";
@@ -70,6 +71,9 @@ function WebHomeScreen() {
   const savedRefreshSequence = useRef(0);
   const trailSeed = useRef<{ category: ContentCategory; id: string } | null>(null);
   const responsiveOrbitRequest = useRef(0);
+  const culturalProfileCache = useRef(
+    new Map<string, ReturnType<typeof buildCulturalProfile>>()
+  );
   const discovery = useDiscoveryController({ onSavedItemsChange: setSavedItems });
   const { selected } = discovery.state;
   const { activeItem } = discovery;
@@ -88,6 +92,7 @@ function WebHomeScreen() {
         setMapSnapshot(EMPTY_MAP_SNAPSHOT);
         setSelectedNodeId(null);
         responsiveOrbitRequest.current += 1;
+        culturalProfileCache.current.clear();
         setResponsiveOrbit({ seedId: null, orbitSeed: null, previewId: null, loading: false, error: false, recommendations: [] });
         setDetailSelection(null);
       }
@@ -323,7 +328,31 @@ function WebHomeScreen() {
       mapLoadSequence.current === operationMapSequence &&
       activeOwnerId.current === operationOwnerId;
     const savedSeed = mapSnapshot.nodes.find((node) => node.id === seed.id);
-    const profile = savedSeed?.culturalProfile ?? buildCulturalProfile(seed.category, seed.item);
+    let profile =
+      savedSeed?.culturalProfile ?? culturalProfileCache.current.get(seed.id);
+    if (!profile) {
+      try {
+        const enrichedSeed = await loadMapRecommendationSeed(
+          seed.category,
+          seed.item
+        );
+        if (!operationIsCurrent()) {
+          throw new Error(
+            "The atlas changed while recommendation detail was loading."
+          );
+        }
+        profile = enrichedSeed.profile;
+        culturalProfileCache.current.set(seed.id, profile);
+        setMapSnapshot((current) => ({
+          ...current,
+          nodes: current.nodes.map((node) =>
+            node.id === seed.id ? { ...node, culturalProfile: profile } : node
+          ),
+        }));
+      } catch {
+        profile = buildCulturalProfile(seed.category, seed.item);
+      }
+    }
     const result = await findMapRecommendations(
       { category: seed.category, item: seed.item, profile },
       { providers: defaultDiscoveryProviders }

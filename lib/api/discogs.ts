@@ -106,7 +106,19 @@ export type MusicFilterParams = {
   genres?: string[];
   yearFrom?: number;
   yearTo?: number;
+  page?: number;
+  deterministic?: boolean;
 };
+
+function stableResultOrder(
+  left: SearchReleaseItem,
+  right: SearchReleaseItem
+): number {
+  return (
+    String(left.title).localeCompare(String(right.title)) ||
+    String(left.id).localeCompare(String(right.id))
+  );
+}
 
 function resolveGenreStyle(labels: string[]): { genre?: string; style?: string } {
   for (const l of labels) {
@@ -189,7 +201,7 @@ export async function randomArtists(): Promise<ResultItem[]> {
 export async function filterAlbums(params: MusicFilterParams): Promise<ResultItem[]> {
   const { genre, style } = resolveGenreStyle(params.genres ?? []);
   const year = buildYear(params);
-  const page = Math.floor(Math.random() * 3) + 1;
+  const page = params.page ?? Math.floor(Math.random() * 3) + 1;
   const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
     type: 'master',
     genre,
@@ -208,13 +220,16 @@ export async function filterAlbums(params: MusicFilterParams): Promise<ResultIte
     });
     items = fallback.results ?? [];
   }
-  return [...items].sort(() => Math.random() - 0.5).slice(0, 5).map(releaseToResult);
+  return [...items]
+    .sort(params.deterministic ? stableResultOrder : () => Math.random() - 0.5)
+    .slice(0, 5)
+    .map(releaseToResult);
 }
 
 export async function filterArtists(params: MusicFilterParams): Promise<ResultItem[]> {
   const { genre, style } = resolveGenreStyle(params.genres ?? []);
   const year = buildYear(params);
-  const page = Math.floor(Math.random() * 3) + 1;
+  const page = params.page ?? Math.floor(Math.random() * 3) + 1;
   const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
     type: 'master',
     genre,
@@ -225,7 +240,10 @@ export async function filterArtists(params: MusicFilterParams): Promise<ResultIt
   });
   const seen = new Set<string>();
   const out: ResultItem[] = [];
-  for (const r of data.results ?? []) {
+  const artistSource = params.deterministic
+    ? [...(data.results ?? [])].sort(stableResultOrder)
+    : data.results ?? [];
+  for (const r of artistSource) {
     const { artist } = parseTitle(r.title);
     if (artist === 'Various' || seen.has(artist.toLowerCase())) continue;
     seen.add(artist.toLowerCase());
@@ -299,6 +317,22 @@ export async function getArtistDetail(id: string): Promise<ArtistDetail> {
     seen.add(key);
     unique.push(r);
   }
+  let profileMetadata: {
+    genres?: string[];
+    styles?: string[];
+    year?: number;
+  } = {};
+  if (unique[0]) {
+    try {
+      profileMetadata = await discogs<{
+        genres?: string[];
+        styles?: string[];
+        year?: number;
+      }>(`/masters/${unique[0].id}`);
+    } catch {
+      profileMetadata = {};
+    }
+  }
   return {
     id: String(artist.id),
     name: artist.name,
@@ -311,10 +345,21 @@ export async function getArtistDetail(id: string): Promise<ArtistDetail> {
     })),
     spotifyUrl:
       artist.uri ?? `https://www.discogs.com/artist/${artist.id}`,
+    genres: profileMetadata.genres ?? [],
+    styles: profileMetadata.styles ?? [],
+    description: artist.profile ?? "",
+    releaseYear: profileMetadata.year
+      ? String(profileMetadata.year)
+      : unique[0]?.year
+        ? String(unique[0].year)
+        : undefined,
   };
 }
 
-export async function getSimilarAlbums(id: string): Promise<ResultItem[]> {
+export async function getSimilarAlbums(
+  id: string,
+  options: { deterministic?: boolean } = {}
+): Promise<ResultItem[]> {
   let release: ReleaseInfo;
   try {
     const master = await discogs<{ main_release: number }>(`/masters/${id}`);
@@ -334,7 +379,7 @@ export async function getSimilarAlbums(id: string): Promise<ResultItem[]> {
   const items = data.results ?? [];
   return [...items]
     .filter((r) => String(r.id) !== id && r.cover_image)
-    .sort(() => Math.random() - 0.5)
+    .sort(options.deterministic ? stableResultOrder : () => Math.random() - 0.5)
     .slice(0, 10)
     .map(releaseToResult);
 }

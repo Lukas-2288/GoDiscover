@@ -264,6 +264,7 @@ import {
   loadMapSnapshot,
   recordMapTrailEvent,
 } from "../../lib/storage/discoveryMap";
+import { loadDetail } from "../../lib/discovery/loadDetail";
 import { listSavedForOwner } from "../../lib/storage/saved";
 import { removeSavedItem, saveSavedItem } from "../../lib/storage/savedMutations";
 import {
@@ -374,6 +375,7 @@ beforeEach(() => {
   jest.mocked(disconnectSavedItemTrails).mockReset().mockResolvedValue([]);
   jest.mocked(syncDiscoveryTrailEvents).mockReset().mockResolvedValue([]);
   jest.mocked(findMapRecommendations).mockReset();
+  jest.mocked(loadDetail).mockReset().mockResolvedValue(null as never);
   jest.mocked(supabase.auth.getSession).mockReset();
 });
 
@@ -1115,6 +1117,55 @@ it("turns all actual recommendation-provider failures into a retryable orbit fai
 
   await waitFor(() => expect(screen.getByTestId("orbit-error")).toBeTruthy());
   expect(recordMapTrailEvent).not.toHaveBeenCalled();
+});
+
+it("lazily enriches a lightweight saved movie before cross-media recommendation lookup", async () => {
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(loadDetail).mockResolvedValue({
+    category: "movies",
+    data: {
+      id: source.id,
+      title: source.title,
+      overview: "A science-fiction drama.",
+      releaseYear: "2026",
+      rating: 8,
+      genres: ["Science Fiction"],
+      language: "en",
+    },
+  });
+  jest.mocked(findMapRecommendations).mockResolvedValue({
+    recommendations: [],
+    sourceStatuses: [],
+  });
+
+  render(<WebHomeScreen />);
+  await waitFor(() =>
+    expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id)
+  );
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("orbit-find"));
+  });
+
+  await waitFor(() =>
+    expect(findMapRecommendations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "movies",
+        item: expect.objectContaining({ id: "source" }),
+        profile: expect.objectContaining({
+          genres: expect.arrayContaining(["Sci-Fi"]),
+          era: "2020s",
+        }),
+      }),
+      expect.any(Object)
+    )
+  );
 });
 
 it("records only a relationship when an orbit candidate is already saved", async () => {

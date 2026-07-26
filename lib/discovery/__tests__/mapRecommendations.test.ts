@@ -75,12 +75,14 @@ describe("findMapRecommendations", () => {
       { category: "movies", id: "contact", score: 0.9, reason: { kind: "provider-similar", label: "Provider-native similar movie", evidence: ["provider-native similar result"] } },
       { category: "artists", id: "name:bjork", score: 0.68, reason: { kind: "shared-genre", label: "Shared genre: Jazz", evidence: ["Jazz"] } },
       { category: "albums", id: "untrue", score: 0.68, reason: { kind: "shared-genre", label: "Shared genre: Jazz", evidence: ["Jazz"] } },
+      { category: "books", id: "left-hand", score: 0.67, reason: { kind: "shared-style", label: "Shared style: Epic", evidence: ["Epic"] } },
+      { category: "movies", id: "interstellar", score: 0.67, reason: { kind: "shared-style", label: "Shared style: Epic", evidence: ["Epic"] } },
     ]);
     for (const category of ["artists", "albums"] as const) {
       expect(registry[category].filter).toHaveBeenCalledWith(["Jazz", "10s"]);
     }
-    expect(registry.movies.filter).not.toHaveBeenCalled();
-    expect(registry.books.filter).not.toHaveBeenCalled();
+    expect(registry.movies.filter).toHaveBeenCalledWith(["Adventure", "10s"]);
+    expect(registry.books.filter).toHaveBeenCalledWith(["Fantasy", "10s"]);
   });
 
   it("does not fill cross-category variety with era-only weak matches", async () => {
@@ -234,5 +236,113 @@ describe("findMapRecommendations", () => {
       { category: "artists", source: "traits", status: "available" },
       { category: "albums", source: "traits", status: "available" },
     ]);
+  });
+
+  it("uses a normalized creator search as honest cross-category evidence", async () => {
+    const creatorMatch: ResultItem = {
+      id: "earthsea-score",
+      title: "Earthsea",
+      subtitle: "A musical interpretation",
+      meta: "2024",
+    };
+    const registry = providers({
+      movies: { similar: async () => [] },
+      albums: { search: jest.fn(async () => [creatorMatch]) },
+    });
+
+    const result = await findMapRecommendations(
+      {
+        category: "movies",
+        item: seed,
+        profile: {
+          vocabularyVersion: 1,
+          genres: [],
+          styles: [],
+          subjects: [],
+          creators: ["ursula-k-le-guin"],
+        },
+      },
+      { providers: registry }
+    );
+
+    expect(registry.albums.search).toHaveBeenCalledWith("ursula k le guin");
+    expect(result.recommendations).toEqual([
+      {
+        category: "albums",
+        item: creatorMatch,
+        score: 0.7,
+        reason: {
+          kind: "shared-creator",
+          label: "Shared creator: Ursula K Le Guin",
+          evidence: ["ursula-k-le-guin"],
+        },
+      },
+    ]);
+  });
+
+  it("uses the stable map adapter path instead of random discovery filters", async () => {
+    const stable: ResultItem = {
+      id: "stable",
+      title: "Stable",
+      subtitle: "Artist",
+      meta: "",
+    };
+    const randomA: ResultItem = {
+      id: "random-a",
+      title: "Random A",
+      subtitle: "Artist",
+      meta: "",
+    };
+    const randomB: ResultItem = {
+      id: "random-b",
+      title: "Random B",
+      subtitle: "Artist",
+      meta: "",
+    };
+    const registry = providers({
+      movies: { similar: async () => [] },
+      artists: {
+        filter: async () => (Math.random() < 0.5 ? [randomA] : [randomB]),
+        mapFilter: jest.fn(async () => [stable]),
+      } as never,
+    });
+    const recommendationSeed = {
+      category: "movies" as const,
+      item: seed,
+      profile: {
+        vocabularyVersion: 1 as const,
+        genres: ["Jazz"],
+        styles: [],
+        subjects: [],
+        creators: [],
+      },
+    };
+
+    jest.spyOn(Math, "random").mockReturnValueOnce(0).mockReturnValueOnce(1);
+    const first = await findMapRecommendations(recommendationSeed, {
+      providers: registry,
+    });
+    const second = await findMapRecommendations(recommendationSeed, {
+      providers: registry,
+    });
+
+    expect(first.recommendations.map((candidate) => candidate.item.id)).toEqual([
+      "stable",
+    ]);
+    expect(second.recommendations.map((candidate) => candidate.item.id)).toEqual([
+      "stable",
+    ]);
+    expect(
+      (registry.artists as typeof registry.artists & {
+        mapFilter: jest.Mock;
+      }).mapFilter
+    ).toHaveBeenNthCalledWith(
+      1,
+      ["Jazz"],
+      expect.objectContaining({
+        seed: expect.stringContaining("movies:arrival"),
+      })
+    );
+    jest.restoreAllMocks();
   });
 });
