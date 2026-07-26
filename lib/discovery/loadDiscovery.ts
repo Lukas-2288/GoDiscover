@@ -25,6 +25,7 @@ import {
   SPOTIFY_GENRE_MAP,
 } from "../api/discogs";
 import type { ContentCategory, ResultItem } from "../../types/content";
+import { loadNextSimilar } from "./similarTiers";
 import type { DiscoveryLoadContext, DiscoveryLoadInput } from "./types";
 
 export type DiscoveryProvider = {
@@ -258,11 +259,30 @@ export async function loadDiscovery(
     });
   }
   if (!("seed" in input)) throw new Error("Similar requires a source item");
+
+  // Walk the similarity ladder rather than re-asking for page 1 every time,
+  // which is what made Similar repeat itself.
+  const seen = new Set<string>([
+    ...(context.presentIds ?? []),
+    ...(context.rejectedIds ?? []),
+  ]);
+  const { items, tier, exhausted } = await loadNextSimilar(
+    {
+      category: input.category,
+      seed: input.seed,
+      tier: context.similarTier ?? "close",
+      page: context.page ?? 1,
+    },
+    {
+      provider,
+      wander: (page) => provider.random({ page }),
+    },
+    seen
+  );
+  context.onSimilarTier?.(tier, exhausted);
   // Similar is already scoped by the seed the user chose, so damping its genre
   // would gut the result. Rejected and present items are still removed.
-  return applyDiscoveryContext(await provider.similar(input.seed, context), context, {
-    dampTraits: false,
-  });
+  return applyDiscoveryContext(items, context, { dampTraits: false });
 }
 
 export function toDiscoveryError(category: ContentCategory): string {

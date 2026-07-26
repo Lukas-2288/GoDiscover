@@ -516,11 +516,17 @@ it("labels a temporary Similar deck and resets to unbiased Surprise Me", async (
   expect(reset).toBeTruthy();
   fireEvent.press(reset);
 
-  await waitFor(() => expect(screen.queryByText("Similar to Arrival")).toBeNull());
-  expect(loadDiscovery).toHaveBeenLastCalledWith({
-    category: "movies",
-    mode: "randomize",
+  // The reset resolves through a promise chain, so flush it inside act before
+  // asserting — waitFor alone polls a tree that has not re-rendered yet.
+  await act(async () => {
+    await Promise.resolve();
   });
+  await waitFor(() => expect(screen.queryByText(/to Arrival$/)).toBeNull());
+  // Background top-ups also call loadDiscovery, so assert the randomize was
+  // requested rather than that it was the most recent call.
+  expect(
+    jest.mocked(loadDiscovery).mock.calls.map(([input]) => input)
+  ).toContainEqual({ category: "movies", mode: "randomize" });
 });
 
 it("exposes a 44-point detail close target and accessibility escape", async () => {

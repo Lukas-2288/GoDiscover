@@ -19,6 +19,10 @@ import type {
 } from "../../lib/discovery/deckState";
 import { loadDiscovery, toDiscoveryError } from "../../lib/discovery/loadDiscovery";
 import { createDiscoveryRequestTracker } from "../../lib/discovery/requestTracker";
+import {
+  SIMILAR_EXHAUSTED_MESSAGE,
+  type SimilarTier,
+} from "../../lib/discovery/similarTiers";
 import type {
   DiscoveryActionMode,
   DiscoveryLoadContext,
@@ -223,6 +227,11 @@ export function useDiscoveryController(
   const undoTimerRef = useRef<UndoTimer | null>(null);
   const undoInFlightRef = useRef(new Set<number>());
   const rejectionsRef = useRef<readonly Rejection[]>([]);
+  const similarTierRef = useRef<{
+    category: ContentCategory;
+    tier: SimilarTier;
+    exhausted: boolean;
+  } | null>(null);
   const mountedRef = useRef(true);
 
   stateRef.current = deckState;
@@ -305,6 +314,12 @@ export function useDiscoveryController(
         dampedTraits: dampedTraitsFor(rejections, category),
         presentIds: new Set(deck.queue.map((item) => item.id)),
         page,
+        // Resume the ladder where it left off so a Similar top-up widens the
+        // scope rather than re-requesting the closest matches.
+        similarTier: deck.similarContext?.tier,
+        onSimilarTier: (tier, exhausted) => {
+          similarTierRef.current = { category, tier, exhausted };
+        },
       };
     },
     []
@@ -325,14 +340,24 @@ export function useDiscoveryController(
         if (!mountedRef.current || !requestTrackerRef.current.isCurrent(request)) {
           return;
         }
+        const similar =
+          similarTierRef.current?.category === input.category
+            ? similarTierRef.current
+            : null;
         dispatch({
           type: "requestSucceeded",
           request,
           input,
           items: [...items],
+          similarTier: similar?.tier,
+          similarExhausted: similar?.exhausted,
         });
         if (input.mode === "similar") {
-          setAnnouncement(`Showing picks similar to ${input.seed.title}.`);
+          setAnnouncement(
+            similar?.exhausted
+              ? SIMILAR_EXHAUSTED_MESSAGE
+              : `Showing picks similar to ${input.seed.title}.`
+          );
         }
       } catch (error) {
         if (!mountedRef.current || !requestTrackerRef.current.isCurrent(request)) {

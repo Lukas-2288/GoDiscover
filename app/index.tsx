@@ -68,6 +68,7 @@ import {
   toDetailError,
   type ContentDetail,
 } from "../lib/discovery/loadDetail";
+import { SIMILAR_TIER_LABELS } from "../lib/discovery/similarTiers";
 
 export default function HomeScreen() {
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
@@ -656,7 +657,12 @@ export default function HomeScreen() {
           {session?.deck.similarContext ? (
             <View style={styles.similarContext}>
               <Text style={styles.similarContextText}>
-                Similar to {session.deck.similarContext.sourceTitle}
+                {/* Naming the rung keeps the label honest once the ladder has
+                    widened, instead of calling a distant pick "similar". */}
+                {session.deck.similarContext.tier
+                  ? SIMILAR_TIER_LABELS[session.deck.similarContext.tier]
+                  : "Similar"}{" "}
+                to {session.deck.similarContext.sourceTitle}
               </Text>
               <Pressable
                 accessibilityLabel="Back to unbiased Surprise Me"

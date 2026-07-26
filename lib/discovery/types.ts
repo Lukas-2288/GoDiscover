@@ -17,6 +17,14 @@ export type DiscoveryLoadInput =
 export type SimilarContext = {
   sourceId: string;
   sourceTitle: string;
+  /**
+   * How far from the seed the current results are. Shown on the deck so
+   * "Loosely related" is honest about having widened rather than pretending
+   * everything is a close match.
+   */
+  tier?: import("./similarTiers").SimilarTier;
+  /** True once even the widest tier is spent. */
+  exhausted?: boolean;
 };
 
 /**
@@ -33,4 +41,12 @@ export type DiscoveryLoadContext = {
   /** Items already in the deck, so a top-up does not repeat them. */
   presentIds?: ReadonlySet<string>;
   page?: number;
+  /**
+   * Rung of the similarity ladder to start from. Each Similar top-up resumes
+   * where the last left off, so the scope widens instead of repeating the same
+   * ten results.
+   */
+  similarTier?: import("./similarTiers").SimilarTier;
+  /** Receives the rung actually used, so the deck can show and resume it. */
+  onSimilarTier?(tier: import("./similarTiers").SimilarTier, exhausted: boolean): void;
 };

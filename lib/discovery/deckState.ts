@@ -6,6 +6,7 @@ import type {
   SimilarContext,
 } from "./types";
 import { toggleDiscoveryFilter } from "./filterSelection";
+import type { SimilarTier } from "./similarTiers";
 
 export type DeckState = {
   queue: ResultItem[];
@@ -96,6 +97,9 @@ export type DiscoveryDeckAction =
       request: DiscoveryRequestIdentity;
       input: DiscoveryLoadInput;
       items: ResultItem[];
+      /** Which rung of the similarity ladder produced these results. */
+      similarTier?: SimilarTier;
+      similarExhausted?: boolean;
     }
   | { type: "requestFailed"; request: DiscoveryRequestIdentity; message: string }
   | {
@@ -339,7 +343,12 @@ export function discoveryDeckReducer(
 
       const similarContext =
         action.input.mode === "similar"
-          ? { sourceId: action.input.seed.id, sourceTitle: action.input.seed.title }
+          ? {
+              sourceId: action.input.seed.id,
+              sourceTitle: action.input.seed.title,
+              tier: action.similarTier,
+              exhausted: action.similarExhausted,
+            }
           : null;
       const deck = replaceDeck(session.deck, action.items, similarContext);
       return updateSession(state, action.request.category, (current) => ({
