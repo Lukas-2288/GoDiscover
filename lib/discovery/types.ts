@@ -18,3 +18,19 @@ export type SimilarContext = {
   sourceId: string;
   sourceTitle: string;
 };
+
+/**
+ * What the deck already knows when it asks for more.
+ *
+ * Carries the memory that "Not for me" builds up: items to never show again,
+ * and traits rejected often enough to steer away from. Threaded through
+ * `loadDiscovery` so providers can apply it at the query level where the API
+ * supports it, with a post-filter as the floor.
+ */
+export type DiscoveryLoadContext = {
+  rejectedIds?: ReadonlySet<string>;
+  dampedTraits?: readonly string[];
+  /** Items already in the deck, so a top-up does not repeat them. */
+  presentIds?: ReadonlySet<string>;
+  page?: number;
+};

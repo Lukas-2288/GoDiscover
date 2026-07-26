@@ -160,6 +160,46 @@ function buildYear(params: MusicFilterParams): string | undefined {
   return undefined;
 }
 
+export type EraWindow = {
+  yearFrom: number;
+  yearTo: number;
+  weight: number;
+};
+
+/**
+ * Decade windows for unfiltered randomise.
+ *
+ * Discogs is a record-collector catalogue: its `master` releases skew heavily
+ * towards the vinyl era, and randomAlbums/randomArtists previously sent no
+ * `year` at all, so Discogs' own ordering picked — and it kept picking the 70s
+ * to 90s. Asking for an explicit decade is what puts recent music back in
+ * rotation.
+ *
+ * Weighted towards this century because that is where the catalogue is thinnest
+ * by default, not because older music matters less. Older decades stay well
+ * represented; an explicit Era filter still overrides all of this.
+ */
+export const RANDOM_ERA_WINDOWS: readonly EraWindow[] = [
+  { yearFrom: 1960, yearTo: 1969, weight: 1 },
+  { yearFrom: 1970, yearTo: 1979, weight: 1 },
+  { yearFrom: 1980, yearTo: 1989, weight: 1 },
+  { yearFrom: 1990, yearTo: 1999, weight: 1.5 },
+  { yearFrom: 2000, yearTo: 2009, weight: 2 },
+  { yearFrom: 2010, yearTo: 2019, weight: 2.5 },
+  { yearFrom: 2020, yearTo: new Date().getFullYear(), weight: 2 },
+];
+
+/** Weighted pick over RANDOM_ERA_WINDOWS. `roll` is injectable for tests. */
+export function pickRandomEraWindow(roll: () => number = Math.random): EraWindow {
+  const total = RANDOM_ERA_WINDOWS.reduce((sum, window) => sum + window.weight, 0);
+  let remaining = Math.min(Math.max(roll(), 0), 0.999_999_9) * total;
+  for (const window of RANDOM_ERA_WINDOWS) {
+    remaining -= window.weight;
+    if (remaining < 0) return window;
+  }
+  return RANDOM_ERA_WINDOWS[RANDOM_ERA_WINDOWS.length - 1];
+}
+
 export async function searchAlbums(query: string): Promise<ResultItem[]> {
   if (!query.trim()) return [];
   const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
@@ -183,29 +223,54 @@ export async function searchArtists(query: string): Promise<ResultItem[]> {
 export async function randomAlbums(): Promise<ResultItem[]> {
   const keys = Object.keys(DISCOGS_GENRE_MAP);
   const { genre, style } = DISCOGS_GENRE_MAP[keys[Math.floor(Math.random() * keys.length)]];
-  const page = Math.floor(Math.random() * 10) + 1;
+  const era = pickRandomEraWindow();
+  // Fewer pages than before: the result set is now scoped to one decade, so
+  // deep pages are often empty and would return nothing.
+  const page = Math.floor(Math.random() * 5) + 1;
   const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
     type: 'master',
     genre,
     style,
+    year: `${era.yearFrom}-${era.yearTo}`,
     per_page: 20,
     page,
   });
-  const items = data.results ?? [];
+  const items = data.results?.length
+    ? data.results
+    : (await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
+        type: 'master',
+        genre,
+        style,
+        year: `${era.yearFrom}-${era.yearTo}`,
+        per_page: 20,
+      })).results ?? [];
   return [...items].sort(() => Math.random() - 0.5).slice(0, 5).map(releaseToResult);
 }
 
 export async function randomArtists(): Promise<ResultItem[]> {
   const keys = Object.keys(DISCOGS_GENRE_MAP);
   const { genre, style } = DISCOGS_GENRE_MAP[keys[Math.floor(Math.random() * keys.length)]];
-  const page = Math.floor(Math.random() * 10) + 1;
-  const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
+  // Artists are parsed out of master-release titles below, so without a year
+  // this inherits the release catalogue's vinyl-era skew directly.
+  const era = pickRandomEraWindow();
+  const page = Math.floor(Math.random() * 5) + 1;
+  let data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
     type: 'master',
     genre,
     style,
+    year: `${era.yearFrom}-${era.yearTo}`,
     per_page: 50,
     page,
   });
+  if (!data.results?.length) {
+    data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
+      type: 'master',
+      genre,
+      style,
+      year: `${era.yearFrom}-${era.yearTo}`,
+      per_page: 50,
+    });
+  }
   const seen = new Set<string>();
   const out: ResultItem[] = [];
   for (const r of data.results ?? []) {

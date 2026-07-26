@@ -1,6 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ContentCategory, ResultItem } from '../../types/content';
 import { supabase } from '../supabase';
+import {
+  assertOwnerUnchanged,
+  createClaimQueue,
+  getActiveOwnerId,
+} from './owner';
 
 export type SavedItem = ResultItem & {
   category: ContentCategory;
@@ -36,53 +41,22 @@ function rowToItem(r: DbRow): SavedItem {
   };
 }
 
-async function getUserId(): Promise<string | null> {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.user.id ?? null;
-}
+const getUserId = getActiveOwnerId;
 
 /**
  * Raised when the signed-in account changed while an operation was in flight.
  * The operation is abandoned rather than completed against whoever is now
  * active — an Undo raised under owner A must not delete owner B's copy of the
  * same item, and owner A's results must never be published as owner B's.
+ *
+ * Aliased from the shared `owner` module so existing imports keep working.
  */
-export class SavedOwnerChangedError extends Error {
-  readonly name = 'SavedOwnerChangedError';
-
-  constructor(
-    readonly expectedOwnerId: string | null,
-    readonly activeOwnerId: string | null
-  ) {
-    super('Saved-item owner changed while the operation was in flight');
-  }
-}
-
-/**
- * Revalidates the owner an operation was started for. Call after every awaited
- * storage or Supabase boundary and before any write — checking once on entry
- * leaves every later await as a window for the account to change underneath.
- */
-async function assertOwnerUnchanged(expectedOwnerId: string | null): Promise<void> {
-  const activeOwnerId = await getUserId();
-  if (activeOwnerId !== expectedOwnerId) {
-    throw new SavedOwnerChangedError(expectedOwnerId, activeOwnerId);
-  }
-}
+export { OwnerChangedError as SavedOwnerChangedError } from './owner';
 
 // The anonymous bucket is one shared resource that any sign-in wants to claim.
 // Serializing claims keeps two overlapping hydrations from uploading the same
 // signed-out saves into two different accounts.
-let anonymousClaimTail: Promise<unknown> = Promise.resolve();
-
-function claimAnonymousBucket<T>(claim: () => Promise<T>): Promise<T> {
-  const result = anonymousClaimTail.then(claim, claim);
-  anonymousClaimTail = result.then(
-    () => undefined,
-    () => undefined
-  );
-  return result;
-}
+const claimAnonymousBucket = createClaimQueue();
 
 export function savedStorageKeyForOwner(ownerId: string): string {
   return `${SAVED_STORAGE_PREFIX}:owner:${encodeURIComponent(ownerId)}`;

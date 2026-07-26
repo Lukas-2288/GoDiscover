@@ -25,13 +25,20 @@ import {
   SPOTIFY_GENRE_MAP,
 } from "../api/discogs";
 import type { ContentCategory, ResultItem } from "../../types/content";
-import type { DiscoveryLoadInput } from "./types";
+import type { DiscoveryLoadContext, DiscoveryLoadInput } from "./types";
 
 export type DiscoveryProvider = {
   search(query: string): Promise<ResultItem[]>;
-  random(): Promise<ResultItem[]>;
-  filter(filters: readonly string[]): Promise<ResultItem[]>;
-  similar(item: ResultItem): Promise<ResultItem[]>;
+  // `context` is optional so existing test doubles keep satisfying the type.
+  random(context?: DiscoveryLoadContext): Promise<ResultItem[]>;
+  filter(
+    filters: readonly string[],
+    context?: DiscoveryLoadContext
+  ): Promise<ResultItem[]>;
+  similar(
+    item: ResultItem,
+    context?: DiscoveryLoadContext
+  ): Promise<ResultItem[]>;
   mapFilter?(
     filters: readonly string[],
     context: MapProviderContext
@@ -69,8 +76,17 @@ function minimumRating(filters: readonly string[]): number | undefined {
 export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
   movies: {
     search: searchMovies,
-    random: randomMovies,
-    filter: (filters) => {
+    // TMDB is the one provider that can exclude genres in the query itself, so
+    // damped traits are removed from the result set rather than filtered out of
+    // an already-narrow page.
+    random: (context) =>
+      randomMovies({
+        page: context?.page,
+        withoutGenres: context?.dampedTraits
+          ? [...context.dampedTraits]
+          : undefined,
+      }),
+    filter: (filters, context) => {
       const range = yearRange(filters);
       const genreIds = filters
         .map((filter) => TMDB_GENRES[filter])
@@ -80,6 +96,10 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
         yearFrom: range?.yearFrom,
         yearTo: range?.yearTo,
         minRating: minimumRating(filters),
+        page: context?.page,
+        withoutGenres: context?.dampedTraits
+          ? [...context.dampedTraits]
+          : undefined,
       });
     },
     similar: (item) => getSimilarMovies(item.id),
@@ -191,19 +211,58 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
   },
 };
 
+/**
+ * Drops anything the user rejected, anything already on the deck, and — for
+ * providers whose API cannot express exclusion — anything carrying a damped
+ * trait. Search is exempt from trait damping: an explicit query outranks a
+ * standing preference, and silently hiding matches would look broken.
+ */
+export function applyDiscoveryContext(
+  items: readonly ResultItem[],
+  context: DiscoveryLoadContext,
+  { dampTraits }: { dampTraits: boolean }
+): ResultItem[] {
+  const damped = dampTraits ? new Set(context.dampedTraits ?? []) : null;
+  return items.filter((item) => {
+    if (context.rejectedIds?.has(item.id)) return false;
+    if (context.presentIds?.has(item.id)) return false;
+    if (damped?.size && item.traits?.some((trait) => damped.has(trait))) {
+      return false;
+    }
+    return true;
+  });
+}
+
 export async function loadDiscovery(
   input: DiscoveryLoadInput,
-  providers: DiscoveryProviderRegistry = defaultDiscoveryProviders
+  providers: DiscoveryProviderRegistry = defaultDiscoveryProviders,
+  context: DiscoveryLoadContext = {}
 ): Promise<ResultItem[]> {
   const provider = providers[input.category];
   if (input.mode === "search") {
     if (!input.query.trim()) throw new Error("Search requires a query");
-    return provider.search(input.query.trim());
+    return applyDiscoveryContext(await provider.search(input.query.trim()), context, {
+      dampTraits: false,
+    });
   }
-  if (input.mode === "filter") return provider.filter([...input.filters]);
-  if (input.mode === "randomize") return provider.random();
+  if (input.mode === "filter") {
+    return applyDiscoveryContext(
+      await provider.filter([...input.filters], context),
+      context,
+      { dampTraits: true }
+    );
+  }
+  if (input.mode === "randomize") {
+    return applyDiscoveryContext(await provider.random(context), context, {
+      dampTraits: true,
+    });
+  }
   if (!("seed" in input)) throw new Error("Similar requires a source item");
-  return provider.similar(input.seed);
+  // Similar is already scoped by the seed the user chose, so damping its genre
+  // would gut the result. Rejected and present items are still removed.
+  return applyDiscoveryContext(await provider.similar(input.seed, context), context, {
+    dampTraits: false,
+  });
 }
 
 export function toDiscoveryError(category: ContentCategory): string {

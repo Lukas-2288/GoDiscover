@@ -76,15 +76,38 @@ export async function searchMovies(query: string, page = 1): Promise<ResultItem[
   return data.results.slice(0, 5).map(toResultItem);
 }
 
-export async function randomMovies(): Promise<ResultItem[]> {
-  const page = Math.floor(Math.random() * 20) + 1;
-  const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', {
+export type RandomMovieParams = {
+  page?: number;
+  withoutGenres?: string[];
+};
+
+export async function randomMovies(
+  params: RandomMovieParams = {}
+): Promise<ResultItem[]> {
+  const page = params.page ?? Math.floor(Math.random() * 20) + 1;
+  const q: Record<string, string | number> = {
     sort_by: 'popularity.desc',
     page,
     include_adult: 'false',
-  });
+  };
+  // `popularity.desc` is why rejecting one superhero film used to hand back
+  // another: the blockbusters TMDB sorts to the top are heavily one genre.
+  // Excluding damped genres at the query level actually removes them from the
+  // result set rather than filtering an already-narrow page.
+  const withoutGenreIds = toGenreIds(params.withoutGenres);
+  if (withoutGenreIds) q.without_genres = withoutGenreIds;
+  const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', q);
   const shuffled = [...data.results].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, 5).map(toResultItem);
+}
+
+/** Maps filter labels to a TMDB `with_genres`/`without_genres` value. */
+function toGenreIds(labels?: readonly string[]): string | undefined {
+  if (!labels?.length) return undefined;
+  const ids = labels
+    .map((label) => TMDB_GENRES[label])
+    .filter((id): id is number => typeof id === 'number');
+  return ids.length > 0 ? ids.join(',') : undefined;
 }
 
 export type MovieFilterParams = {
@@ -94,6 +117,7 @@ export type MovieFilterParams = {
   minRating?: number;
   language?: string;
   page?: number;
+  withoutGenres?: string[];
 };
 
 export async function filterMovies(params: MovieFilterParams): Promise<ResultItem[]> {
@@ -108,6 +132,13 @@ export async function filterMovies(params: MovieFilterParams): Promise<ResultIte
   if (params.yearTo) q['primary_release_date.lte'] = `${params.yearTo}-12-31`;
   if (params.minRating) q['vote_average.gte'] = params.minRating;
   if (params.language) q.with_original_language = params.language;
+  // An explicitly chosen genre wins over a damped one — the user asking for
+  // Action right now outranks having skipped Action before.
+  const requested = new Set(params.genreIds ?? []);
+  const withoutGenreIds = toGenreIds(
+    params.withoutGenres?.filter((label) => !requested.has(TMDB_GENRES[label]))
+  );
+  if (withoutGenreIds) q.without_genres = withoutGenreIds;
   const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', q);
   return data.results.slice(0, 5).map(toResultItem);
 }

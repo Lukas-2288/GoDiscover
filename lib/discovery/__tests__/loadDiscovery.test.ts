@@ -50,7 +50,9 @@ describe("loadDiscovery", () => {
       { category: "movies", mode: "similar", seed: item },
       registry
     );
-    expect(registry.movies.similar).toHaveBeenCalledWith(item);
+    // The second argument carries rejected/present ids so Similar stops
+    // repeating cards the user has already seen.
+    expect(registry.movies.similar).toHaveBeenCalledWith(item, expect.any(Object));
   });
 
   it("never exposes a provider token response in user copy", () => {
