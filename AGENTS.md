@@ -42,9 +42,16 @@ before concluding something doesn't exist.
 
 - **Test-first.** Every production behavior change starts with a focused failing
   test. This repo has a real Jest suite — use it.
-- **Never break native.** The map dependencies (`@xyflow/react`, `d3-force`) are
-  web-only and must stay shaken out of native bundles. Verify with
+- **Never break native.** The map is web-only (`app/index.web.tsx`,
+  `components/web/map/`). Native must keep exporting cleanly — verify with
   `npx expo export --platform ios`.
+  Known gap: the map code is *intended* to be shaken out of native bundles, but
+  is not. `saved-atlas-flow` — a string that exists only in
+  `SavedAtlas.web.tsx` — appears 11 times in the iOS Hermes bundle, so
+  `@xyflow/react` and `d3-force` are being pulled in through Expo Router's
+  route enumeration. Harmless at runtime (the router never renders the `.web`
+  route on native) but it is dead weight. Unresolved; see the 2026-07-26
+  claude-log entry.
 - **Don't widen scope.** Finish what was asked. If you find an adjacent problem,
   note it in your log entry's Follow-ups rather than fixing it uninvited.
 - **Report honestly.** If tests fail, say so with the output. If you skipped a
