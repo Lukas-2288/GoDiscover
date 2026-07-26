@@ -147,4 +147,55 @@ describe("Discovery Orbit graph", () => {
 
     expect(graph.nodes.filter((node) => node.transient)).toHaveLength(8);
   });
+
+  it("keeps every unrelated permanent coordinate exact through find, skip, and reseed", () => {
+    const permanentPositions = {
+      "movies:arrival": { x: 0.12, y: 0.22 },
+      "albums:vespertine": { x: 0.3, y: 0.4 },
+      "books:le-guin": { x: 0.52, y: 0.62 },
+      "artists:bjork": { x: 0.91, y: 0.83 },
+    };
+    const select = buildOrbitGraph(
+      nodes,
+      edges,
+      "movies:arrival",
+      [],
+      undefined,
+      permanentPositions
+    );
+    const find = buildOrbitGraph(
+      nodes,
+      edges,
+      "movies:arrival",
+      [recommendation(0), recommendation(1)],
+      undefined,
+      permanentPositions
+    );
+    const skip = buildOrbitGraph(
+      nodes,
+      edges,
+      "movies:arrival",
+      [recommendation(1)],
+      undefined,
+      permanentPositions
+    );
+    const reseed = buildOrbitGraph(
+      nodes,
+      edges,
+      "movies:candidate-1",
+      [recommendation(2)],
+      {
+        id: "movies:candidate-1",
+        category: "movies",
+        item: recommendation(1).item,
+      },
+      permanentPositions
+    );
+
+    for (const graph of [select, find, skip, reseed]) {
+      expect(graph.positions["artists:bjork"]).toEqual(
+        permanentPositions["artists:bjork"]
+      );
+    }
+  });
 });

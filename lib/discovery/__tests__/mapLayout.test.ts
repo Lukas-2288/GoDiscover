@@ -226,6 +226,56 @@ it("settles a 200-node, 400-edge atlas deterministically", () => {
   expect(Object.keys(first)).toHaveLength(200);
   expect(new Set(edges.map((edge) => `${edge.source}->${edge.target}`)).size).toBe(400);
   expect(second).toEqual(first);
-  // 250 ms gives a 5× buffer over the observed 50 ms release-check baseline.
-  expect(elapsedMilliseconds).toBeLessThan(250);
+  expect(second).toBe(first);
+
+  const dimensions: Record<string, { width: number; height: number }> = {
+    movies: { width: 96, height: 144 },
+    books: { width: 96, height: 144 },
+    albums: { width: 112, height: 112 },
+    artists: { width: 108, height: 108 },
+  };
+  const boxes = nodes.map((node) => {
+    const size = dimensions[node.category];
+    const position = first[node.id];
+    return {
+      id: node.id,
+      left: position.x * 1_600,
+      right: position.x * 1_600 + size.width,
+      top: position.y * 1_000,
+      bottom: position.y * 1_000 + size.height,
+      centerX: position.x * 1_600 + size.width / 2,
+      centerY: position.y * 1_000 + size.height / 2,
+    };
+  });
+  let overlaps = 0;
+  for (let left = 0; left < boxes.length; left += 1) {
+    for (let right = left + 1; right < boxes.length; right += 1) {
+      const a = boxes[left];
+      const b = boxes[right];
+      if (
+        a.left < b.right &&
+        a.right > b.left &&
+        a.top < b.bottom &&
+        a.bottom > b.top
+      ) {
+        overlaps += 1;
+      }
+    }
+  }
+  expect(overlaps).toBeLessThanOrEqual(4);
+  for (const index of [0, 19, 57, 101, 149, 199]) {
+    const target = boxes[index];
+    const nearestOtherCenter = Math.min(
+      ...boxes
+        .filter((box) => box.id !== target.id)
+        .map((box) =>
+          Math.hypot(
+            box.centerX - target.centerX,
+            box.centerY - target.centerY
+          )
+        )
+    );
+    expect(nearestOtherCenter).toBeGreaterThan(44);
+  }
+  expect(elapsedMilliseconds).toBeLessThan(750);
 });

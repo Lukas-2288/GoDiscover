@@ -181,11 +181,11 @@ function SavedAtlasInner({
     ? responsiveOrbitSeed
     : undefined;
   const graphTransientSeed = responsiveTransientSeed ?? transientOrbitSeed ?? undefined;
-  const orbitGraph = useMemo(
-    () => (graphOrbitSeedId ? buildOrbitGraph(nodes, edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed) : null),
-    [edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed, nodes]
-  );
   const atlasPositions = useMemo(() => createAtlasLayout(nodes, edges), [edges, nodes]);
+  const orbitGraph = useMemo(
+    () => (graphOrbitSeedId ? buildOrbitGraph(nodes, edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed, atlasPositions) : null),
+    [atlasPositions, edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed, nodes]
+  );
   const displayedNodes = orbitGraph?.nodes ?? nodes;
   const displayedEdges = orbitGraph?.edges ?? edges;
 

@@ -1,4 +1,8 @@
-import { createAtlasLayout, projectOrbit } from "../../../lib/discovery/mapLayout";
+import {
+  createAtlasLayout,
+  projectOrbit,
+  type AtlasPosition,
+} from "../../../lib/discovery/mapLayout";
 import type { MapEdge, MapNode } from "../../../lib/storage/discoveryMap";
 import type { ContentCategory, ResultItem } from "../../../types/content";
 
@@ -76,7 +80,8 @@ export function buildOrbitGraph(
   savedEdges: readonly MapEdge[],
   seedId: string,
   recommendations: readonly OrbitRecommendation[],
-  transientSeed?: TransientOrbitSeed
+  transientSeed?: TransientOrbitSeed,
+  permanentPositions?: Readonly<Record<string, AtlasPosition>>
 ): OrbitGraph {
   const savedNodeIds = new Set(savedNodes.map((node) => node.id));
   const reservesTransientSeedSlot = Boolean(transientSeed && !savedNodeIds.has(seedId));
@@ -118,8 +123,21 @@ export function buildOrbitGraph(
     ...suggestedEdges,
   ];
   const related = relatedNodeIds(seedId, nodes, edges);
-  const atlasPositions = createAtlasLayout(nodes, edges);
+  const atlasPositions =
+    permanentPositions ?? createAtlasLayout(savedNodes, savedEdges);
+  const transientPositions = Object.fromEntries(
+    transientNodes.map((node) => [
+      node.id,
+      {
+        x: 0.5,
+        y: 0.5,
+      },
+    ])
+  );
   const positions = projectOrbit(seedId, nodes, edges, atlasPositions).positions;
+  for (const [nodeId, position] of Object.entries(transientPositions)) {
+    if (!(nodeId in positions)) positions[nodeId] = position;
+  }
 
   return {
     nodes: nodes.map((node) => ({

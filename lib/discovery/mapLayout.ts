@@ -1,4 +1,12 @@
 import type { MapEdge, MapNode } from "../storage/discoveryMap";
+import {
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  forceX,
+  forceY,
+} from "d3-force";
 
 export type AtlasPosition = { x: number; y: number };
 
@@ -24,6 +32,11 @@ const CATEGORY_ANCHORS: Record<MapNode["category"], AtlasPosition> = {
   movies: { x: 0.72, y: 0.72 },
 };
 
+const BASE_CANVAS_WIDTH = 1_600;
+const BASE_CANVAS_HEIGHT = 1_000;
+const LAYOUT_TICKS = 300;
+const layoutCache = new Map<string, Record<string, AtlasPosition>>();
+
 function hashToUnitInterval(value: string): number {
   let hash = 2_166_136_261;
   for (let index = 0; index < value.length; index += 1) {
@@ -33,8 +46,39 @@ function hashToUnitInterval(value: string): number {
   return (hash >>> 0) / 4_294_967_295;
 }
 
-function clamp(value: number): number {
-  return Math.max(0, Math.min(1, value));
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function seededRandom(seed: string): () => number {
+  let state = Math.floor(hashToUnitInterval(seed) * 4_294_967_295) >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function artworkSize(category: MapNode["category"]): {
+  width: number;
+  height: number;
+} {
+  if (category === "movies" || category === "books") {
+    return { width: 96, height: 144 };
+  }
+  if (category === "artists") {
+    return { width: 108, height: 108 };
+  }
+  return { width: 112, height: 112 };
+}
+
+function nodeRadius(category: MapNode["category"]): number {
+  const size = artworkSize(category);
+  const width = size.width / BASE_CANVAS_WIDTH;
+  const height = size.height / BASE_CANVAS_HEIGHT;
+  return Math.hypot(width, height) / 2 + 0.009;
 }
 
 export function buildGraphSignature(
@@ -53,57 +97,99 @@ export function createAtlasLayout(
   edges: readonly Pick<MapEdge, "source" | "target">[],
   options: AtlasLayoutOptions = {}
 ): Record<string, AtlasPosition> {
-  const seed = options.seed ?? buildGraphSignature(nodes, edges);
-  const positions = Object.fromEntries(
-    nodes.map((node) => {
-      const anchor = CATEGORY_ANCHORS[node.category];
-      const xOffset = (hashToUnitInterval(`${seed}:x:${node.id}`) - 0.5) * 0.18;
-      const yOffset = (hashToUnitInterval(`${seed}:y:${node.id}`) - 0.5) * 0.18;
-      return [node.id, { x: clamp(anchor.x + xOffset), y: clamp(anchor.y + yOffset) }];
-    })
+  const signature = buildGraphSignature(nodes, edges);
+  const cacheKey = `${signature};seed=${options.seed ?? "permanent"}`;
+  const cached = layoutCache.get(cacheKey);
+  if (cached) return cached;
+
+  const densityScale = Math.max(1, Math.sqrt(nodes.length / 32));
+  const sortedNodes = [...nodes].sort((left, right) =>
+    left.id.localeCompare(right.id)
   );
+  const forceNodes = sortedNodes.map((node) => {
+    const anchor = CATEGORY_ANCHORS[node.category];
+    const jitterSeed = options.seed ?? "permanent";
+    return {
+      id: node.id,
+      category: node.category,
+      radius: nodeRadius(node.category),
+      x:
+        anchor.x * densityScale +
+        (hashToUnitInterval(`${jitterSeed}:x:${node.id}`) - 0.5) * 0.2,
+      y:
+        anchor.y * densityScale +
+        (hashToUnitInterval(`${jitterSeed}:y:${node.id}`) - 0.5) * 0.2,
+      vx: 0,
+      vy: 0,
+    };
+  });
+  const forceNodeIds = new Set(forceNodes.map((node) => node.id));
+  const links = [...edges]
+    .filter(
+      (edge) =>
+        forceNodeIds.has(edge.source) && forceNodeIds.has(edge.target)
+    )
+    .sort((left, right) =>
+      `${left.source}->${left.target}`.localeCompare(
+        `${right.source}->${right.target}`
+      )
+    )
+    .map((edge) => ({ source: edge.source, target: edge.target }));
 
-  for (const edge of [...edges].sort((left, right) =>
-    `${left.source}->${left.target}`.localeCompare(`${right.source}->${right.target}`)
-  )) {
-    const source = positions[edge.source];
-    const target = positions[edge.target];
-    if (!source || !target) continue;
-    const sourceX = source.x;
-    const sourceY = source.y;
-    source.x = clamp(sourceX + (target.x - sourceX) * 0.32);
-    source.y = clamp(sourceY + (target.y - sourceY) * 0.32);
-    target.x = clamp(target.x + (sourceX - target.x) * 0.32);
-    target.y = clamp(target.y + (sourceY - target.y) * 0.32);
-  }
+  const simulation = forceSimulation(forceNodes)
+    .randomSource(seededRandom(`${cacheKey}:simulation`))
+    .alpha(1)
+    .alphaMin(0.001)
+    .velocityDecay(0.38)
+    .force(
+      "category-x",
+      forceX((node: (typeof forceNodes)[number]) =>
+        CATEGORY_ANCHORS[node.category].x * densityScale
+      ).strength(0.055)
+    )
+    .force(
+      "category-y",
+      forceY((node: (typeof forceNodes)[number]) =>
+        CATEGORY_ANCHORS[node.category].y * densityScale
+      ).strength(0.055)
+    )
+    .force(
+      "links",
+      forceLink(links)
+        .id((node: (typeof forceNodes)[number]) => node.id)
+        .distance(0.22)
+        .strength(0.11)
+    )
+    .force(
+      "collision",
+      forceCollide((node: (typeof forceNodes)[number]) => node.radius)
+        .strength(1)
+        .iterations(4)
+    )
+    .force("charge", forceManyBody().strength(-0.012))
+    .stop();
 
-  const nodeIds = Object.keys(positions).sort();
-  const minimumDistance = 0.07;
-  for (let iteration = 0; iteration < 4; iteration += 1) {
-    for (let sourceIndex = 0; sourceIndex < nodeIds.length; sourceIndex += 1) {
-      for (let targetIndex = sourceIndex + 1; targetIndex < nodeIds.length; targetIndex += 1) {
-        const source = positions[nodeIds[sourceIndex]];
-        const target = positions[nodeIds[targetIndex]];
-        const xDifference = target.x - source.x;
-        const yDifference = target.y - source.y;
-        const distance = Math.hypot(xDifference, yDifference);
-        if (distance >= minimumDistance) continue;
-
-        const angle =
-          distance === 0
-            ? hashToUnitInterval(`${seed}:${nodeIds[sourceIndex]}:${nodeIds[targetIndex]}`) * Math.PI * 2
-            : Math.atan2(yDifference, xDifference);
-        const adjustment = (minimumDistance - distance) / 2;
-        const xAdjustment = Math.cos(angle) * adjustment;
-        const yAdjustment = Math.sin(angle) * adjustment;
-        source.x = clamp(source.x - xAdjustment);
-        source.y = clamp(source.y - yAdjustment);
-        target.x = clamp(target.x + xAdjustment);
-        target.y = clamp(target.y + yAdjustment);
-      }
+  for (let tick = 0; tick < LAYOUT_TICKS; tick += 1) {
+    simulation.tick();
+    for (const node of forceNodes) {
+      node.x = clamp(node.x, node.radius, densityScale - node.radius);
+      node.y = clamp(node.y, node.radius, densityScale - node.radius);
     }
   }
 
+  const positions = Object.fromEntries(
+    forceNodes.map((node) => {
+      const size = artworkSize(node.category);
+      return [
+        node.id,
+        {
+          x: node.x - size.width / BASE_CANVAS_WIDTH / 2,
+          y: node.y - size.height / BASE_CANVAS_HEIGHT / 2,
+        },
+      ];
+    })
+  );
+  layoutCache.set(cacheKey, positions);
   return positions;
 }
 
