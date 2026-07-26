@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import type { Session } from "@supabase/supabase-js";
 
@@ -28,6 +28,24 @@ const EMPTY_MAP_SNAPSHOT: MapSnapshot = {
   edges: [],
 };
 
+type ResponsiveOrbitState = {
+  seedId: string | null;
+  orbitSeed: OrbitSeed | null;
+  previewId: string | null;
+  loading: boolean;
+  error: boolean;
+  recommendations: OrbitRecommendation[];
+};
+
+const EMPTY_ORBIT_STATE: ResponsiveOrbitState = {
+  seedId: null,
+  orbitSeed: null,
+  previewId: null,
+  loading: false,
+  error: false,
+  recommendations: [],
+};
+
 export default function WebHomeScreenEntry() {
   const hydrated = useClientOnlyValue(false, true);
   if (!hydrated) {
@@ -49,14 +67,11 @@ function WebHomeScreen() {
   const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>(EMPTY_MAP_SNAPSHOT);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [atlasDrawerExpanded, setAtlasDrawerExpanded] = useState(false);
-  const [responsiveOrbit, setResponsiveOrbit] = useState<{
-    seedId: string | null;
-    orbitSeed: OrbitSeed | null;
-    previewId: string | null;
-    loading: boolean;
-    error: boolean;
-    recommendations: OrbitRecommendation[];
-  }>({ seedId: null, orbitSeed: null, previewId: null, loading: false, error: false, recommendations: [] });
+  const [responsiveOrbit, setResponsiveOrbit] =
+    useState<ResponsiveOrbitState>(EMPTY_ORBIT_STATE);
+  const responsiveOrbitRef = useRef(responsiveOrbit);
+  responsiveOrbitRef.current = responsiveOrbit;
+  const [restoreOverviewVersion, setRestoreOverviewVersion] = useState(0);
   const [detailSelection, setDetailSelection] = useState<{ category: ContentCategory; item: ResultItem } | null>(null);
   const [detail, setDetail] = useState<ContentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -93,7 +108,9 @@ function WebHomeScreen() {
         setSelectedNodeId(null);
         responsiveOrbitRequest.current += 1;
         culturalProfileCache.current.clear();
-        setResponsiveOrbit({ seedId: null, orbitSeed: null, previewId: null, loading: false, error: false, recommendations: [] });
+        setResponsiveOrbit(EMPTY_ORBIT_STATE);
+        responsiveOrbitRef.current = EMPTY_ORBIT_STATE;
+        setRestoreOverviewVersion((version) => version + 1);
         setDetailSelection(null);
       }
       setAuthSession(next);
@@ -270,7 +287,16 @@ function WebHomeScreen() {
       item: selectedNodeToItem(node),
     };
     responsiveOrbitRequest.current += 1;
-    setResponsiveOrbit({ seedId: node.id, orbitSeed: seed, previewId: node.id, loading: false, error: false, recommendations: [] });
+    const nextOrbit: ResponsiveOrbitState = {
+      seedId: node.id,
+      orbitSeed: seed,
+      previewId: node.id,
+      loading: false,
+      error: false,
+      recommendations: [],
+    };
+    responsiveOrbitRef.current = nextOrbit;
+    setResponsiveOrbit(nextOrbit);
     setSelectedNodeId(node.id);
     setAtlasDrawerExpanded(false);
     setDetailSelection({ category: node.category, item: selectedNodeToItem(node) });
@@ -445,20 +471,52 @@ function WebHomeScreen() {
   }, [activeItem, discovery, section, selected]);
 
   const selectedNode = useMemo<MapNode | null>(() => mapSnapshot.nodes.find((node) => node.id === selectedNodeId) ?? null, [mapSnapshot.nodes, selectedNodeId]);
+  const selectedNodeRef = useRef<MapNode | null>(selectedNode);
+  selectedNodeRef.current = selectedNode;
   const panelSelection = detailSelection ?? (selectedNode ? { category: selectedNode.category, item: selectedNodeToItem(selectedNode) } : null);
-  const requestResponsiveOrbit = async (
+  const findOrbitRecommendationsRef = useRef(findOrbitRecommendations);
+  findOrbitRecommendationsRef.current = findOrbitRecommendations;
+  const saveOrbitRecommendationRef = useRef(saveOrbitRecommendation);
+  saveOrbitRecommendationRef.current = saveOrbitRecommendation;
+  const updateResponsiveOrbit = useCallback(
+    (
+      update:
+        | ResponsiveOrbitState
+        | ((current: ResponsiveOrbitState) => ResponsiveOrbitState)
+    ) => {
+      setResponsiveOrbit((current) => {
+        const next =
+          typeof update === "function" ? update(current) : update;
+        responsiveOrbitRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
+  const restoreAtlasOverview = useCallback(() => {
+    responsiveOrbitRequest.current += 1;
+    responsiveOrbitRef.current = EMPTY_ORBIT_STATE;
+    setResponsiveOrbit(EMPTY_ORBIT_STATE);
+    setSelectedNodeId(null);
+    setDetailSelection(null);
+    setAtlasDrawerExpanded(false);
+    setRestoreOverviewVersion((version) => version + 1);
+  }, []);
+  const requestResponsiveOrbit = useCallback(async (
     requestedSeed?: OrbitSeed,
     { reseeding = false }: { reseeding?: boolean } = {}
   ) => {
+    const selectedNode = selectedNodeRef.current;
     if (!selectedNode) return;
     const requestId = ++responsiveOrbitRequest.current;
     const rootSeedId = selectedNode.id;
-    const seed: OrbitSeed = requestedSeed ?? responsiveOrbit.orbitSeed ?? {
+    const currentOrbit = responsiveOrbitRef.current;
+    const seed: OrbitSeed = requestedSeed ?? currentOrbit.orbitSeed ?? {
       id: selectedNode.id,
       category: selectedNode.category,
       item: selectedNodeToItem(selectedNode),
     };
-    setResponsiveOrbit((current) => ({
+    updateResponsiveOrbit((current) => ({
       seedId: rootSeedId,
       orbitSeed: current.seedId === rootSeedId ? current.orbitSeed : seed,
       previewId: current.seedId === rootSeedId ? current.previewId : seed.id,
@@ -467,9 +525,9 @@ function WebHomeScreen() {
       recommendations: current.seedId === rootSeedId ? current.recommendations : [],
     }));
     try {
-      const recommendations = await findOrbitRecommendations(seed);
+      const recommendations = await findOrbitRecommendationsRef.current(seed);
       if (responsiveOrbitRequest.current !== requestId) return;
-      setResponsiveOrbit((current) => ({
+      updateResponsiveOrbit((current) => ({
         seedId: rootSeedId,
         orbitSeed: seed,
         previewId: reseeding ? seed.id : current.previewId,
@@ -479,7 +537,7 @@ function WebHomeScreen() {
       }));
     } catch {
       if (responsiveOrbitRequest.current !== requestId) return;
-      setResponsiveOrbit((current) => ({
+      updateResponsiveOrbit((current) => ({
         seedId: rootSeedId,
         orbitSeed: current.seedId === rootSeedId ? current.orbitSeed : seed,
         previewId: current.seedId === rootSeedId ? current.previewId : seed.id,
@@ -488,17 +546,17 @@ function WebHomeScreen() {
         recommendations: current.seedId === rootSeedId ? current.recommendations : [],
       }));
     }
-  };
-  const findResponsiveRecommendation = (recommendationId: string) =>
-    responsiveOrbit.recommendations.find(
+  }, [updateResponsiveOrbit]);
+  const findResponsiveRecommendation = useCallback((recommendationId: string) =>
+    responsiveOrbitRef.current.recommendations.find(
       (recommendation) => `${recommendation.category}:${recommendation.item.id}` === recommendationId
-    );
-  const previewResponsiveRecommendation = (recommendationId: string) => {
+    ), []);
+  const previewResponsiveRecommendation = useCallback((recommendationId: string) => {
     if (!findResponsiveRecommendation(recommendationId)) return;
-    setResponsiveOrbit((current) => ({ ...current, previewId: recommendationId }));
-  };
-  const skipResponsiveRecommendation = (recommendationId: string) => {
-    setResponsiveOrbit((current) => ({
+    updateResponsiveOrbit((current) => ({ ...current, previewId: recommendationId }));
+  }, [findResponsiveRecommendation, updateResponsiveOrbit]);
+  const skipResponsiveRecommendation = useCallback((recommendationId: string) => {
+    updateResponsiveOrbit((current) => ({
       ...current,
       previewId: current.previewId === recommendationId
         ? current.orbitSeed?.id ?? current.seedId
@@ -507,22 +565,22 @@ function WebHomeScreen() {
         (recommendation) => `${recommendation.category}:${recommendation.item.id}` !== recommendationId
       ),
     }));
-  };
-  const saveResponsiveRecommendation = async (recommendationId: string) => {
+  }, [updateResponsiveOrbit]);
+  const saveResponsiveRecommendation = useCallback(async (recommendationId: string) => {
     const recommendation = findResponsiveRecommendation(recommendationId);
-    const seed = responsiveOrbit.orbitSeed;
+    const seed = responsiveOrbitRef.current.orbitSeed;
     if (!recommendation || !seed) return;
     const actionRequest = responsiveOrbitRequest.current;
     try {
-      await saveOrbitRecommendation(seed, recommendation);
+      await saveOrbitRecommendationRef.current(seed, recommendation);
       if (responsiveOrbitRequest.current !== actionRequest) return;
       skipResponsiveRecommendation(recommendationId);
     } catch {
       if (responsiveOrbitRequest.current !== actionRequest) return;
-      setResponsiveOrbit((current) => ({ ...current, error: true }));
+      updateResponsiveOrbit((current) => ({ ...current, error: true }));
     }
-  };
-  const reseedResponsiveRecommendation = (recommendationId: string) => {
+  }, [findResponsiveRecommendation, skipResponsiveRecommendation, updateResponsiveOrbit]);
+  const reseedResponsiveRecommendation = useCallback((recommendationId: string) => {
     const recommendation = findResponsiveRecommendation(recommendationId);
     if (!recommendation) return;
     void requestResponsiveOrbit({
@@ -530,7 +588,7 @@ function WebHomeScreen() {
       category: recommendation.category,
       item: recommendation.item,
     }, { reseeding: true });
-  };
+  }, [findResponsiveRecommendation, requestResponsiveOrbit]);
   const responsiveOrbitProps = selectedNode && responsiveOrbit.seedId === selectedNode.id ? {
     atlasRecommendations: responsiveOrbit.recommendations.map((recommendation) => ({
       id: `${recommendation.category}:${recommendation.item.id}`,
@@ -577,23 +635,25 @@ function WebHomeScreen() {
             edges={mapSnapshot.edges}
             selectedId={selectedNodeId}
             onSelect={selectMapNode}
-            onClearSelection={() => {
-              responsiveOrbitRequest.current += 1;
-              setResponsiveOrbit({ seedId: null, orbitSeed: null, previewId: null, loading: false, error: false, recommendations: [] });
-              setSelectedNodeId(null);
-              setDetailSelection(null);
-            }}
+            onClearSelection={restoreAtlasOverview}
+            onRestoreOverview={restoreAtlasOverview}
+            restoreOverviewVersion={restoreOverviewVersion}
             onStart={() => setSection("archive")}
-            onFindSimilar={findOrbitRecommendations}
-            onSaveRecommendation={saveOrbitRecommendation}
+            onRequestOrbit={requestResponsiveOrbit}
+            onPreviewOrbitRecommendation={previewResponsiveRecommendation}
+            onSaveOrbitRecommendation={saveResponsiveRecommendation}
+            onSkipOrbitRecommendation={skipResponsiveRecommendation}
+            onReseedOrbitRecommendation={reseedResponsiveRecommendation}
             layout={layout}
             reducedMotion={reducedMotion}
-            responsiveRecommendations={(layout === "mobile" || layout === "tabletPortrait") && responsiveOrbit.seedId === selectedNodeId ? responsiveOrbit.recommendations : undefined}
-            responsiveOrbitSeed={(layout === "mobile" || layout === "tabletPortrait") && responsiveOrbit.seedId === selectedNodeId ? responsiveOrbit.orbitSeed ?? undefined : undefined}
-            responsivePreviewId={(layout === "mobile" || layout === "tabletPortrait") && responsiveOrbit.seedId === selectedNodeId ? responsiveOrbit.previewId ?? undefined : undefined}
+            responsiveRecommendations={responsiveOrbit.seedId === selectedNodeId ? responsiveOrbit.recommendations : []}
+            responsiveOrbitSeed={responsiveOrbit.seedId === selectedNodeId ? responsiveOrbit.orbitSeed ?? undefined : undefined}
+            responsivePreviewId={responsiveOrbit.seedId === selectedNodeId ? responsiveOrbit.previewId ?? undefined : undefined}
+            responsiveRecommendationsLoading={responsiveOrbit.seedId === selectedNodeId && responsiveOrbit.loading}
+            responsiveRecommendationError={responsiveOrbit.seedId === selectedNodeId && responsiveOrbit.error}
           />
-          {panelSelection && (layout === "tabletLandscape" || layout === "desktop") ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} presentation="rail" onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} similarLabel="Open discovery deck" onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
-          {panelSelection && layout === "tabletPortrait" ? <View style={styles.atlasPortraitDrawer}><WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} presentation="drawer" expanded={atlasDrawerExpanded} onToggleExpanded={() => setAtlasDrawerExpanded((expanded) => !expanded)} onClose={() => { responsiveOrbitRequest.current += 1; setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} similarLabel="Open discovery deck" onShare={() => void shareItem(panelSelection.category, panelSelection.item)} {...responsiveOrbitProps} /></View> : null}
+          {panelSelection && (layout === "tabletLandscape" || layout === "desktop") ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} presentation="rail" onClose={restoreAtlasOverview} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} similarLabel="Open discovery deck" onShare={() => void shareItem(panelSelection.category, panelSelection.item)} {...responsiveOrbitProps} /> : null}
+          {panelSelection && layout === "tabletPortrait" ? <View style={styles.atlasPortraitDrawer}><WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} presentation="drawer" expanded={atlasDrawerExpanded} onToggleExpanded={() => setAtlasDrawerExpanded((expanded) => !expanded)} onClose={restoreAtlasOverview} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} similarLabel="Open discovery deck" onShare={() => void shareItem(panelSelection.category, panelSelection.item)} {...responsiveOrbitProps} /></View> : null}
         </View>
       ) : null}
       {section === "account" ? (
@@ -603,7 +663,7 @@ function WebHomeScreen() {
           {authSession ? <><Text style={styles.accountBody}>{authSession.user.email}</Text><Pressable accessibilityRole="button" onPress={() => void supabase.auth.signOut()} style={styles.authButton}><Text style={styles.authButtonText}>Sign out</Text></Pressable></> : <View style={styles.authCard}><Text style={styles.accountBody}>Sign in to keep your saved discoveries available across devices.</Text><TextInput accessibilityLabel="Email" autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={webPalette.muted} value={authEmail} onChangeText={setAuthEmail} style={styles.authInput} /><TextInput accessibilityLabel="Password" secureTextEntry placeholder="Password" placeholderTextColor={webPalette.muted} value={authPassword} onChangeText={setAuthPassword} style={styles.authInput} /><Pressable accessibilityRole="button" onPress={() => void submitAuth()} style={styles.authButton}><Text style={styles.authButtonText}>{authMode === "signin" ? "Sign in" : "Create account"}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setAuthMode((mode) => mode === "signin" ? "signup" : "signin")}><Text style={styles.authSwitch}>{authMode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}</Text></Pressable>{authMessage ? <Text style={styles.authMessage}>{authMessage}</Text> : null}</View>}
         </View>
       ) : null}
-      {detailSelection && layout === "mobile" ? <View style={styles.mobileDetail}><WebDetailPanel item={detailSelection.item} category={detailSelection.category} detail={detail} saved={savedItems.some((item) => item.category === detailSelection.category && item.id === detailSelection.item.id)} loading={detailLoading} presentation="sheet" onClose={() => setDetailSelection(null)} onSave={toggleDetailSave} onSimilar={() => startSimilar(detailSelection.category, detailSelection.item)} onShare={() => void shareItem(detailSelection.category, detailSelection.item)} {...responsiveOrbitProps} /></View> : null}
+      {detailSelection && layout === "mobile" ? <View style={styles.mobileDetail}><WebDetailPanel item={detailSelection.item} category={detailSelection.category} detail={detail} saved={savedItems.some((item) => item.category === detailSelection.category && item.id === detailSelection.item.id)} loading={detailLoading} presentation="sheet" onClose={section === "atlas" ? restoreAtlasOverview : () => setDetailSelection(null)} onSave={toggleDetailSave} onSimilar={() => startSimilar(detailSelection.category, detailSelection.item)} onShare={() => void shareItem(detailSelection.category, detailSelection.item)} {...responsiveOrbitProps} /></View> : null}
     </WebShell>
   );
 }

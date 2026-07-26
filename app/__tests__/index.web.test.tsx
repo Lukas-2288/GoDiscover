@@ -37,6 +37,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
     ArchiveAtlas: Empty,
     WebDetailPanel: ({
       item,
+      onClose,
       onSave,
       onToggleExpanded,
       onFindSimilarInAtlas,
@@ -51,6 +52,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       similarLabel,
     }: {
       item?: { title: string; meta: string } | null;
+      onClose(): void;
       onSave(): void;
       onToggleExpanded?(): void;
       onFindSimilarInAtlas?(): void;
@@ -67,6 +69,7 @@ jest.mock("../../components/web/WebHomeScreen", () => {
       View,
       { accessibilityLabel: `${presentation} detail` },
       item ? React.createElement(MockText, null, item.title) : null,
+      React.createElement(Pressable, { onPress: onClose, testID: "detail-close" }),
       React.createElement(Pressable, { onPress: onSave, testID: "detail-toggle" }),
       onFindSimilarInAtlas ? React.createElement(Pressable, { onPress: onFindSimilarInAtlas, testID: "atlas-find-similar" }) : null,
       onToggleExpanded ? React.createElement(Pressable, { onPress: onToggleExpanded, testID: "drawer-expand" }) : null,
@@ -138,18 +141,26 @@ jest.mock("../../components/web/map/SavedAtlas.web", () => {
   return {
     SavedAtlas: ({
       nodes,
-      onFindSimilar,
-      onSaveRecommendation,
+      onRequestOrbit,
+      onSaveOrbitRecommendation,
       onSelect,
       ...props
     }: {
       nodes: Array<{ id: string; title: string }>;
-      onFindSimilar?(seed: unknown): Promise<Array<unknown>>;
-      onSaveRecommendation?(seed: unknown, recommendation: unknown): Promise<void>;
+      onRequestOrbit?(seed?: unknown): Promise<void>;
+      onSaveOrbitRecommendation?(recommendationId: string): Promise<void>;
       onSelect?(node: unknown): void;
+      responsiveRecommendationError?: boolean;
+      responsiveRecommendations?: Array<{
+        category: string;
+        item: { id: string };
+      }>;
     }) => {
-      mockSavedAtlasProps = props;
-      const [orbitError, setOrbitError] = React.useState(false);
+      mockSavedAtlasProps = {
+        ...props,
+        onRequestOrbit,
+        onSaveOrbitRecommendation,
+      };
       const seed = {
         id: "movies:source",
         category: "movies",
@@ -160,25 +171,23 @@ jest.mock("../../components/web/map/SavedAtlas.web", () => {
         { accessibilityLabel: nodes.map((node) => `${node.id}:${node.title}`).join("|") || "empty", testID: "saved-atlas" },
         React.createElement(Pressable, { onPress: () => onSelect?.(nodes[0]), testID: "atlas-select" }),
         React.createElement(Pressable, {
-          onPress: async () => {
-            try {
-              await onFindSimilar?.(seed);
-            } catch {
-              setOrbitError(true);
-            }
-          },
+          onPress: () => onRequestOrbit?.(seed),
           testID: "orbit-find",
         }),
         React.createElement(Pressable, {
-          onPress: async () => {
-            const recommendations = await onFindSimilar?.(seed);
-            if (recommendations?.[0]) {
-              await onSaveRecommendation?.(seed, recommendations[0]).catch(() => undefined);
+          onPress: () => {
+            const recommendation = props.responsiveRecommendations?.[0];
+            if (recommendation) {
+              void onSaveOrbitRecommendation?.(
+                `${recommendation.category}:${recommendation.item.id}`
+              );
             }
           },
           testID: "orbit-save",
         }),
-        orbitError ? React.createElement(MockText, { testID: "orbit-error" }, "retry") : null
+        props.responsiveRecommendationError
+          ? React.createElement(MockText, { testID: "orbit-error" }, "retry")
+          : null
       );
     },
   };
@@ -533,6 +542,201 @@ it("preserves the exact responsive orbit in the sheet and map while refresh fail
   await waitFor(() => expect(screen.getByTestId("atlas-recommendation-error")).toBeTruthy());
   expect(screen.getByTestId("responsive-result-movies:candidate")).toHaveTextContent("Candidate");
   expect(mockSavedAtlasProps.responsiveRecommendations).toEqual(settledRecommendations);
+});
+
+it("keeps one settled orbit and the same action owners while resizing across every atlas layout", async () => {
+  mockLayout = "desktop";
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+
+  const view = render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+
+  const requestOwner = mockSavedAtlasProps.onRequestOrbit;
+  await act(async () => {
+    await (requestOwner as (() => Promise<void>))();
+  });
+  await waitFor(() =>
+    expect(mockSavedAtlasProps.responsiveRecommendations).toEqual([
+      expect.objectContaining({ item: expect.objectContaining({ id: "candidate" }) }),
+    ])
+  );
+  const settledSeed = mockSavedAtlasProps.responsiveOrbitSeed;
+  const settledRecommendations = mockSavedAtlasProps.responsiveRecommendations;
+  const actionOwners = {
+    request: mockSavedAtlasProps.onRequestOrbit,
+    preview: mockSavedAtlasProps.onPreviewOrbitRecommendation,
+    save: mockSavedAtlasProps.onSaveOrbitRecommendation,
+    skip: mockSavedAtlasProps.onSkipOrbitRecommendation,
+    reseed: mockSavedAtlasProps.onReseedOrbitRecommendation,
+  };
+
+  for (const nextLayout of ["tabletPortrait", "mobile", "tabletLandscape", "desktop"] as const) {
+    mockLayout = nextLayout;
+    view.rerender(<WebHomeScreen />);
+    expect(mockSavedAtlasProps).toEqual(expect.objectContaining({
+      layout: nextLayout,
+      responsiveOrbitSeed: settledSeed,
+      responsiveRecommendations: settledRecommendations,
+      ...{
+        onRequestOrbit: actionOwners.request,
+        onPreviewOrbitRecommendation: actionOwners.preview,
+        onSaveOrbitRecommendation: actionOwners.save,
+        onSkipOrbitRecommendation: actionOwners.skip,
+        onReseedOrbitRecommendation: actionOwners.reseed,
+      },
+    }));
+  }
+});
+
+it("keeps loading, failure, reseed, and save work attached to one orbit while resizing", async () => {
+  mockLayout = "desktop";
+  const source = sourceItem();
+  const firstRequest = deferred<ReturnType<typeof orbitResult>>();
+  const reseedRequest = deferred<ReturnType<typeof orbitResult>>();
+  const pendingSave =
+    deferred<{ items: SavedItem[]; confirmed: boolean; created: boolean }>();
+  const candidate: SavedItem = {
+    ...source,
+    id: "next",
+    title: "Next",
+    savedAt: 2,
+  };
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session: session(ownerA) },
+  } as never);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations)
+    .mockReturnValueOnce(firstRequest.promise as never)
+    .mockResolvedValueOnce(
+      orbitResult("movies", "candidate", "Candidate") as never
+    )
+    .mockReturnValueOnce(reseedRequest.promise as never);
+  jest.mocked(saveSavedItem).mockReturnValue(pendingSave.promise);
+
+  const view = render(<WebHomeScreen />);
+  await waitFor(() =>
+    expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id)
+  );
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  const actionOwners = {
+    request: mockSavedAtlasProps.onRequestOrbit,
+    save: mockSavedAtlasProps.onSaveOrbitRecommendation,
+    reseed: mockSavedAtlasProps.onReseedOrbitRecommendation,
+  };
+
+  act(() => {
+    void (actionOwners.request as (() => Promise<void>))();
+  });
+  await waitFor(() =>
+    expect(mockSavedAtlasProps.responsiveRecommendationsLoading).toBe(true)
+  );
+  mockLayout = "mobile";
+  view.rerender(<WebHomeScreen />);
+  expect(mockSavedAtlasProps).toEqual(expect.objectContaining({
+    responsiveRecommendationsLoading: true,
+    onRequestOrbit: actionOwners.request,
+    onSaveOrbitRecommendation: actionOwners.save,
+    onReseedOrbitRecommendation: actionOwners.reseed,
+  }));
+
+  await act(async () => {
+    firstRequest.reject(new Error("offline"));
+    await firstRequest.promise.catch(() => undefined);
+  });
+  await waitFor(() =>
+    expect(mockSavedAtlasProps.responsiveRecommendationError).toBe(true)
+  );
+  mockLayout = "tabletPortrait";
+  view.rerender(<WebHomeScreen />);
+  expect(mockSavedAtlasProps).toEqual(expect.objectContaining({
+    responsiveRecommendationError: true,
+    onRequestOrbit: actionOwners.request,
+  }));
+
+  await act(async () => {
+    await (actionOwners.request as (() => Promise<void>))();
+  });
+  await waitFor(() =>
+    expect(mockSavedAtlasProps.responsiveRecommendations).toHaveLength(1)
+  );
+  act(() => {
+    void (actionOwners.reseed as ((id: string) => void))("movies:candidate");
+  });
+  await waitFor(() =>
+    expect(mockSavedAtlasProps.responsiveRecommendationsLoading).toBe(true)
+  );
+  mockLayout = "tabletLandscape";
+  view.rerender(<WebHomeScreen />);
+  expect(mockSavedAtlasProps).toEqual(expect.objectContaining({
+    responsiveRecommendationsLoading: true,
+    onReseedOrbitRecommendation: actionOwners.reseed,
+  }));
+
+  await act(async () => {
+    reseedRequest.resolve(orbitResult("movies", "next", "Next"));
+    await reseedRequest.promise;
+  });
+  await waitFor(() =>
+    expect(mockSavedAtlasProps.responsiveOrbitSeed).toEqual(
+      expect.objectContaining({ id: "movies:candidate" })
+    )
+  );
+  act(() => {
+    void (actionOwners.save as ((id: string) => Promise<void>))("movies:next");
+  });
+  await waitFor(() => expect(saveSavedItem).toHaveBeenCalled());
+  const savingRecommendations = mockSavedAtlasProps.responsiveRecommendations;
+  mockLayout = "desktop";
+  view.rerender(<WebHomeScreen />);
+  expect(mockSavedAtlasProps).toEqual(expect.objectContaining({
+    responsiveOrbitSeed: expect.objectContaining({ id: "movies:candidate" }),
+    responsiveRecommendations: savingRecommendations,
+    onSaveOrbitRecommendation: actionOwners.save,
+  }));
+
+  await act(async () => {
+    pendingSave.resolve({
+      items: [source, candidate],
+      confirmed: true,
+      created: true,
+    });
+    await pendingSave.promise;
+  });
+});
+
+it("routes mobile detail close through the shared atlas restoration contract", async () => {
+  mockLayout = "mobile";
+  const source = sourceItem();
+  jest.mocked(supabase.auth.getSession).mockResolvedValue({ data: { session: session(ownerA) } } as never);
+  jest.mocked(listSavedForOwner).mockResolvedValue([source]);
+  jest.mocked(loadMapSnapshot).mockResolvedValue(sourceSnapshot([source]));
+  jest.mocked(findMapRecommendations).mockResolvedValue(orbitResult("movies", "candidate", "Candidate") as never);
+
+  render(<WebHomeScreen />);
+  await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
+  openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(await screen.findByTestId("atlas-find-similar"));
+  await screen.findByTestId("responsive-result-movies:candidate");
+  const restoreVersion = mockSavedAtlasProps.restoreOverviewVersion;
+
+  fireEvent.press(screen.getByTestId("detail-close"));
+
+  await waitFor(() => expect(screen.queryByLabelText("sheet detail")).toBeNull());
+  expect(mockSavedAtlasProps.selectedId).toBeNull();
+  expect(mockSavedAtlasProps.responsiveOrbitSeed).toBeUndefined();
+  expect(mockSavedAtlasProps.responsiveRecommendations).toEqual([]);
+  expect(mockSavedAtlasProps.restoreOverviewVersion).toBe(
+    (restoreVersion as number) + 1
+  );
 });
 
 it("previews and skips a mobile recommendation without mutating persistence", async () => {
@@ -1075,6 +1279,9 @@ it("persists a new orbit recommendation before recording its honest connecting t
   render(<WebHomeScreen />);
   await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
   openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(screen.getByTestId("orbit-find"));
+  await waitFor(() => expect(mockSavedAtlasProps.responsiveRecommendations).toHaveLength(1));
   await act(async () => { fireEvent.press(screen.getByTestId("orbit-save")); });
 
   await waitFor(() => expect(saveSavedItem).toHaveBeenCalledWith("movies", expect.objectContaining({ id: "candidate" })));
@@ -1113,6 +1320,7 @@ it("turns all actual recommendation-provider failures into a retryable orbit fai
   render(<WebHomeScreen />);
   await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
   openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
   await act(async () => { fireEvent.press(screen.getByTestId("orbit-find")); });
 
   await waitFor(() => expect(screen.getByTestId("orbit-error")).toBeTruthy());
@@ -1181,6 +1389,9 @@ it("records only a relationship when an orbit candidate is already saved", async
   render(<WebHomeScreen />);
   await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith(items, ownerA.id));
   openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(screen.getByTestId("orbit-find"));
+  await waitFor(() => expect(mockSavedAtlasProps.responsiveRecommendations).toHaveLength(1));
   await act(async () => { fireEvent.press(screen.getByTestId("orbit-save")); });
 
   await waitFor(() => expect(recordMapTrailEvent).toHaveBeenCalled());
@@ -1204,6 +1415,9 @@ it("does not create a trail when saving a new orbit recommendation is unconfirme
   render(<WebHomeScreen />);
   await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
   openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(screen.getByTestId("orbit-find"));
+  await waitFor(() => expect(mockSavedAtlasProps.responsiveRecommendations).toHaveLength(1));
   await act(async () => { fireEvent.press(screen.getByTestId("orbit-save")); });
 
   await waitFor(() => expect(saveSavedItem).toHaveBeenCalled());
@@ -1223,6 +1437,9 @@ it("drops a pending orbit save when ownership changes before persistence complet
   render(<WebHomeScreen />);
   await waitFor(() => expect(loadMapSnapshot).toHaveBeenCalledWith([source], ownerA.id));
   openAtlas();
+  fireEvent.press(screen.getByTestId("atlas-select"));
+  fireEvent.press(screen.getByTestId("orbit-find"));
+  await waitFor(() => expect(mockSavedAtlasProps.responsiveRecommendations).toHaveLength(1));
   fireEvent.press(screen.getByTestId("orbit-save"));
   await waitFor(() => expect(saveSavedItem).toHaveBeenCalled());
   await act(async () => { authStateChangeHandler?.("SIGNED_IN", session(ownerB)); });

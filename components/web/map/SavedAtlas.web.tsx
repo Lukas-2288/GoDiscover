@@ -93,13 +93,23 @@ type SavedAtlasProps = {
   onSelect(node: MapNode): void;
   onClearSelection(): void;
   onStart(): void;
-  onFindSimilar?(seed: OrbitSeed): Promise<OrbitRecommendation[]>;
-  onSaveRecommendation?(seed: OrbitSeed, recommendation: OrbitRecommendation): Promise<void> | void;
+  onRequestOrbit?(
+    seed?: OrbitSeed,
+    options?: { reseeding?: boolean }
+  ): Promise<void> | void;
+  onPreviewOrbitRecommendation?(recommendationId: string): void;
+  onSaveOrbitRecommendation?(recommendationId: string): Promise<void> | void;
+  onSkipOrbitRecommendation?(recommendationId: string): void;
+  onReseedOrbitRecommendation?(recommendationId: string): void;
+  onRestoreOverview?(): void;
+  restoreOverviewVersion?: number;
   layout?: "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop";
   reducedMotion?: boolean;
   responsiveRecommendations?: readonly OrbitRecommendation[];
   responsiveOrbitSeed?: OrbitSeed;
   responsivePreviewId?: string;
+  responsiveRecommendationsLoading?: boolean;
+  responsiveRecommendationError?: boolean;
 };
 
 export type OrbitSeed = {
@@ -121,28 +131,29 @@ function SavedAtlasInner({
   onSelect,
   onClearSelection,
   onStart,
-  onFindSimilar,
-  onSaveRecommendation,
+  onRequestOrbit,
+  onPreviewOrbitRecommendation,
+  onSaveOrbitRecommendation,
+  onSkipOrbitRecommendation,
+  onReseedOrbitRecommendation,
+  onRestoreOverview = onClearSelection,
+  restoreOverviewVersion = 0,
   layout = "desktop",
   reducedMotion = false,
   responsiveRecommendations,
   responsiveOrbitSeed,
   responsivePreviewId,
+  responsiveRecommendationsLoading = false,
+  responsiveRecommendationError = false,
 }: SavedAtlasProps) {
   const { width, height } = useWindowDimensions();
   const { getViewport, setCenter, setViewport } = useReactFlow<AtlasArtworkNodeDefinition, Edge>();
   const [view, setView] = useState<SavedAtlasView>("map");
   const [query, setQuery] = useState("");
   const [detailMode, setDetailMode] = useState<ZoomDetailMode>("medium");
-  const [orbitSeedId, setOrbitSeedId] = useState<string | null>(selectedId);
-  const [transientOrbitSeed, setTransientOrbitSeed] = useState<OrbitSeed | null>(null);
-  const [recommendations, setRecommendations] = useState<OrbitRecommendation[]>([]);
-  const [recommendationError, setRecommendationError] = useState(false);
-  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [spatialNodeId, setSpatialNodeId] = useState<string | null>(selectedId);
   const overviewViewport = useRef<Viewport | null>(null);
-  const orbitRequest = useRef(0);
-  const activeOrbitSeedId = useRef<string | null>(selectedId);
+  const appliedRestoreVersion = useRef(restoreOverviewVersion);
   const previousSelectedId = useRef<string | null>(null);
   const focusedResponsivePreview = useRef<string | null>(null);
   const showMiniMap = width >= 1_200 || (width >= 900 && width > height);
@@ -152,35 +163,23 @@ function SavedAtlasInner({
   };
 
   useEffect(() => {
-    orbitRequest.current += 1;
-    activeOrbitSeedId.current = selectedId;
     if (selectedId && !previousSelectedId.current) {
       captureOverviewViewport();
     }
     previousSelectedId.current = selectedId;
     if (selectedId) {
-      setOrbitSeedId(selectedId);
       setSpatialNodeId(selectedId);
-      setTransientOrbitSeed(null);
-      setRecommendations([]);
-      setRecommendationError(false);
-      setRecommendationsLoading(false);
       return;
     }
-    setOrbitSeedId(null);
     setSpatialNodeId(null);
-    setTransientOrbitSeed(null);
-    setRecommendations([]);
-    setRecommendationError(false);
-    setRecommendationsLoading(false);
   }, [getViewport, selectedId]);
 
-  const graphRecommendations = responsiveRecommendations ?? recommendations;
-  const graphOrbitSeedId = responsiveOrbitSeed?.id ?? orbitSeedId;
+  const graphRecommendations = responsiveRecommendations ?? [];
+  const graphOrbitSeedId = responsiveOrbitSeed?.id ?? selectedId;
   const responsiveTransientSeed = responsiveOrbitSeed && !nodes.some((node) => node.id === responsiveOrbitSeed.id)
     ? responsiveOrbitSeed
     : undefined;
-  const graphTransientSeed = responsiveTransientSeed ?? transientOrbitSeed ?? undefined;
+  const graphTransientSeed = responsiveTransientSeed;
   const atlasPositions = useMemo(() => createAtlasLayout(nodes, edges), [edges, nodes]);
   const orbitGraph = useMemo(
     () => (graphOrbitSeedId ? buildOrbitGraph(nodes, edges, graphOrbitSeedId, graphRecommendations, graphTransientSeed, atlasPositions) : null),
@@ -281,55 +280,20 @@ function SavedAtlasInner({
       imageUrl: node.imageUrl,
     },
   });
-  const currentSeed = orbitSeedId
-    ? displayedNodes.find((node) => node.id === orbitSeedId)
+  const currentSeed = graphOrbitSeedId
+    ? displayedNodes.find((node) => node.id === graphOrbitSeedId)
     : null;
 
-  const requestRecommendations = async (
-    seed: OrbitSeed,
-    { reseeding = false }: { reseeding?: boolean } = {}
-  ): Promise<boolean> => {
-    if (!onFindSimilar) return false;
-    const requestId = ++orbitRequest.current;
-    const requestOwnerSeedId = activeOrbitSeedId.current;
-    setRecommendationsLoading(true);
-    setRecommendationError(false);
-    try {
-      const next = await onFindSimilar(seed);
-      if (
-        orbitRequest.current !== requestId ||
-        activeOrbitSeedId.current !== (reseeding ? requestOwnerSeedId : seed.id)
-      ) return false;
-      setRecommendations(next.slice(0, 8));
-      return true;
-    } catch {
-      if (
-        orbitRequest.current !== requestId ||
-        activeOrbitSeedId.current !== (reseeding ? requestOwnerSeedId : seed.id)
-      ) return false;
-      setRecommendationError(true);
-      return false;
-    } finally {
-      if (
-        orbitRequest.current === requestId &&
-        activeOrbitSeedId.current === (reseeding ? requestOwnerSeedId : seed.id)
-      ) setRecommendationsLoading(false);
-    }
-  };
-
-  const restoreOverview = () => {
-    orbitRequest.current += 1;
-    activeOrbitSeedId.current = null;
-    setOrbitSeedId(null);
-    setTransientOrbitSeed(null);
-    setRecommendations([]);
-    setRecommendationError(false);
+  useEffect(() => {
+    if (appliedRestoreVersion.current === restoreOverviewVersion) return;
+    appliedRestoreVersion.current = restoreOverviewVersion;
+    setSpatialNodeId(null);
+    focusedResponsivePreview.current = null;
     if (overviewViewport.current) {
       void setViewport(overviewViewport.current, { duration: 0 });
     }
     overviewViewport.current = null;
-    onClearSelection();
-  };
+  }, [restoreOverviewVersion, setViewport]);
 
   useEffect(() => {
     if (!graphOrbitSeedId) return;
@@ -340,13 +304,13 @@ function SavedAtlasInner({
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (event.key !== "Escape" || !orbitSeedId) return;
+      if (event.key !== "Escape" || !graphOrbitSeedId) return;
       event.preventDefault();
-      restoreOverview();
+      onRestoreOverview();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  }, [graphOrbitSeedId, onRestoreOverview]);
 
   const handleMoveEnd = (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
     const nextMode = resolveZoomDetail(viewport.zoom, nodes).mode;
@@ -381,8 +345,8 @@ function SavedAtlasInner({
       event.preventDefault();
       return;
     }
-    if (event.key === "Escape" && orbitSeedId) {
-      restoreOverview();
+    if (event.key === "Escape" && graphOrbitSeedId) {
+      onRestoreOverview();
       event.preventDefault();
     }
   };
@@ -456,7 +420,7 @@ function SavedAtlasInner({
             onlyRenderVisibleElements
             onMoveEnd={handleMoveEnd}
             onNodeClick={handleNodeClick}
-            onPaneClick={onClearSelection}
+            onPaneClick={onRestoreOverview}
             proOptions={{ hideAttribution: true }}
           >
             <Controls
@@ -487,34 +451,34 @@ function SavedAtlasInner({
               <Text style={styles.orbitKicker}>DISCOVERY ORBIT</Text>
               <Text style={styles.orbitTitle}>{currentSeed.title}</Text>
               <View style={styles.orbitActions}>
-                <Pressable accessibilityLabel="Back to atlas" accessibilityRole="button" onPress={restoreOverview} style={styles.orbitButton}>
+                <Pressable accessibilityLabel="Back to atlas" accessibilityRole="button" onPress={onRestoreOverview} style={styles.orbitButton}>
                   <Text style={styles.orbitButtonText}>Back</Text>
                 </Pressable>
                 <Pressable
                   accessibilityLabel={`Find similar in atlas to ${currentSeed.title}`}
                   accessibilityRole="button"
-                  disabled={recommendationsLoading || !onFindSimilar}
-                  onPress={() => void requestRecommendations(seedFromNode(currentSeed))}
+                  disabled={responsiveRecommendationsLoading || !onRequestOrbit}
+                  onPress={() => void onRequestOrbit?.(seedFromNode(currentSeed))}
                   style={[styles.orbitButton, styles.orbitPrimary]}
                 >
                   <Text style={styles.orbitPrimaryText}>
-                    {recommendationsLoading ? "Looking…" : "Find similar in atlas"}
+                    {responsiveRecommendationsLoading ? "Looking…" : "Find similar in atlas"}
                   </Text>
                 </Pressable>
-                <Pressable accessibilityLabel="View whole atlas" accessibilityRole="button" onPress={restoreOverview} style={styles.orbitButton}>
+                <Pressable accessibilityLabel="View whole atlas" accessibilityRole="button" onPress={onRestoreOverview} style={styles.orbitButton}>
                   <Text style={styles.orbitButtonText}>View whole atlas</Text>
                 </Pressable>
               </View>
-              {recommendationError ? (
+              {responsiveRecommendationError ? (
                 <View style={styles.orbitError}>
                   <Text style={styles.orbitErrorText}>Recommendations are unavailable right now.</Text>
                   <Text style={styles.orbitErrorText}>Discovery is offline. Your saved atlas and trails are still available.</Text>
-                  <Pressable accessibilityLabel="Retry recommendations" accessibilityRole="button" onPress={() => void requestRecommendations(seedFromNode(currentSeed))} style={styles.retryButton}>
+                  <Pressable accessibilityLabel="Retry recommendations" accessibilityRole="button" onPress={() => void onRequestOrbit?.(seedFromNode(currentSeed))} style={styles.retryButton}>
                     <Text style={styles.retryText}>Retry</Text>
                   </Pressable>
                 </View>
               ) : null}
-              {recommendations.map((recommendation) => (
+              {graphRecommendations.map((recommendation) => (
                 <View key={recommendationNodeId(recommendation)} style={styles.recommendationRow}>
                   <View style={styles.recommendationCopy}>
                     <Text numberOfLines={1} style={styles.recommendationTitle}>{recommendation.item.title}</Text>
@@ -523,27 +487,19 @@ function SavedAtlasInner({
                   <Pressable
                     accessibilityLabel={`Save ${recommendation.item.title} to map`}
                     accessibilityRole="button"
-                    onPress={() => void Promise.resolve(onSaveRecommendation?.(seedFromNode(currentSeed), recommendation)).then(() => {
-                      setRecommendations((current) => current.filter((candidate) => recommendationNodeId(candidate) !== recommendationNodeId(recommendation)));
-                    }).catch(() => setRecommendationError(true))}
+                    onPress={() => void onSaveOrbitRecommendation?.(recommendationNodeId(recommendation))}
                     style={[styles.recommendationAction, styles.recommendationSave]}
                   ><Text style={styles.recommendationSaveText}>Save</Text></Pressable>
                   <Pressable
                     accessibilityLabel={`Skip ${recommendation.item.title}`}
                     accessibilityRole="button"
-                    onPress={() => setRecommendations((current) => current.filter((candidate) => recommendationNodeId(candidate) !== recommendationNodeId(recommendation)))}
+                    onPress={() => onSkipOrbitRecommendation?.(recommendationNodeId(recommendation))}
                     style={styles.recommendationAction}
                   ><Text style={styles.recommendationSkipText}>Skip</Text></Pressable>
                   <Pressable
                     accessibilityLabel={`Reseed from ${recommendation.item.title}`}
                     accessibilityRole="button"
-                    onPress={() => void requestRecommendations({ id: recommendationNodeId(recommendation), category: recommendation.category, item: recommendation.item }, { reseeding: true }).then((loaded) => {
-                      if (loaded) {
-                        activeOrbitSeedId.current = recommendationNodeId(recommendation);
-                        setTransientOrbitSeed({ id: recommendationNodeId(recommendation), category: recommendation.category, item: recommendation.item });
-                        setOrbitSeedId(recommendationNodeId(recommendation));
-                      }
-                    })}
+                    onPress={() => onReseedOrbitRecommendation?.(recommendationNodeId(recommendation))}
                     style={styles.recommendationAction}
                   ><Text style={styles.recommendationSkipText}>Reseed</Text></Pressable>
                 </View>

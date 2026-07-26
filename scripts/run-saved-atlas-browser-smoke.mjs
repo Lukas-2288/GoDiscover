@@ -13,10 +13,11 @@ const screenshotPath = process.argv[5];
 // freshly loaded Saved Atlas map.
 const inputMode = process.argv[6] ?? "all";
 const inputOnly = process.argv[7] === "input-only";
+const denseFixture = process.argv[8] === "dense";
 const chromeBinary =
   process.env.CHROME_BIN ??
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const savedItems = [
+const baseSavedItems = [
   {
     id: "arrival",
     category: "movies",
@@ -42,7 +43,7 @@ const savedItems = [
     savedAt: 10,
   },
 ];
-const trailEvents = [
+const baseTrailEvents = [
   {
     id: "connect:movies:arrival->books:kindred:40",
     relationshipId: "movies:arrival->books:kindred",
@@ -54,6 +55,44 @@ const trailEvents = [
     reason: "Language across distance",
   },
 ];
+const denseCategories = ["movies", "books", "albums", "artists"];
+const savedItems = denseFixture
+  ? [
+      ...baseSavedItems,
+      ...Array.from({ length: 197 }, (_, index) => {
+        const category = denseCategories[index % denseCategories.length];
+        return {
+          id: `dense-${index}`,
+          category,
+          title: `Dense ${index}`,
+          subtitle: `Hit region ${index}`,
+          meta: `2026 · Dense ${category}`,
+          savedAt: 1_000 - index,
+        };
+      }),
+    ]
+  : baseSavedItems;
+const denseNodeIds = savedItems.map((item) => `${item.category}:${item.id}`);
+const trailEvents = denseFixture
+  ? [
+      ...baseTrailEvents,
+      ...Array.from({ length: 399 }, (_, index) => {
+        const source = denseNodeIds[index % denseNodeIds.length];
+        const target =
+          denseNodeIds[(index * 37 + 11) % denseNodeIds.length];
+        return {
+          id: `connect:${source}->${target}:${100 + index}`,
+          relationshipId: `${source}->${target}`,
+          action: "connect",
+          source,
+          target,
+          occurredAt: 100 + index,
+          origin: "anonymous",
+          reason: `Dense trail ${index}`,
+        };
+      }),
+    ]
+  : baseTrailEvents;
 
 const debuggingPort = await openPort();
 const profileDirectory = await mkdtemp(
@@ -171,7 +210,13 @@ try {
     );
   }
   const result = smoke.result.value;
-  result.interactions = await runInputSmoke(send, viewportWidth, viewportHeight, inputOnly);
+  result.interactions = await runInputSmoke(
+    send,
+    viewportWidth,
+    viewportHeight,
+    inputOnly,
+    denseFixture
+  );
   if (inputOnly) {
     result.checks.inputOnlyOpened = result.interactions.atlasReady;
     result.checks.viewportStable = result.interactions.cleanupViewport.stable;
@@ -181,6 +226,10 @@ try {
     result.checks.mouseOrbitAndRestore = result.interactions.mouseOrbitAndRestore;
     result.checks.keyboardOrbitAndRestore = result.interactions.keyboardOrbitAndRestore;
     result.checks.touchOrbitAndRestore = result.interactions.touchOrbitAndRestore;
+  }
+  if (denseFixture) {
+    result.checks.denseRepresentativeHitTargets =
+      result.interactions.denseRepresentativeHitTargets;
   }
   const fatalRuntimeExceptions = runtimeExceptions;
   result.checks.noFatalRuntimeErrors = fatalRuntimeExceptions.length === 0;
@@ -219,7 +268,7 @@ try {
   await rm(profileDirectory, { force: true, recursive: true });
 }
 
-async function runInputSmoke(send, width, height, isInputOnly) {
+async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
   const diagnosticLabels = await send("Runtime.evaluate", {
     returnByValue: true,
     expression: '[...document.querySelectorAll("[aria-label]")].map((element) => element.getAttribute("aria-label")).filter(Boolean)',
@@ -253,6 +302,22 @@ async function runInputSmoke(send, width, height, isInputOnly) {
     }
     return { stable: false, transform: previous };
   };
+  const readViewportTransform = async () =>
+    (
+      await send("Runtime.evaluate", {
+        returnByValue: true,
+        expression:
+          'document.querySelector(".react-flow__viewport")?.style.transform ?? ""',
+      })
+    ).result.value;
+  const restoredExactly = async (expectedTransform) =>
+    waitFor(`(() => {
+      const selected = document.querySelector('[data-testid^="atlas-artwork-"][aria-selected="true"]');
+      const orbit = document.querySelector('[aria-label="Discovery Orbit"]');
+      const back = document.querySelector('[aria-label="Back to atlas"]');
+      const transform = document.querySelector(".react-flow__viewport")?.style.transform ?? "";
+      return !selected && !orbit && !back && transform === ${JSON.stringify(expectedTransform)};
+    })()`);
   const centerOf = async (selector) => {
     const result = await send("Runtime.evaluate", {
       returnByValue: true,
@@ -313,12 +378,16 @@ async function runInputSmoke(send, width, height, isInputOnly) {
     : expectedSurface === "drawer"
       ? 'Boolean(document.querySelector(\'[aria-label="Arrival details"]\') && document.querySelector(\'[aria-label="Expand detail drawer"]\'))'
       : `Boolean(document.querySelector(${JSON.stringify(back)}) && document.querySelector('[aria-label="Arrival details"]'))`;
-  const restoreExpectedSurface = async () => {
+  const restoreExpectedSurface = async (expectedTransform) => {
+    let exitTriggered = false;
     if (expectedSurface !== "rail") {
-      return (await click(closeDetails)) && (await waitFor(`!(${expectedSurfacePresent})`));
+      exitTriggered = await click(closeDetails);
+    } else {
+      exitTriggered = await click(back);
     }
-    return (await click(back)) &&
-      (await waitFor(`!document.querySelector(${JSON.stringify(back)}) && !document.querySelector('[aria-label="Arrival details"]')`));
+    return exitTriggered &&
+      (await waitFor(`!(${expectedSurfacePresent})`)) &&
+      (await restoredExactly(expectedTransform));
   };
   if (await waitFor(`Boolean(document.querySelector(${JSON.stringify(closeDetails)}))`)) {
     await click(closeDetails);
@@ -340,18 +409,89 @@ async function runInputSmoke(send, width, height, isInputOnly) {
     mousePan = Boolean(after.result.value) && after.result.value !== before.result.value;
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
+  const mouseOverview = await waitForViewportStable();
   const mouseOrbitAndRestore = (inputMode === "all" || inputMode === "mouse") &&
-    (await click(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
+    mouseOverview.stable &&
+    (await click(arrival)) &&
+    (await waitFor(expectedSurfacePresent)) &&
+    (await restoreExpectedSurface(mouseOverview.transform));
   let keyboardOrbitAndRestore = false;
+  const keyboardOverview = await waitForViewportStable();
   if (inputMode === "all" || inputMode === "keyboard") {
     await send("Runtime.evaluate", { expression: 'document.querySelector("[role=application]")?.focus()' });
     await key("ArrowRight");
     await key("Enter");
     keyboardOrbitAndRestore = (await waitFor(expectedSurfacePresent)) &&
-      (await key("Escape"), await waitFor(`!(${expectedSurfacePresent}) && !document.querySelector('[aria-label="Arrival details"]')`));
+      (await key("Escape"), await waitFor(`!(${expectedSurfacePresent})`)) &&
+      (await restoredExactly(keyboardOverview.transform));
   }
+  const touchOverview = await waitForViewportStable();
   const touchOrbitAndRestore = (inputMode === "all" || inputMode === "touch") &&
-    (await touch(arrival)) && (await waitFor(expectedSurfacePresent)) && (await restoreExpectedSurface());
+    touchOverview.stable &&
+    (await touch(arrival)) &&
+    (await waitFor(expectedSurfacePresent)) &&
+    (await restoreExpectedSurface(touchOverview.transform));
+  let denseRepresentativeHitTargets = true;
+  if (isDenseFixture) {
+    const representatives = (
+      await send("Runtime.evaluate", {
+        returnByValue: true,
+        expression: `(() => {
+          const visible = [...document.querySelectorAll(".react-flow__node")]
+            .map((node) => {
+              const rect = node.getBoundingClientRect();
+              const x = rect.left + rect.width / 2;
+              const y = rect.top + rect.height / 2;
+              const hit = document.elementFromPoint(x, y)?.closest(".react-flow__node");
+              return {
+                id: node.getAttribute("data-id"),
+                x,
+                y,
+                visible: rect.width > 0 && rect.height > 0 &&
+                  x >= 0 && x <= innerWidth && y >= 0 && y <= innerHeight &&
+                  hit === node,
+              };
+            })
+            .filter((candidate) => candidate.visible && candidate.id)
+            .sort((left, right) => left.x - right.x || left.y - right.y);
+          if (visible.length < 3) return [];
+          return [visible[0], visible[Math.floor(visible.length / 2)], visible[visible.length - 1]];
+        })()`,
+      })
+    ).result.value;
+    denseRepresentativeHitTargets = representatives.length === 3;
+    for (const representative of representatives) {
+      const overview = await waitForViewportStable();
+      await send("Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: representative.x,
+        y: representative.y,
+        button: "left",
+        clickCount: 1,
+      });
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: representative.x,
+        y: representative.y,
+        button: "left",
+        clickCount: 1,
+      });
+      const selected = await waitFor(
+        `Boolean(document.querySelector(${JSON.stringify(
+          `[data-testid="atlas-artwork-${representative.id}"][aria-selected="true"]`
+        )}))`
+      );
+      const exited =
+        (await waitFor(
+          `Boolean(document.querySelector(${JSON.stringify(closeDetails)}) || document.querySelector(${JSON.stringify(back)}))`
+        )) &&
+        ((await click(closeDetails)) || (await click(back))) &&
+        (await restoredExactly(overview.transform));
+      denseRepresentativeHitTargets =
+        denseRepresentativeHitTargets && Boolean(selected) && Boolean(exited);
+      if (!denseRepresentativeHitTargets) break;
+    }
+  }
   const modePassed = {
     pan: mousePan,
     mouse: mouseOrbitAndRestore,
@@ -368,7 +508,13 @@ async function runInputSmoke(send, width, height, isInputOnly) {
     mouseOrbitAndRestore,
     keyboardOrbitAndRestore,
     touchOrbitAndRestore,
+    denseRepresentativeHitTargets,
     modePassed: Boolean(modePassed),
+    overviewTransforms: {
+      mouse: mouseOverview.transform,
+      keyboard: keyboardOverview.transform,
+      touch: touchOverview.transform,
+    },
     diagnosticLabels: diagnosticLabels.result.value,
   };
 }
