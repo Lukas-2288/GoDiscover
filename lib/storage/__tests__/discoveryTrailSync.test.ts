@@ -544,3 +544,63 @@ it("does not let a second account claim signed-in offline history", async () => 
     ],
   });
 });
+
+// An anonymous trail event belongs to whichever account claims it first. Two
+// overlapping syncs must not both convert and upload it, or one signed-out
+// user's discovery history is copied into two different accounts.
+it("uploads an anonymous event to exactly one account when two syncs overlap", async () => {
+  await AsyncStorage.setItem(
+    DISCOVERY_MAP_STORAGE_KEY,
+    JSON.stringify({ version: 2, events: [localConnect] })
+  );
+
+  let releaseSelect: () => void = () => undefined;
+  mockSelectGate = new Promise<void>((resolve) => {
+    releaseSelect = resolve;
+  });
+
+  mockCurrentUserId = "user-a";
+  const firstSync = syncDiscoveryTrailEvents("user-a");
+  // Owner B starts its own sync while A's cloud read is still parked.
+  mockCurrentUserId = "user-b";
+  const secondSync = syncDiscoveryTrailEvents("user-b");
+
+  releaseSelect();
+  await Promise.all([
+    firstSync.catch(() => undefined),
+    secondSync.catch(() => undefined),
+  ]);
+
+  const uploadsOfAnonymousEvent = mockRemoteEvents.filter(
+    (event) => event.relationship_id === "movies:arrival->books:kindred"
+  );
+  expect(uploadsOfAnonymousEvent).toHaveLength(1);
+  expect(new Set(uploadsOfAnonymousEvent.map((event) => event.user_id)).size).toBe(1);
+});
+
+it("keeps an anonymous event claimable when its upload fails", async () => {
+  await AsyncStorage.setItem(
+    DISCOVERY_MAP_STORAGE_KEY,
+    JSON.stringify({ version: 2, events: [localConnect] })
+  );
+  mockCurrentUserId = "user-a";
+  mockAppendFailure = new Error("offline");
+
+  await syncDiscoveryTrailEvents("user-a").catch(() => undefined);
+
+  const stored = JSON.parse(
+    (await AsyncStorage.getItem(DISCOVERY_MAP_STORAGE_KEY)) ?? "{}"
+  );
+  const preserved = stored.events.find(
+    (event: { relationshipId: string }) =>
+      event.relationshipId === "movies:arrival->books:kindred"
+  );
+  // Still unclaimed, so a later successful sync can upload it.
+  expect(preserved.origin).toBe("anonymous");
+  expect(mockRemoteEvents).toHaveLength(0);
+
+  mockAppendFailure = null;
+  await syncDiscoveryTrailEvents("user-a");
+  expect(mockRemoteEvents).toHaveLength(1);
+  expect(mockRemoteEvents[0].user_id).toBe("user-a");
+});

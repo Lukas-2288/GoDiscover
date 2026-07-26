@@ -87,7 +87,27 @@ async function getUserId(): Promise<string | null> {
   }
 }
 
+// Synchronizations are serialized so two accounts cannot interleave their
+// claims on the same anonymous history. Without this, overlapping syncs both
+// read the events as unclaimed and both upload them.
+let syncTail: Promise<unknown> = Promise.resolve();
+
+function serializeSync<T>(run: () => Promise<T>): Promise<T> {
+  const result = syncTail.then(run, run);
+  syncTail = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 export async function syncDiscoveryTrailEvents(
+  expectedUserId?: string
+): Promise<TrailMutationEvent[]> {
+  return serializeSync(() => runDiscoveryTrailSync(expectedUserId));
+}
+
+async function runDiscoveryTrailSync(
   expectedUserId?: string
 ): Promise<TrailMutationEvent[]> {
   const userId = await getUserId();
@@ -96,6 +116,38 @@ export async function syncDiscoveryTrailEvents(
     return localEvents;
   }
 
+  // Claim the anonymous history for this account durably, before any cloud
+  // call. A later sync for a different account then reads these as already
+  // owned and leaves them alone. Claiming only in memory — as this did — lets
+  // both accounts believe they own the same events.
+  const claimedEventIds = new Set<string>();
+  await updateDiscoveryTrailEvents((events) =>
+    events.map((event) => {
+      if (event.origin !== "anonymous") return event;
+      claimedEventIds.add(event.id);
+      return { ...event, origin: "account" as const, userId };
+    })
+  );
+
+  // Any abandoned sync must hand the claim back, or the events become
+  // unreachable: owned by an account that never uploaded them, and no longer
+  // anonymous for anyone else to claim.
+  const releaseClaim = async (): Promise<TrailMutationEvent[]> => {
+    if (claimedEventIds.size === 0) return readDiscoveryTrailEvents();
+    return updateDiscoveryTrailEvents((events) =>
+      events.map((event) =>
+        claimedEventIds.has(event.id) &&
+        event.origin === "account" &&
+        event.userId === userId
+          ? { ...event, origin: "anonymous" as const, userId: undefined }
+          : event
+      )
+    );
+  };
+
+  const ownerStillActive = async (): Promise<boolean> =>
+    (await getUserId()) === userId;
+
   let data: unknown;
   let error: unknown;
   try {
@@ -103,9 +155,10 @@ export async function syncDiscoveryTrailEvents(
       .from("discovery_trail_events")
       .select("event_id,relationship_id,action,source,target,occurred_at,reason,session_id,user_id"));
   } catch {
-    return readDiscoveryTrailEvents();
+    return releaseClaim();
   }
-  if (error) return readDiscoveryTrailEvents();
+  if (error) return releaseClaim();
+  if (!(await ownerStillActive())) return releaseClaim();
 
   const cloudEvents = ((data ?? []) as DiscoveryTrailEventRow[])
     .map(rowToEvent)
@@ -131,9 +184,10 @@ export async function syncDiscoveryTrailEvents(
           ignoreDuplicates: true,
         }));
     } catch {
-      return readDiscoveryTrailEvents();
+      return releaseClaim();
     }
-    if (appendError) return readDiscoveryTrailEvents();
+    if (appendError) return releaseClaim();
+    if (!(await ownerStillActive())) return releaseClaim();
   }
 
   return updateDiscoveryTrailEvents((latestEvents) => {
