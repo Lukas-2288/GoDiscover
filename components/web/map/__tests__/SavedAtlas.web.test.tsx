@@ -5,7 +5,12 @@ import type { MapEdge, MapNode } from "../../../../lib/storage/discoveryMap";
 
 let mockFlowProps: Record<string, any> = {};
 const mockSetCenter = jest.fn();
-const mockGetViewport = jest.fn(() => ({ x: 24, y: -18, zoom: 0.86 }));
+const OVERVIEW_VIEWPORT = { x: 24, y: -18, zoom: 0.86 };
+// React Flow's getViewport() reports the *live* camera, so the mock has to move
+// when the camera moves. A constant here would hide any capture that reads the
+// viewport at the wrong moment.
+let currentViewport = { ...OVERVIEW_VIEWPORT };
+const mockGetViewport = jest.fn(() => currentViewport);
 const mockSetViewport = jest.fn();
 jest.mock("../../../../lib/discovery/mapLayout", () => {
   const actual = jest.requireActual("../../../../lib/discovery/mapLayout");
@@ -61,10 +66,20 @@ const edges: MapEdge[] = [];
 describe("Saved Atlas React Flow canvas", () => {
   beforeEach(() => {
     mockFlowProps = {};
+    currentViewport = { ...OVERVIEW_VIEWPORT };
     mockSetCenter.mockClear();
     mockGetViewport.mockClear();
     mockSetViewport.mockClear();
   });
+
+  // Moves the camera the way a real gesture or a programmatic setCenter would:
+  // the live viewport changes, then React Flow emits onMoveEnd.
+  function moveCamera(next: { x: number; y: number; zoom: number }) {
+    currentViewport = next;
+    act(() => {
+      mockFlowProps.onMoveEnd?.(null, next);
+    });
+  }
 
   it("keeps artwork fixed while preserving pan and zoom navigation", () => {
     render(
@@ -185,6 +200,126 @@ describe("Saved Atlas React Flow canvas", () => {
     expect(mockGetViewport).toHaveBeenCalled();
     expect(mockGetViewport.mock.invocationCallOrder[0]).toBeLessThan(
       onSelect.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("restores the panned viewport after a mouse selection, not the viewport the atlas opened at", () => {
+    const panned = { x: -412, y: 137, zoom: 0.52 };
+    const view = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onRestoreOverview={jest.fn()}
+        restoreOverviewVersion={0}
+      />
+    );
+
+    moveCamera(panned);
+
+    act(() => {
+      mockFlowProps.onNodeClick({}, mockFlowProps.nodes[0]);
+    });
+
+    view.rerender(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onRestoreOverview={jest.fn()}
+        restoreOverviewVersion={1}
+      />
+    );
+
+    expect(mockSetViewport).toHaveBeenCalledWith(panned, { duration: 0 });
+  });
+
+  // Regression: the orbit camera must never be mistaken for the overview.
+  // When the app drives the orbit itself (Find similar, reseed), setCenter moves
+  // the camera before `selectedId` propagates back down. A capture that runs
+  // after that point records the orbit camera, and exiting the orbit strands the
+  // user there instead of returning them to where they had panned.
+  it("keeps the panned overview when the app opens an orbit before selectedId arrives", () => {
+    const panned = { x: -260, y: 88, zoom: 0.61 };
+    const orbitCamera = { x: 800, y: 500, zoom: 1.15 };
+    const orbitSeed = {
+      id: "movies:arrival",
+      category: "movies" as const,
+      item: {
+        id: "arrival",
+        title: "Arrival",
+        subtitle: "Denis Villeneuve",
+        meta: "2016 · Science fiction",
+      },
+    };
+    const view = render(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onRestoreOverview={jest.fn()}
+        restoreOverviewVersion={0}
+      />
+    );
+
+    moveCamera(panned);
+
+    // The app opens the orbit; the orbit camera flies in before selectedId does.
+    view.rerender(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onRestoreOverview={jest.fn()}
+        responsiveOrbitSeed={orbitSeed}
+        restoreOverviewVersion={0}
+      />
+    );
+    moveCamera(orbitCamera);
+
+    view.rerender(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId="movies:arrival"
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onRestoreOverview={jest.fn()}
+        responsiveOrbitSeed={orbitSeed}
+        restoreOverviewVersion={0}
+      />
+    );
+
+    view.rerender(
+      <SavedAtlas
+        nodes={nodes}
+        edges={edges}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+        onRestoreOverview={jest.fn()}
+        restoreOverviewVersion={1}
+      />
+    );
+
+    expect(mockSetViewport).toHaveBeenCalledWith(panned, { duration: 0 });
+    expect(mockSetViewport).not.toHaveBeenCalledWith(
+      orbitCamera,
+      expect.anything()
     );
   });
 

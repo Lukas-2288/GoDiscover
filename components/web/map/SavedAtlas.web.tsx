@@ -162,8 +162,18 @@ function SavedAtlasInner({
     0.35 / Math.max(1, Math.sqrt(nodes.length / 32))
   );
 
+  const graphRecommendations = responsiveRecommendations ?? [];
+  const graphOrbitSeedId = responsiveOrbitSeed?.id ?? selectedId;
+
+  // While the atlas is in overview mode the live camera *is* the overview, so
+  // re-read it every time and keep the record current as the user pans. Once an
+  // orbit owns the camera, freeze whatever was recorded on the way in — reading
+  // getViewport() then would capture the orbit camera and strand the user there
+  // on exit. The remaining fall-through covers an orbit opened before any pan
+  // or fit-view settled, where the current camera is the best available answer.
   const captureOverviewViewport = () => {
-    if (!overviewViewport.current) overviewViewport.current = getViewport();
+    if (graphOrbitSeedId && overviewViewport.current) return;
+    overviewViewport.current = getViewport();
   };
 
   useEffect(() => {
@@ -177,9 +187,6 @@ function SavedAtlasInner({
     }
     setSpatialNodeId(null);
   }, [getViewport, selectedId]);
-
-  const graphRecommendations = responsiveRecommendations ?? [];
-  const graphOrbitSeedId = responsiveOrbitSeed?.id ?? selectedId;
   const responsiveTransientSeed = responsiveOrbitSeed && !nodes.some((node) => node.id === responsiveOrbitSeed.id)
     ? responsiveOrbitSeed
     : undefined;
@@ -317,6 +324,11 @@ function SavedAtlasInner({
   }, [graphOrbitSeedId, onRestoreOverview]);
 
   const handleMoveEnd = (_event: MouseEvent | TouchEvent | null, viewport: Viewport) => {
+    // Every settled overview camera becomes the restore target, so a pan is
+    // preserved no matter which path opens the orbit next — mouse, keyboard,
+    // touch, search, list, or an app-driven seed. Orbit moves are excluded:
+    // onMoveEnd also fires for programmatic setCenter/setViewport calls.
+    if (!graphOrbitSeedId) overviewViewport.current = viewport;
     const nextMode = resolveZoomDetail(viewport.zoom, nodes).mode;
     setDetailMode((current) => (current === nextMode ? current : nextMode));
   };

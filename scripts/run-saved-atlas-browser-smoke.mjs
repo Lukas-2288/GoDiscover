@@ -14,6 +14,30 @@ const screenshotPath = process.argv[5];
 const inputMode = process.argv[6] ?? "all";
 const inputOnly = process.argv[7] === "input-only";
 const denseFixture = process.argv[8] === "dense";
+
+// Which stages each input contract runs. The `pan-*` modes pan first and then
+// drive one input contract in the same profile, so restoration is asserted
+// against the camera the user panned to rather than the fit-view position the
+// atlas opened at.
+const panModes = new Set(["all", "pan", "pan-mouse", "pan-keyboard", "pan-touch"]);
+const mouseModes = new Set(["all", "mouse", "pan-mouse"]);
+const keyboardModes = new Set(["all", "keyboard", "pan-keyboard"]);
+const touchModes = new Set(["all", "touch", "pan-touch"]);
+const knownInputModes = new Set([
+  ...panModes,
+  ...mouseModes,
+  ...keyboardModes,
+  ...touchModes,
+]);
+if (!knownInputModes.has(inputMode)) {
+  console.error(
+    `Unknown input mode ${JSON.stringify(inputMode)}. Expected one of: ${[...knownInputModes]
+      .sort()
+      .join(", ")}`
+  );
+  process.exit(2);
+}
+
 const chromeBinary =
   process.env.CHROME_BIN ??
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -402,7 +426,7 @@ async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
   const cleanupViewport = await waitForViewportStable();
   const paneCenter = await centerOf(pane);
   let mousePan = false;
-  if (paneCenter && (inputMode === "all" || inputMode === "pan")) {
+  if (paneCenter && panModes.has(inputMode)) {
     const before = await send("Runtime.evaluate", { returnByValue: true, expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""' });
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x: paneCenter.x, y: paneCenter.y, button: "left", clickCount: 1 });
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: paneCenter.x + 40, y: paneCenter.y + 24, button: "left", buttons: 1 });
@@ -412,14 +436,14 @@ async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   const mouseOverview = await waitForViewportStable();
-  const mouseOrbitAndRestore = (inputMode === "all" || inputMode === "mouse") &&
+  const mouseOrbitAndRestore = mouseModes.has(inputMode) &&
     mouseOverview.stable &&
     (await click(arrival)) &&
     (await waitFor(expectedSurfacePresent)) &&
     (await restoreExpectedSurface(mouseOverview.transform));
   let keyboardOrbitAndRestore = false;
   const keyboardOverview = await waitForViewportStable();
-  if (inputMode === "all" || inputMode === "keyboard") {
+  if (keyboardModes.has(inputMode)) {
     await send("Runtime.evaluate", { expression: 'document.querySelector("[role=application]")?.focus()' });
     await key("ArrowRight");
     await key("Enter");
@@ -428,7 +452,7 @@ async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
       (await restoredExactly(keyboardOverview.transform));
   }
   const touchOverview = await waitForViewportStable();
-  const touchOrbitAndRestore = (inputMode === "all" || inputMode === "touch") &&
+  const touchOrbitAndRestore = touchModes.has(inputMode) &&
     touchOverview.stable &&
     (await touch(arrival)) &&
     (await waitFor(expectedSurfacePresent)) &&
@@ -499,6 +523,13 @@ async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
     mouse: mouseOrbitAndRestore,
     keyboard: keyboardOrbitAndRestore,
     touch: touchOrbitAndRestore,
+    // Combined modes: the pan and the orbit happen in one profile, so the
+    // restore target is the camera the user actually panned to rather than the
+    // fit-view position the atlas opened at. Running pan on its own — as the
+    // earlier matrix did — cannot catch a stale overview capture.
+    "pan-mouse": mousePan && mouseOrbitAndRestore,
+    "pan-keyboard": mousePan && keyboardOrbitAndRestore,
+    "pan-touch": mousePan && touchOrbitAndRestore,
     all: mousePan && mouseOrbitAndRestore && keyboardOrbitAndRestore && touchOrbitAndRestore,
   }[inputMode];
   return {
