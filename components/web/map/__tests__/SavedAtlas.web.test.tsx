@@ -363,10 +363,20 @@ describe("Saved Atlas React Flow canvas", () => {
 
     expect(mockGetViewport).toHaveBeenCalled();
     fireEvent.press(view.getByLabelText("Find similar in atlas to Arrival"));
+    // The orbit control now states a direction, so the seed comes with an intent.
     expect(onRequestOrbit).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "movies:arrival" })
+      expect.objectContaining({ id: "movies:arrival" }),
+      expect.objectContaining({ intent: "more-like-this" })
     );
     expect(view.getByText("Story of Your Life")).toBeTruthy();
+
+    // Saving one thing should not lock the orbit to near-clones of it, so the
+    // opposite direction is offered alongside.
+    fireEvent.press(view.getByLabelText("Find something different from Arrival"));
+    expect(onRequestOrbit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "movies:arrival" }),
+      expect.objectContaining({ intent: "something-different" })
+    );
     fireEvent.press(view.getByLabelText("View whole atlas"));
     expect(onRestoreOverview).toHaveBeenCalledTimes(1);
     view.rerender(

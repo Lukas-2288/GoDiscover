@@ -23,6 +23,12 @@ import {
   SIMILAR_EXHAUSTED_MESSAGE,
   type SimilarTier,
 } from "../../lib/discovery/similarTiers";
+import {
+  DEFAULT_SAVE_INTENT,
+  contextForSaveIntent,
+  requestForSaveIntent,
+  type SaveIntent,
+} from "../../lib/discovery/saveIntent";
 import type {
   DiscoveryActionMode,
   DiscoveryLoadContext,
@@ -232,6 +238,9 @@ export function useDiscoveryController(
     tier: SimilarTier;
     exhausted: boolean;
   } | null>(null);
+  // Remembered so the follow-up is one tap next time rather than a prompt on
+  // every save.
+  const lastSaveIntentRef = useRef<SaveIntent>(DEFAULT_SAVE_INTENT);
   const mountedRef = useRef(true);
 
   stateRef.current = deckState;
@@ -683,6 +692,63 @@ export function useDiscoveryController(
     }
   }, [dispatch]);
 
+  /**
+   * Follows a save in the direction the user asked for. "More like this" seeds
+   * Similar; "Something different" stays in the category but steers away from
+   * what was just saved, so liking one superhero film does not lock the deck to
+   * superhero films.
+   */
+  const followSave = useCallback(
+    async (item: ResultItem, intent: SaveIntent): Promise<void> => {
+      const category = stateRef.current.selected;
+      if (!category) return;
+      lastSaveIntentRef.current = intent;
+
+      const input = copyRequestInput(requestForSaveIntent(category, item, intent));
+      const request = requestTrackerRef.current.start(category);
+      dispatch({ type: "requestStarted", request, input });
+      try {
+        const items = await dependenciesRef.current.load(
+          input,
+          contextForSaveIntent(item, intent, {
+            ...buildLoadContext(category),
+            presentIds: undefined,
+          })
+        );
+        if (!mountedRef.current || !requestTrackerRef.current.isCurrent(request)) {
+          return;
+        }
+        const similar =
+          similarTierRef.current?.category === category
+            ? similarTierRef.current
+            : null;
+        dispatch({
+          type: "requestSucceeded",
+          request,
+          input,
+          items: [...items],
+          similarTier: similar?.tier,
+          similarExhausted: similar?.exhausted,
+        });
+      } catch (error) {
+        if (!mountedRef.current || !requestTrackerRef.current.isCurrent(request)) {
+          return;
+        }
+        console.warn({
+          category,
+          mode: input.mode,
+          errorName: errorName(error),
+        });
+        dispatch({
+          type: "requestFailed",
+          request,
+          message: toDiscoveryError(category),
+        });
+      }
+    },
+    [buildLoadContext, dispatch]
+  );
+
   const clearActionError = useCallback(() => {
     dispatch({ type: "clearActionError" });
   }, [dispatch]);
@@ -721,6 +787,8 @@ export function useDiscoveryController(
     deckExhausted: session?.deck.exhausted ?? false,
     lastSkip: state.lastSkip,
     undoSkip,
+    followSave,
+    lastSaveIntent: lastSaveIntentRef.current,
     announcement,
     actionErrorAnnouncement: state.actionError,
     selectCategory,

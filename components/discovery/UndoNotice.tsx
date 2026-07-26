@@ -2,14 +2,30 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { Palette } from "../../lib/theme";
 
+/**
+ * A follow-up offered alongside the notice, e.g. choosing what to see after a
+ * save instead of always being handed near-clones.
+ */
+export type UndoNoticeAction = {
+  label: string;
+  onPress(): void;
+};
+
 export type UndoNoticeProps = {
   message: string | null;
   canUndo: boolean;
   palette: Palette;
   onUndo(): void;
+  actions?: readonly UndoNoticeAction[];
 };
 
-export function UndoNotice({ message, canUndo, palette, onUndo }: UndoNoticeProps) {
+export function UndoNotice({
+  message,
+  canUndo,
+  palette,
+  onUndo,
+  actions,
+}: UndoNoticeProps) {
   if (!message) return null;
 
   return (
@@ -24,6 +40,19 @@ export function UndoNotice({ message, canUndo, palette, onUndo }: UndoNoticeProp
       ]}
     >
       <Text style={[styles.message, { color: palette.text }]}>{message}</Text>
+      {actions?.map((action) => (
+        <Pressable
+          key={action.label}
+          accessibilityLabel={action.label}
+          accessibilityRole="button"
+          onPress={action.onPress}
+          style={({ pressed }) => [styles.undo, { opacity: pressed ? 0.7 : 1 }]}
+        >
+          <Text style={[styles.undoLabel, { color: palette.focus }]}>
+            {action.label}
+          </Text>
+        </Pressable>
+      ))}
       {canUndo ? (
         <Pressable
           accessibilityLabel="Undo"

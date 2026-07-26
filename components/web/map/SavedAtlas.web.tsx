@@ -39,6 +39,7 @@ import {
   type SavedAtlasView,
 } from "./SavedAtlasChrome";
 import { SavedAtlasList } from "./SavedAtlasList";
+import type { SaveIntent } from "../../../lib/discovery/saveIntent";
 
 const nodeTypes: NodeTypes = { artwork: AtlasArtworkNode };
 
@@ -95,7 +96,7 @@ type SavedAtlasProps = {
   onStart(): void;
   onRequestOrbit?(
     seed?: OrbitSeed,
-    options?: { reseeding?: boolean }
+    options?: { reseeding?: boolean; intent?: SaveIntent }
   ): Promise<void> | void;
   onPreviewOrbitRecommendation?(recommendationId: string): void;
   onSaveOrbitRecommendation?(recommendationId: string): Promise<void> | void;
@@ -470,16 +471,36 @@ function SavedAtlasInner({
                 <Pressable accessibilityLabel="Back to atlas" accessibilityRole="button" onPress={onRestoreOverview} style={styles.orbitButton}>
                   <Text style={styles.orbitButtonText}>Back</Text>
                 </Pressable>
+                {/* Two directions rather than one. Provider-native similars
+                    score far above trait matches, so a single "find similar"
+                    reliably returned near-clones of whatever was saved. */}
                 <Pressable
                   accessibilityLabel={`Find similar in atlas to ${currentSeed.title}`}
                   accessibilityRole="button"
                   disabled={responsiveRecommendationsLoading || !onRequestOrbit}
-                  onPress={() => void onRequestOrbit?.(seedFromNode(currentSeed))}
+                  onPress={() =>
+                    void onRequestOrbit?.(seedFromNode(currentSeed), {
+                      intent: "more-like-this",
+                    })
+                  }
                   style={[styles.orbitButton, styles.orbitPrimary]}
                 >
                   <Text style={styles.orbitPrimaryText}>
-                    {responsiveRecommendationsLoading ? "Looking…" : "Find similar in atlas"}
+                    {responsiveRecommendationsLoading ? "Looking…" : "More like this"}
                   </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={`Find something different from ${currentSeed.title}`}
+                  accessibilityRole="button"
+                  disabled={responsiveRecommendationsLoading || !onRequestOrbit}
+                  onPress={() =>
+                    void onRequestOrbit?.(seedFromNode(currentSeed), {
+                      intent: "something-different",
+                    })
+                  }
+                  style={styles.orbitButton}
+                >
+                  <Text style={styles.orbitButtonText}>Something different</Text>
                 </Pressable>
                 <Pressable accessibilityLabel="View whole atlas" accessibilityRole="button" onPress={onRestoreOverview} style={styles.orbitButton}>
                   <Text style={styles.orbitButtonText}>View whole atlas</Text>

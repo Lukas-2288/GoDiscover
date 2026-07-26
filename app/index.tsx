@@ -69,6 +69,7 @@ import {
   type ContentDetail,
 } from "../lib/discovery/loadDetail";
 import { SIMILAR_TIER_LABELS } from "../lib/discovery/similarTiers";
+import { SAVE_INTENT_LABELS } from "../lib/discovery/saveIntent";
 
 export default function HomeScreen() {
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
@@ -741,19 +742,41 @@ export default function HomeScreen() {
             />
           ) : null}
 
+          {/* One notice serves both outcomes. A save offers a direction to go
+              next; a skip offers the way back, which previously did not exist. */}
           <UndoNotice
             message={
               discovery.actionError ??
               (discovery.lastSave
                 ? `Saved ${discovery.lastSave.item.title}`
+                : discovery.lastSkip
+                ? `Not for me: ${discovery.lastSkip.item.title}`
                 : null)
             }
             canUndo={Boolean(
-              discovery.lastSave &&
+              (discovery.lastSave || discovery.lastSkip) &&
                 discovery.actionError === null
             )}
+            actions={
+              discovery.lastSave && discovery.actionError === null
+                ? (["more-like-this", "something-different"] as const).map(
+                    (intent) => ({
+                      label: SAVE_INTENT_LABELS[intent],
+                      onPress: () =>
+                        void discoveryController.followSave(
+                          discovery.lastSave!.item,
+                          intent
+                        ),
+                    })
+                  )
+                : undefined
+            }
             palette={palette}
-            onUndo={() => void discoveryController.undo()}
+            onUndo={() =>
+              void (discovery.lastSave
+                ? discoveryController.undo()
+                : discoveryController.undoSkip())
+            }
           />
           <DiscoveryAnnouncer
             message={announcement}

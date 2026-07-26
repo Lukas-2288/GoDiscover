@@ -16,6 +16,11 @@ import { disconnectSavedItemTrails, syncDiscoveryTrailEvents } from "../lib/stor
 import { buildCulturalProfile } from "../lib/discovery/culturalProfile";
 import { loadMapRecommendationSeed } from "../lib/discovery/mapRecommendationAdapters";
 import { findMapRecommendations } from "../lib/discovery/mapRecommendations";
+import {
+  DEFAULT_SAVE_INTENT,
+  applySaveIntent,
+  type SaveIntent,
+} from "../lib/discovery/saveIntent";
 import { defaultDiscoveryProviders } from "../lib/discovery/loadDiscovery";
 import type { OrbitSeed } from "../components/web/map/SavedAtlas.web";
 import type { OrbitRecommendation } from "../components/web/map/orbitGraph";
@@ -360,7 +365,10 @@ function WebHomeScreen() {
       .catch(() => undefined);
   };
 
-  const findOrbitRecommendations = async (seed: OrbitSeed): Promise<OrbitRecommendation[]> => {
+  const findOrbitRecommendations = async (
+    seed: OrbitSeed,
+    intent: SaveIntent = DEFAULT_SAVE_INTENT
+  ): Promise<OrbitRecommendation[]> => {
     const operationOwnerId = authSession?.user.id ?? null;
     const operationMapSequence = mapLoadSequence.current;
     const operationIsCurrent = () =>
@@ -396,6 +404,16 @@ function WebHomeScreen() {
       { category: seed.category, item: seed.item, profile },
       { providers: defaultDiscoveryProviders }
     );
+    // "Something different" drops the provider-native near-clones that would
+    // otherwise take every slot and leads with other media instead.
+    const intended = {
+      ...result,
+      recommendations: applySaveIntent(
+        result.recommendations,
+        seed.category,
+        intent
+      ),
+    };
     if (!operationIsCurrent()) throw new Error("The atlas changed while recommendations were loading.");
     const attemptedSources = result.sourceStatuses.filter(
       (status) => status.status !== "not-applicable"
@@ -407,7 +425,7 @@ function WebHomeScreen() {
     ) {
       throw new Error("Every recommendation source is unavailable.");
     }
-    return result.recommendations.slice(0, 8).map(({ category, item, reason }) => ({
+    return intended.recommendations.slice(0, 8).map(({ category, item, reason }) => ({
       category,
       item,
       reason: { label: reason.label },
@@ -521,7 +539,10 @@ function WebHomeScreen() {
   }, []);
   const requestResponsiveOrbit = useCallback(async (
     requestedSeed?: OrbitSeed,
-    { reseeding = false }: { reseeding?: boolean } = {}
+    {
+      reseeding = false,
+      intent = DEFAULT_SAVE_INTENT,
+    }: { reseeding?: boolean; intent?: SaveIntent } = {}
   ) => {
     const selectedNode = selectedNodeRef.current;
     if (!selectedNode) return;
@@ -542,7 +563,10 @@ function WebHomeScreen() {
       recommendations: current.seedId === rootSeedId ? current.recommendations : [],
     }));
     try {
-      const recommendations = await findOrbitRecommendationsRef.current(seed);
+      const recommendations = await findOrbitRecommendationsRef.current(
+        seed,
+        intent
+      );
       if (responsiveOrbitRequest.current !== requestId) return;
       updateResponsiveOrbit((current) => ({
         seedId: rootSeedId,
