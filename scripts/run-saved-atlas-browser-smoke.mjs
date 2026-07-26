@@ -356,6 +356,27 @@ async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
     });
     return result.result.value;
   };
+  const targetIsHittable = async () => {
+    const result = await send("Runtime.evaluate", {
+      returnByValue: true,
+      expression: `(() => {
+        const element = document.querySelector(${JSON.stringify(arrival)});
+        if (!element) return { found: false };
+        const rect = element.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return {
+          found: true,
+          x: Number(x.toFixed(1)),
+          y: Number(y.toFixed(1)),
+          inViewport: x >= 0 && x <= innerWidth && y >= 0 && y <= innerHeight,
+          hitIsSelf: Boolean(hit && hit.closest(${JSON.stringify(arrival)})),
+        };
+      })()`,
+    });
+    return result.result.value;
+  };
   const click = async (selector) => {
     const center = await centerOf(selector);
     if (!center) return false;
@@ -427,15 +448,29 @@ async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
   const paneCenter = await centerOf(pane);
   let mousePan = false;
   if (paneCenter && panModes.has(inputMode)) {
+    // Drag the selection target toward the viewport centre. A fixed +40/+24
+    // pushed it past the right edge at 375px wide, so the pointer contracts
+    // clicked empty space while keyboard — which selects by focus, not
+    // coordinates — still passed. Clamped so the gesture stays a modest pan.
+    const targetBefore = await centerOf(arrival);
+    const towardCentre = (position, extent) =>
+      Math.max(-56, Math.min(56, Math.round((extent / 2 - position) * 0.6)));
+    const panX = targetBefore ? towardCentre(targetBefore.x, width) : 40;
+    const panY = targetBefore ? towardCentre(targetBefore.y, height) : 24;
     const before = await send("Runtime.evaluate", { returnByValue: true, expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""' });
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x: paneCenter.x, y: paneCenter.y, button: "left", clickCount: 1 });
-    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: paneCenter.x + 40, y: paneCenter.y + 24, button: "left", buttons: 1 });
-    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: paneCenter.x + 40, y: paneCenter.y + 24, button: "left", clickCount: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: paneCenter.x + panX, y: paneCenter.y + panY, button: "left", buttons: 1 });
+    await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: paneCenter.x + panX, y: paneCenter.y + panY, button: "left", clickCount: 1 });
     const after = await send("Runtime.evaluate", { returnByValue: true, expression: 'document.querySelector(".react-flow__viewport")?.style.transform ?? ""' });
     mousePan = Boolean(after.result.value) && after.result.value !== before.result.value;
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   const mouseOverview = await waitForViewportStable();
+  // Pointer contracts select by coordinate, so the pan above must leave the
+  // target hit-testable or the click silently lands on nothing. Surfaced here
+  // so a harness mistake reads as "target off-screen" instead of an unexplained
+  // restore failure.
+  const targetHittable = await targetIsHittable();
   const mouseOrbitAndRestore = mouseModes.has(inputMode) &&
     mouseOverview.stable &&
     (await click(arrival)) &&
@@ -537,6 +572,7 @@ async function runInputSmoke(send, width, height, isInputOnly, isDenseFixture) {
     inputMode,
     atlasReady,
     cleanupViewport,
+    targetHittable,
     mousePan,
     mouseOrbitAndRestore,
     keyboardOrbitAndRestore,
