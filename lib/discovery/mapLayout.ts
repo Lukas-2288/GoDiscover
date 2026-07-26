@@ -166,7 +166,10 @@ export function createAtlasLayout(
         .strength(1)
         .iterations(4)
     )
-    .force("charge", forceManyBody().strength(-0.012))
+    .force(
+      "charge",
+      forceManyBody().strength(-0.003 * Math.max(1, densityScale))
+    )
     .stop();
 
   for (let tick = 0; tick < LAYOUT_TICKS; tick += 1) {

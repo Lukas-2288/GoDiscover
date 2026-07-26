@@ -114,6 +114,30 @@ describe("Saved Atlas React Flow canvas", () => {
     expect(createAtlasLayout).toHaveBeenCalledTimes(layoutsAfterInitialRender);
   });
 
+  it("lets fit-view zoom out far enough to show a 200-node expanded atlas", () => {
+    const categories = ["movies", "books", "albums", "artists"] as const;
+    const denseNodes = Array.from({ length: 200 }, (_, index): MapNode => ({
+      ...nodes[0],
+      id: `${categories[index % categories.length]}:dense-${index}`,
+      itemId: `dense-${index}`,
+      category: categories[index % categories.length],
+      title: `Dense ${index}`,
+    }));
+
+    render(
+      <SavedAtlas
+        nodes={denseNodes}
+        edges={[]}
+        selectedId={null}
+        onSelect={jest.fn()}
+        onClearSelection={jest.fn()}
+        onStart={jest.fn()}
+      />
+    );
+
+    expect(mockFlowProps.minZoom).toBeLessThan(0.2);
+  });
+
   it("selects artwork for detail and moves search matches into focus", () => {
     const onSelect = jest.fn();
     const { getByLabelText, unmount } = render(

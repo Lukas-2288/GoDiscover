@@ -174,15 +174,17 @@ try {
   });
   await send("Page.addScriptToEvaluateOnNewDocument", {
     source: `
-      localStorage.clear();
-      localStorage.setItem(
-        "godiscover:saved-items:v1",
-        ${JSON.stringify(JSON.stringify(savedItems))}
-      );
-      localStorage.setItem(
-        "godiscover:discovery-map-edges:v1",
-        ${JSON.stringify(JSON.stringify({ version: 2, events: trailEvents }))}
-      );
+      if (location.protocol === "http:" || location.protocol === "https:") {
+        localStorage.clear();
+        localStorage.setItem(
+          "godiscover:saved-items:v1",
+          ${JSON.stringify(JSON.stringify(savedItems))}
+        );
+        localStorage.setItem(
+          "godiscover:discovery-map-edges:v1",
+          ${JSON.stringify(JSON.stringify({ version: 2, events: trailEvents }))}
+        );
+      }
     `,
   });
   const loadEvent = new Promise((resolve) => {

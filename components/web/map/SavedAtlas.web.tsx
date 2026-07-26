@@ -157,6 +157,10 @@ function SavedAtlasInner({
   const previousSelectedId = useRef<string | null>(null);
   const focusedResponsivePreview = useRef<string | null>(null);
   const showMiniMap = width >= 1_200 || (width >= 900 && width > height);
+  const minimumZoom = Math.max(
+    0.12,
+    0.35 / Math.max(1, Math.sqrt(nodes.length / 32))
+  );
 
   const captureOverviewViewport = () => {
     if (!overviewViewport.current) overviewViewport.current = getViewport();
@@ -415,7 +419,7 @@ function SavedAtlasInner({
             preventScrolling
             fitView
             fitViewOptions={{ maxZoom: 1.15, padding: 0.18 }}
-            minZoom={0.35}
+            minZoom={minimumZoom}
             maxZoom={2.2}
             onlyRenderVisibleElements
             onMoveEnd={handleMoveEnd}

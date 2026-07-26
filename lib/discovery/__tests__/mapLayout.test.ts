@@ -279,3 +279,25 @@ it("settles a 200-node, 400-edge atlas deterministically", () => {
   }
   expect(elapsedMilliseconds).toBeLessThan(750);
 });
+
+it("keeps a small cross-category atlas inside mobile fit-view hit bounds", () => {
+  const createAtlasLayout = loadMapLayout().createAtlasLayout as (
+    nodes: unknown[],
+    edges: unknown[]
+  ) => Record<string, { x: number; y: number }>;
+  const nodes = [
+    { id: "movies:arrival", category: "movies" },
+    { id: "books:kindred", category: "books" },
+    { id: "albums:vespertine", category: "albums" },
+  ];
+  const positions = createAtlasLayout(nodes, [
+    { source: "movies:arrival", target: "books:kindred" },
+  ]);
+
+  expect(positions["movies:arrival"].x).toBeGreaterThan(0.15);
+  expect(positions["movies:arrival"].x).toBeLessThan(0.78);
+  expect(positions["books:kindred"].x).toBeGreaterThan(0.15);
+  expect(positions["books:kindred"].x).toBeLessThan(0.78);
+  expect(positions["albums:vespertine"].x).toBeGreaterThan(0.15);
+  expect(positions["albums:vespertine"].x).toBeLessThan(0.82);
+});
