@@ -1,7 +1,9 @@
 # Saved Atlas final correction report — 2026-07-25
 
-Worktree: `/Users/lukassagmani/GoDiscover/.worktrees/playful-discovery-deck`  
-Required baseline: `5ef5330`  
+Worktree: `/Users/lukassagmani/GoDiscover/.worktrees/playful-discovery-deck`
+
+Required baseline: `5ef5330`
+
 Branch: `feature/playful-discovery-deck`
 
 ## Result
