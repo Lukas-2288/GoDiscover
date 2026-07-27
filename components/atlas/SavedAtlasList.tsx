@@ -1,10 +1,10 @@
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import type { MapNode } from "../../../lib/storage/discoveryMap";
-import type { ContentCategory } from "../../../types/content";
-import { thumbnailUrl } from "../../../lib/api/imageSizes";
-import { bodyFont, displayFont, monoFont } from "../../../lib/typography";
+import type { MapNode } from "../../lib/storage/discoveryMap";
+import type { ContentCategory } from "../../types/content";
+import { thumbnailUrl } from "../../lib/api/imageSizes";
+import { bodyFont, displayFont, monoFont } from "../../lib/typography";
 
 const CATEGORY_ORDER: readonly ContentCategory[] = [
   "movies",

@@ -71,6 +71,14 @@ import {
 import { SIMILAR_TIER_LABELS } from "../lib/discovery/similarTiers";
 import { SAVE_INTENT_LABELS } from "../lib/discovery/saveIntent";
 import { thumbnailUrl } from "../lib/api/imageSizes";
+import { SavedAtlasNative } from "../components/atlas/SavedAtlasNative";
+import {
+  loadMapSnapshot,
+  recordMapTrailEvent,
+  type MapNode,
+  type MapSnapshot,
+} from "../lib/storage/discoveryMap";
+import { syncDiscoveryTrailEvents } from "../lib/storage/discoveryTrailSync";
 import { displayFont, monoFont } from "../lib/typography";
 
 /** The deck's copy reads better in the singular: "the next movie", not "movies". */
@@ -121,6 +129,18 @@ export default function HomeScreen() {
   const [howToOpen, setHowToOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
+  const [atlasOpen, setAtlasOpen] = useState(false);
+  const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>({
+    version: 1,
+    nodes: [],
+    edges: [],
+  });
+  const mapLoadSequence = useRef(0);
+  // The node a Similar request came from. A save that follows one is a trail
+  // between the two, which is what draws an edge on the atlas.
+  const trailSeed = useRef<{ category: ContentCategory; id: string } | null>(
+    null
+  );
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
@@ -155,6 +175,20 @@ export default function HomeScreen() {
     runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => {});
     listRecents().then(setRecentItems).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const ownerId = authSession?.user.id ?? null;
+    const loadSequence = ++mapLoadSequence.current;
+    const synchronize = ownerId
+      ? syncDiscoveryTrailEvents(ownerId)
+      : Promise.resolve([]);
+    void synchronize
+      .then(() => loadMapSnapshot(savedItems, ownerId ?? undefined))
+      .then((snapshot) => {
+        if (mapLoadSequence.current === loadSequence) setMapSnapshot(snapshot);
+      })
+      .catch(() => undefined);
+  }, [authSession?.user.id, savedItems]);
 
   useEffect(() => {
     if (!detailSelection) return;
@@ -432,6 +466,7 @@ export default function HomeScreen() {
     if (!selection || selection.item.id !== item.id) return;
 
     const focusGeneration = detailFocusGenerationRef.current;
+    trailSeed.current = { category: selection.category, id: item.id };
     clearDetail();
     await discoveryController.similar(item);
     focusActiveCardAfterDismissal(focusGeneration);
@@ -446,6 +481,59 @@ export default function HomeScreen() {
     discoveryController.selectCategory(category);
     setCategoryPickerExpanded(false);
     clearDetail();
+  };
+
+  /**
+   * Saving after a Similar request draws an edge between the two works — that
+   * relationship is what the atlas is made of. The web recorded it and native
+   * did not, so anything saved on the phone arrived on the map unconnected.
+   */
+  const commitFromDeck = async (
+    item: ResultItem,
+    decision: "save" | "skip"
+  ) => {
+    const category = selected;
+    const seed = trailSeed.current;
+    const ownerId = authSession?.user.id ?? null;
+    const result = await discoveryController.commit(item, decision);
+    if (
+      decision !== "save" ||
+      !result.confirmed ||
+      result.decision !== "save" ||
+      !category ||
+      !seed ||
+      // A work is not a trail from itself.
+      (seed.category === category && seed.id === item.id)
+    ) {
+      return;
+    }
+    const saved = result.items.find(
+      (entry) => entry.category === category && entry.id === item.id
+    );
+    if (!saved) return;
+    await recordMapTrailEvent(
+      {
+        source: seed,
+        target: { category, id: item.id },
+        occurredAt: Date.now(),
+      },
+      result.items,
+      ownerId ?? undefined
+    );
+    if (ownerId) await syncDiscoveryTrailEvents(ownerId);
+    const snapshot = await loadMapSnapshot(result.items, ownerId ?? undefined);
+    setMapSnapshot(snapshot);
+  };
+
+  const openAtlasNode = (node: MapNode) => {
+    setAtlasOpen(false);
+    openStoredItem(node.category, {
+      id: node.itemId,
+      title: node.title,
+      subtitle: node.subtitle,
+      meta: node.meta,
+      imageUrl: node.imageUrl,
+    });
   };
 
   /**
@@ -787,13 +875,14 @@ export default function HomeScreen() {
               palette={palette}
               reducedMotion={reducedMotion}
               disabled={session.status === "loading"}
-              onCommit={(item, decision) =>
-                void discoveryController.commit(item, decision)
-              }
+              onCommit={(item, decision) => void commitFromDeck(item, decision)}
               onOpenDetail={(item) =>
                 openDetail({ category: selected, item, origin: "deck" })
               }
-              onSimilar={(item) => void discoveryController.similar(item)}
+              onSimilar={(item) => {
+                trailSeed.current = { category: selected, id: item.id };
+                void discoveryController.similar(item);
+              }}
             />
           ) : null}
 
@@ -985,6 +1074,51 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
+      {/* Saved Atlas — the spatial view of everything saved, and the trails
+          between the works that led to one another. */}
+      <Modal
+        visible={atlasOpen}
+        animationType={reducedMotion ? "none" : "slide"}
+        onRequestClose={() => setAtlasOpen(false)}
+      >
+        <View
+          accessibilityLabel="Saved atlas"
+          accessibilityViewIsModal
+          aria-modal
+          onAccessibilityEscape={() => setAtlasOpen(false)}
+          role="dialog"
+          style={styles.atlasScreen}
+        >
+          <View style={styles.atlasHeader}>
+            <View>
+              <Text style={styles.atlasKicker}>YOUR COLLECTION</Text>
+              <Text style={styles.atlasTitle}>Saved Atlas</Text>
+            </View>
+            <Pressable
+              accessibilityLabel="Close saved atlas"
+              accessibilityRole="button"
+              onPress={() => setAtlasOpen(false)}
+              style={styles.atlasClose}
+            >
+              <AntDesign
+                accessible={false}
+                name="close"
+                size={20}
+                color={palette.text}
+              />
+            </Pressable>
+          </View>
+          <SavedAtlasNative
+            nodes={mapSnapshot.nodes}
+            edges={mapSnapshot.edges}
+            selectedId={null}
+            palette={palette}
+            onSelect={openAtlasNode}
+            onStart={() => setAtlasOpen(false)}
+          />
+        </View>
+      </Modal>
+
       {/* Saved Modal */}
       <Modal
         visible={savedOpen}
@@ -1014,7 +1148,31 @@ export default function HomeScreen() {
                 color={palette.onAccent}
               />
             </Pressable>
-            <Text style={styles.savedTitle}>Saved</Text>
+            <View style={styles.savedHeader}>
+              <Text style={styles.savedTitle}>Saved</Text>
+              {savedItems.length > 0 ? (
+                <Pressable
+                  accessibilityLabel="Open saved atlas"
+                  accessibilityRole="button"
+                  onPress={() => {
+                    setSavedOpen(false);
+                    setAtlasOpen(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.savedAtlasButton,
+                    pressed && { opacity: 0.8 },
+                  ]}
+                >
+                  <FontAwesome
+                    accessible={false}
+                    name="sitemap"
+                    size={13}
+                    color={palette.onAccent}
+                  />
+                  <Text style={styles.savedAtlasButtonText}>Atlas</Text>
+                </Pressable>
+              ) : null}
+            </View>
             {savedSheetMutationError ? (
               <Text
                 accessibilityLabel={savedSheetMutationError}
@@ -1448,6 +1606,59 @@ const makeStyles = (c: Palette, insets: EdgeInsets) => StyleSheet.create({
   container: { backgroundColor: c.bg, flex: 1 },
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 40 + insets.bottom },
+  atlasScreen: { backgroundColor: c.bg, flex: 1, paddingTop: insets.top },
+  atlasHeader: {
+    alignItems: "flex-start",
+    borderBottomColor: c.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  atlasKicker: {
+    color: c.mint,
+    fontFamily: monoFont,
+    fontSize: 10,
+    letterSpacing: 1.6,
+  },
+  atlasTitle: {
+    color: c.text,
+    fontFamily: displayFont,
+    fontSize: 26,
+    fontWeight: "900",
+    marginTop: 2,
+  },
+  atlasClose: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  savedHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  savedAtlasButton: {
+    alignItems: "center",
+    backgroundColor: c.accent,
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 7,
+    justifyContent: "center",
+    marginBottom: 16,
+    minHeight: 44,
+    paddingHorizontal: 16,
+  },
+  savedAtlasButtonText: {
+    color: c.onAccent,
+    fontFamily: monoFont,
+    fontSize: 12,
+    fontWeight: "800",
+  },
 
   // ── Top Bar ──
   topBar: {

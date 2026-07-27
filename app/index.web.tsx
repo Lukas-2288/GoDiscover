@@ -24,7 +24,7 @@ import {
 } from "../lib/discovery/saveIntent";
 import { defaultDiscoveryProviders } from "../lib/discovery/loadDiscovery";
 import type { OrbitSeed } from "../components/web/map/SavedAtlas.web";
-import type { OrbitRecommendation } from "../components/web/map/orbitGraph";
+import type { OrbitRecommendation } from "../lib/discovery/orbitGraph";
 import type { ContentCategory, ResultItem } from "../types/content";
 import { supabase } from "../lib/supabase";
 import { bodyFont, displayFont, monoFont } from "../lib/typography";

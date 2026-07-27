@@ -2,9 +2,9 @@ import {
   createAtlasLayout,
   projectOrbit,
   type AtlasPosition,
-} from "../../../lib/discovery/mapLayout";
-import type { MapEdge, MapNode } from "../../../lib/storage/discoveryMap";
-import type { ContentCategory, ResultItem } from "../../../types/content";
+} from "./mapLayout";
+import type { MapEdge, MapNode } from "../storage/discoveryMap";
+import type { ContentCategory, ResultItem } from "../../types/content";
 
 const MAX_ORBIT_RECOMMENDATIONS = 8;
 

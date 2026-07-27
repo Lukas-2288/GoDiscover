@@ -2,7 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
-import type { AtlasArtworkData } from "./atlasGraph";
+import type { AtlasArtworkData } from "../../../lib/discovery/atlasGraph";
 import { thumbnailUrl } from "../../../lib/api/imageSizes";
 import { bodyFont, displayFont, monoFont } from "../../../lib/typography";
 

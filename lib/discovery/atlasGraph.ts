@@ -2,9 +2,9 @@ import {
   createAtlasLayout,
   resolveZoomDetail,
   type ZoomDetailMode,
-} from "../../../lib/discovery/mapLayout";
-import type { MapEdge, MapNode } from "../../../lib/storage/discoveryMap";
-import type { ContentCategory } from "../../../types/content";
+} from "./mapLayout";
+import type { MapEdge, MapNode } from "../storage/discoveryMap";
+import type { ContentCategory } from "../../types/content";
 
 export type AtlasArtworkShape = "cover" | "square" | "circle";
 

@@ -1,7 +1,7 @@
 import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
 
-import type { MapNode } from "../../../../lib/storage/discoveryMap";
+import type { MapNode } from "../../../lib/storage/discoveryMap";
 import { SavedAtlasList } from "../SavedAtlasList";
 
 const savedNodes: MapNode[] = [

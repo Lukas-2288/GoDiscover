@@ -1,4 +1,4 @@
-import type { MapEdge, MapNode } from "../../../../lib/storage/discoveryMap";
+import type { MapEdge, MapNode } from "../../storage/discoveryMap";
 import {
   buildAtlasFlowEdges,
   buildAtlasFlowNodes,

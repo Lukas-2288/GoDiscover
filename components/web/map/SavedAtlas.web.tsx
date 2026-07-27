@@ -27,18 +27,18 @@ import {
   findNearestAtlasNodeInDirection,
   findAtlasSearchMatch,
   type AtlasDirection,
-} from "./atlasGraph";
+} from "../../../lib/discovery/atlasGraph";
 import {
   buildOrbitGraph,
   recommendationNodeId,
   type OrbitRecommendation,
-} from "./orbitGraph";
+} from "../../../lib/discovery/orbitGraph";
 import {
   SavedAtlasEmpty,
   SavedAtlasHeader,
   type SavedAtlasView,
 } from "./SavedAtlasChrome";
-import { SavedAtlasList } from "./SavedAtlasList";
+import { SavedAtlasList } from "../../atlas/SavedAtlasList";
 import type { SaveIntent } from "../../../lib/discovery/saveIntent";
 import { bodyFont, displayFont, monoFont } from "../../../lib/typography";
 

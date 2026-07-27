@@ -5,7 +5,7 @@ import {
   recordMapTrailEvent,
 } from "../../../../lib/storage/discoveryMap";
 import type { SavedItem } from "../../../../lib/storage/saved";
-import { buildAtlasFlowEdges } from "../atlasGraph";
+import { buildAtlasFlowEdges } from "../../../../lib/discovery/atlasGraph";
 
 jest.mock("@react-native-async-storage/async-storage", () =>
   require("@react-native-async-storage/async-storage/jest/async-storage-mock")
