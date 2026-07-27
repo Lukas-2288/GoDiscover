@@ -1,4 +1,5 @@
 import type { MovieDetail, ResultItem } from '../../types/content';
+import { cachedRequest } from './requestCache';
 
 const API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY;
 const BASE_URL = 'https://api.themoviedb.org/3';
@@ -29,9 +30,20 @@ async function tmdb<T>(path: string, params: Record<string, string | number> = {
   const url = new URL(`${BASE_URL}${path}`);
   url.searchParams.set('api_key', requireKey());
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`TMDB ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  const cacheKey = `tmdb:${path}?${cacheableQuery(url)}`;
+  return cachedRequest(cacheKey, async () => {
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error(`TMDB ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
+  });
+}
+
+/** Cache key without the credential, so a rotated key does not miss. */
+function cacheableQuery(url: URL): string {
+  const params = new URLSearchParams(url.searchParams);
+  params.delete('api_key');
+  params.sort();
+  return params.toString();
 }
 
 export function posterUrl(path: string | null, size: 'w342' | 'w500' | 'original' = 'w500') {

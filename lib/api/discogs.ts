@@ -1,4 +1,5 @@
 import type { AlbumDetail, ArtistDetail, ResultItem } from '../../types/content';
+import { cachedRequest } from './requestCache';
 
 const TOKEN = process.env.EXPO_PUBLIC_DISCOGS_TOKEN;
 const API_BASE = 'https://api.discogs.com';
@@ -14,14 +15,16 @@ async function discogs<T>(
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
     .join('&');
   const url = qs ? `${API_BASE}${path}?${qs}` : `${API_BASE}${path}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Discogs token=${TOKEN}`,
-      'User-Agent': UA,
-    },
+  return cachedRequest(`discogs:${url}`, async () => {
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Discogs token=${TOKEN}`,
+        'User-Agent': UA,
+      },
+    });
+    if (!res.ok) throw new Error(`Discogs ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
   });
-  if (!res.ok) throw new Error(`Discogs ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
 }
 
 type SearchReleaseItem = {

@@ -1,4 +1,5 @@
 import type { BookDetail, ResultItem } from '../../types/content';
+import { cachedRequest } from './requestCache';
 
 const BASE_URL = 'https://openlibrary.org';
 const COVER_BASE = 'https://covers.openlibrary.org/b/id';
@@ -40,9 +41,11 @@ function workId(key: string): string {
 async function ol<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
   const url = new URL(`${BASE_URL}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`Open Library ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  return cachedRequest(`openlibrary:${url.pathname}?${url.searchParams.toString()}`, async () => {
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error(`Open Library ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
+  });
 }
 
 function toResultItem(doc: OLSearchDoc): ResultItem {
