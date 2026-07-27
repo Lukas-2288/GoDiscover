@@ -39,6 +39,16 @@ export type Palette = {
   tangerine: string;
   mint: string;
   lime: string;
+  /**
+   * Ink for text sitting on the light card face — cream in dark mode, white in
+   * light mode. Constant across both schemes precisely because the card face is
+   * light either way, so these must not be flipped with the rest of the theme.
+   */
+  ink: string;
+  inkSecondary: string;
+  inkMuted: string;
+  /** The discovery card's own background, which is light in both schemes. */
+  cardFace: string;
 };
 
 export const darkPalette: Palette = {
@@ -75,6 +85,10 @@ export const darkPalette: Palette = {
   tangerine: '#FF8A5B',
   mint: '#B6F0D2',
   lime: '#D7F36A',
+  ink: '#171225',
+  inkSecondary: '#4A4057',
+  inkMuted: '#645A72',
+  cardFace: '#F4F1EA',
 };
 
 export const lightPalette: Palette = {
@@ -112,6 +126,10 @@ export const lightPalette: Palette = {
   tangerine: '#B4491F',
   mint: '#187A3D',
   lime: '#D7F36A',
+  ink: '#171225',
+  inkSecondary: '#4A4057',
+  inkMuted: '#645A72',
+  cardFace: '#FFFFFF',
 };
 
 const STORAGE_KEY = 'godiscover:theme-mode:v1';

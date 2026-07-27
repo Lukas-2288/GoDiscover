@@ -74,6 +74,36 @@ describe("shared design tokens", () => {
   });
 });
 
+describe("the discovery card face", () => {
+  // The card is light in both schemes — cream on the violet ground, white on
+  // the cream ground — so its ink must NOT flip with the rest of the theme.
+  // Reading `palette.text` here would paint white-on-cream in dark mode.
+  it("keeps one set of ink colours across both schemes", () => {
+    expect(darkPalette.ink).toBe(lightPalette.ink);
+    expect(darkPalette.inkSecondary).toBe(lightPalette.inkSecondary);
+    expect(darkPalette.inkMuted).toBe(lightPalette.inkMuted);
+  });
+
+  it.each([
+    ["dark", darkPalette],
+    ["light", lightPalette],
+  ])("keeps card ink legible on the %s card face", (_name, palette: Palette) => {
+    expect(contrast(palette.ink, palette.cardFace)).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrast(palette.inkSecondary, palette.cardFace)
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(palette.inkMuted, palette.cardFace)).toBeGreaterThanOrEqual(
+      4.5
+    );
+  });
+
+  it("keeps the card readable against the page behind it", () => {
+    for (const palette of [darkPalette, lightPalette]) {
+      expect(contrast(palette.cardFace, palette.bg)).toBeGreaterThan(1.1);
+    }
+  });
+});
+
 describe("typography", () => {
   // The three names the styles used to ask for were never loaded anywhere, so
   // they silently fell back to system sans. Nothing should reintroduce them.

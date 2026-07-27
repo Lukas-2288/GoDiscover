@@ -1,6 +1,7 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { Palette } from "../../lib/theme";
+import { displayFont, monoFont } from "../../lib/typography";
 
 export type DiscoveryStatusCardProps =
   | { kind: "loading"; label: string; palette: Palette; reducedMotion: boolean }
@@ -141,13 +142,15 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   label: {
-    fontSize: 18,
+    fontFamily: displayFont,
+    fontSize: 20,
     fontWeight: "700",
     lineHeight: 25,
     textAlign: "center",
   },
   hint: {
-    fontSize: 13,
+    fontFamily: monoFont,
+    fontSize: 11,
     lineHeight: 19,
     marginTop: -8,
     textAlign: "center",
@@ -162,7 +165,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   actionLabel: {
-    fontSize: 15,
+    fontFamily: monoFont,
+    fontSize: 13,
     fontWeight: "800",
   },
 });

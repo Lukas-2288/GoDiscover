@@ -70,6 +70,7 @@ import {
 import { SIMILAR_TIER_LABELS } from "../lib/discovery/similarTiers";
 import { SAVE_INTENT_LABELS } from "../lib/discovery/saveIntent";
 import { thumbnailUrl } from "../lib/api/imageSizes";
+import { displayFont, monoFont } from "../lib/typography";
 
 /** The deck's copy reads better in the singular: "the next movie", not "movies". */
 function singularFor(category: ContentCategory): string {
@@ -1450,7 +1451,7 @@ const makeStyles = (c: Palette, insets: EdgeInsets) => StyleSheet.create({
     justifyContent: "center",
     width: 44,
   },
-  logoText: { color: c.accent, fontSize: 20, fontWeight: "700", letterSpacing: 0.5 },
+  logoText: { color: c.accent, fontFamily: monoFont, fontSize: 16, fontWeight: "700", letterSpacing: 1.4 },
 
   // ── Discovery ──
   discoveryContent: {
@@ -1507,7 +1508,7 @@ const makeStyles = (c: Palette, insets: EdgeInsets) => StyleSheet.create({
     maxHeight: "85%",
     minHeight: "55%",
   },
-  savedTitle: { color: c.text, fontSize: 22, fontWeight: "700", marginBottom: 16 },
+  savedTitle: { color: c.text, fontFamily: displayFont, fontSize: 26, fontWeight: "900", marginBottom: 16 },
   savedMutationError: {
     backgroundColor: c.surfaceAlt,
     borderColor: c.danger,

@@ -15,6 +15,7 @@ import {
   type CategoryPattern,
 } from "../../lib/discovery/categoryThemes";
 import type { Palette } from "../../lib/theme";
+import { displayFont, monoFont } from "../../lib/typography";
 import type { ContentCategory, ResultItem } from "../../types/content";
 
 export type DiscoveryCardHandle = {
@@ -130,7 +131,7 @@ export const DiscoveryCard = forwardRef<DiscoveryCardHandle, DiscoveryCardProps>
         style={({ pressed }) => [
           styles.card,
           {
-            backgroundColor: palette.surface,
+            backgroundColor: palette.cardFace,
             borderColor: active ? theme.accent : palette.border,
             opacity: pressed ? 0.94 : 1,
           },
@@ -207,10 +208,10 @@ export const DiscoveryCard = forwardRef<DiscoveryCardHandle, DiscoveryCardProps>
         </View>
 
         <View style={styles.copy}>
-          <Text style={[styles.title, { color: palette.text }]}>{item.title}</Text>
-          <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{item.subtitle}</Text>
+          <Text style={[styles.title, { color: palette.ink }]}>{item.title}</Text>
+          <Text style={[styles.subtitle, { color: palette.inkSecondary }]}>{item.subtitle}</Text>
           {item.meta ? (
-            <Text style={[styles.meta, { color: palette.textMuted }]}>{item.meta}</Text>
+            <Text style={[styles.meta, { color: palette.inkMuted }]}>{item.meta}</Text>
           ) : null}
         </View>
       </Pressable>
@@ -308,7 +309,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   badgeText: {
-    fontSize: 11,
+    fontFamily: monoFont,
+    fontSize: 10,
     fontWeight: "900",
     letterSpacing: 0.8,
   },
@@ -332,7 +334,8 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   fallbackText: {
-    fontSize: 16,
+    fontFamily: monoFont,
+    fontSize: 14,
     fontWeight: "800",
     letterSpacing: 1.2,
     textTransform: "uppercase",
@@ -354,7 +357,8 @@ const styles = StyleSheet.create({
     transform: [{ rotate: "-7deg" }],
   },
   swipeCueText: {
-    fontSize: 22,
+    fontFamily: monoFont,
+    fontSize: 20,
     fontWeight: "900",
     letterSpacing: 1.4,
   },
@@ -364,6 +368,7 @@ const styles = StyleSheet.create({
     paddingRight: 44,
   },
   title: {
+    fontFamily: displayFont,
     fontSize: 27,
     fontWeight: "900",
     letterSpacing: -0.5,
@@ -375,7 +380,8 @@ const styles = StyleSheet.create({
     lineHeight: 23,
   },
   meta: {
-    fontSize: 14,
+    fontFamily: monoFont,
+    fontSize: 12,
     fontWeight: "600",
     lineHeight: 20,
   },

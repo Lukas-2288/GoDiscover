@@ -21,6 +21,7 @@ import {
 import type { ContentDetail } from "../../lib/discovery/loadDetail";
 import { getMotionSpec } from "../../lib/discovery/motion";
 import type { Palette } from "../../lib/theme";
+import { monoFont } from "../../lib/typography";
 import type { ContentCategory, ResultItem } from "../../types/content";
 
 export type DetailSelection = {
@@ -730,7 +731,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     flexShrink: 1,
-    fontFamily: "SpaceMono",
+    fontFamily: monoFont,
     fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.7,
@@ -765,7 +766,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   heroFallbackText: {
-    fontFamily: "SpaceMono",
+    fontFamily: monoFont,
     fontSize: 13,
     fontWeight: "700",
     textAlign: "center",
@@ -811,7 +812,7 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     flexShrink: 1,
-    fontFamily: "SpaceMono",
+    fontFamily: monoFont,
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 0.8,
