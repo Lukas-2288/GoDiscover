@@ -4,6 +4,61 @@ Newest entries first. Format is defined in `AGENTS.md`.
 
 <!-- Entries appended below -->
 
+## 2026-07-27 — Performance: measured first, then three changes
+
+**Did:** Asked to improve speed. Measured before touching anything, which is
+what made the priorities obvious.
+
+**Baseline:** web bundle 2.57 MB raw / 634 KB gzipped. Source-map attribution by
+package: react-native-web 734 KB, reanimated 693 KB, react-dom 512 KB,
+expo-router 444 KB, @supabase/* ~714 KB, @xyflow + d3 ~450 KB. Load timings via
+headless Chrome at 9 Mbps / 40ms RTT / 4× CPU, cold cache: FCP ~4.5 s with
+~2.8 s of that JS download.
+
+- **Deferred the Saved Atlas.** React Flow and d3 are only needed on the map,
+  but the app lands on the archive. Verified Metro actually emits dynamic
+  imports as chunks *before* relying on it. Entry 2.57 MB → 2.26 MB, 634 KB →
+  549 KB gzipped, with a 314 KB chunk fetched on demand. The lazy boundary sits
+  in its own module (`SavedAtlasLoader.web.tsx`) so the web suite can substitute
+  it synchronously — otherwise all 34 renders in `index.web.test.tsx` would have
+  needed to await a lazy resolution.
+- **Right-sized thumbnails.** `ResultItem` carries one `imageUrl` sized for the
+  deck card (~470px). Every smaller slot reused it: the atlas list renders 40×58,
+  recents 150×112, atlas nodes ≤96×144, native saved sheet 48×48 — all pulling a
+  500px poster. `sizedImageUrl()` maps TMDB w500/original → w185 and Open Library
+  -L → -M; unrecognised hosts pass through, since a broken image beats an
+  oversized one.
+- **Cached and deduplicated provider requests.** There was no caching at all.
+  All three adapters funnel through one helper each, so a single wrapper covers
+  them: 5-minute TTL plus in-flight deduplication. Failures are not cached,
+  entries are bounded at 120, and the TMDB key is stripped from the cache key.
+
+**Measured result:** FCP median 4524 → 4284 ms under identical throttled
+conditions. Atlas verified still working from its chunk.
+
+**Why:** User asked for speed while asleep. Chose measurable, contained wins
+over speculative ones.
+
+**Files:** `components/web/map/SavedAtlasLoader.web.tsx`, `lib/api/imageSizes.ts`,
+`lib/api/requestCache.ts`, the three API adapters, and the thumbnail call sites.
+
+**Follow-ups:**
+
+- **Biggest remaining lever is Supabase, ~714 KB of source.** `realtime-js`,
+  `storage-js` and `phoenix` (~233 KB) look entirely unused — the app uses auth
+  and two tables. Dropping them means bypassing `@supabase/supabase-js` and
+  composing `auth-js` + `postgrest-js` directly. I did not attempt it: it is the
+  dependency that owns user accounts and session refresh, and that is not a
+  change to make unsupervised. Wanted a human call.
+- **The design fonts are never loaded.** "Bricolage Grotesque", "IBM Plex Mono"
+  and "DM Sans" are referenced throughout the web styles but there is no
+  `@font-face` or font link anywhere, so everything falls back to system fonts —
+  which is why headings render serif. Adding them would make the site look right
+  and load slower; worth a deliberate decision either way.
+- Image byte savings are inferred from pixel dimensions, not measured — no
+  outbound network to TMDB here. The rewrite reaching the DOM *was* verified.
+- The request cache is unit-verified only, for the same reason.
+
 ## 2026-07-27 — Overnight: integration tests, a damping hazard, and the website UI
 
 **Did:** Continued unsupervised after the seven fixes landed. Two things found by
