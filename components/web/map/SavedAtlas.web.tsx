@@ -40,6 +40,7 @@ import {
 } from "./SavedAtlasChrome";
 import { SavedAtlasList } from "./SavedAtlasList";
 import type { SaveIntent } from "../../../lib/discovery/saveIntent";
+import { bodyFont, displayFont, monoFont } from "../../../lib/typography";
 
 const nodeTypes: NodeTypes = { artwork: AtlasArtworkNode };
 
@@ -568,23 +569,23 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   orbitPanel: { backgroundColor: "rgba(33, 27, 42, 0.96)", borderColor: "rgba(244, 241, 234, 0.18)", borderRadius: 8, borderWidth: 1, maxWidth: 390, padding: 15, position: "absolute", right: 20, top: 18, width: "42%" as any },
-  orbitKicker: { color: "#D7F36A", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1.4 },
-  orbitTitle: { color: "#F4F1EA", fontFamily: "Bricolage Grotesque", fontSize: 21, fontWeight: "900", marginTop: 4 },
+  orbitKicker: { color: "#D7F36A", fontFamily: monoFont, fontSize: 9, letterSpacing: 1.4 },
+  orbitTitle: { color: "#F4F1EA", fontFamily: displayFont, fontSize: 21, fontWeight: "900", marginTop: 4 },
   orbitActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
   orbitButton: { alignItems: "center", borderColor: "rgba(244, 241, 234, 0.22)", borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 11 },
   orbitPrimary: { backgroundColor: "#D7F36A", borderColor: "#D7F36A" },
-  orbitButtonText: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 12, fontWeight: "800" },
-  orbitPrimaryText: { color: "#15111F", fontFamily: "DM Sans", fontSize: 12, fontWeight: "900" },
+  orbitButtonText: { color: "#F4F1EA", fontFamily: bodyFont, fontSize: 12, fontWeight: "800" },
+  orbitPrimaryText: { color: "#15111F", fontFamily: bodyFont, fontSize: 12, fontWeight: "900" },
   orbitError: { borderTopColor: "rgba(244, 241, 234, 0.13)", borderTopWidth: 1, marginTop: 12, paddingTop: 11 },
-  orbitErrorText: { color: "#F4C7A1", fontFamily: "DM Sans", fontSize: 12 },
+  orbitErrorText: { color: "#F4C7A1", fontFamily: bodyFont, fontSize: 12 },
   retryButton: { justifyContent: "center", minHeight: 44 },
-  retryText: { color: "#D7F36A", fontFamily: "DM Sans", fontSize: 12, fontWeight: "900", marginTop: 7 },
+  retryText: { color: "#D7F36A", fontFamily: bodyFont, fontSize: 12, fontWeight: "900", marginTop: 7 },
   recommendationRow: { alignItems: "center", borderTopColor: "rgba(244, 241, 234, 0.12)", borderTopWidth: 1, flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 11, paddingTop: 11 },
   recommendationCopy: { flexGrow: 1, minWidth: 150 },
-  recommendationTitle: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" },
-  recommendationReason: { color: "#A59EAE", fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 3 },
+  recommendationTitle: { color: "#F4F1EA", fontFamily: bodyFont, fontSize: 13, fontWeight: "900" },
+  recommendationReason: { color: "#A59EAE", fontFamily: monoFont, fontSize: 9, marginTop: 3 },
   recommendationAction: { borderColor: "rgba(244, 241, 234, 0.2)", borderRadius: 4, borderWidth: 1, minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
   recommendationSave: { backgroundColor: "#7C5CFC", borderColor: "#7C5CFC" },
-  recommendationSaveText: { color: "#F4F1EA", fontFamily: "DM Sans", fontSize: 11, fontWeight: "900" },
-  recommendationSkipText: { color: "#D7D1DC", fontFamily: "DM Sans", fontSize: 11, fontWeight: "800" },
+  recommendationSaveText: { color: "#F4F1EA", fontFamily: bodyFont, fontSize: 11, fontWeight: "900" },
+  recommendationSkipText: { color: "#D7D1DC", fontFamily: bodyFont, fontSize: 11, fontWeight: "800" },
 });

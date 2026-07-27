@@ -4,6 +4,7 @@ import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
 import type { AtlasArtworkData } from "./atlasGraph";
 import { thumbnailUrl } from "../../../lib/api/imageSizes";
+import { bodyFont, displayFont, monoFont } from "../../../lib/typography";
 
 export type AtlasArtworkNodeDefinition = Node<
   AtlasArtworkData,
@@ -149,13 +150,13 @@ const styles = StyleSheet.create({
   },
   fallbackCategory: {
     color: "#91899B",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 7,
     letterSpacing: 1.2,
   },
   fallbackTitle: {
     color: "#F4F1EA",
-    fontFamily: "Bricolage Grotesque",
+    fontFamily: displayFont,
     fontSize: 15,
     fontWeight: "900",
     lineHeight: 16,
@@ -173,7 +174,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(21, 17, 31, 0.84)",
     bottom: 6,
     color: "#D7D1DC",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 7,
     left: 6,
     letterSpacing: 0.8,
@@ -194,7 +195,7 @@ const styles = StyleSheet.create({
   },
   summary: {
     color: "#B9B2C1",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 9,
     left: 0,
     position: "absolute",
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: "#F4F1EA",
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     fontSize: 11,
     fontWeight: "800",
     lineHeight: 14,
@@ -219,13 +220,13 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: "#AAA3B2",
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     fontSize: 9,
     marginTop: 2,
   },
   meta: {
     color: "#85808D",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 7,
     marginTop: 3,
   },

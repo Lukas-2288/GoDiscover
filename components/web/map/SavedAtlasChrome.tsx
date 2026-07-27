@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { bodyFont, displayFont, monoFont } from "../../../lib/typography";
 
 export type SavedAtlasView = "map" | "list";
 
@@ -119,13 +120,13 @@ const styles = StyleSheet.create({
   heading: { minWidth: 220 },
   kicker: {
     color: "#958E9F",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 9,
     letterSpacing: 1.6,
   },
   title: {
     color: "#F4F1EA",
-    fontFamily: "Bricolage Grotesque",
+    fontFamily: displayFont,
     fontSize: 31,
     fontWeight: "900",
     letterSpacing: -0.6,
@@ -134,7 +135,7 @@ const styles = StyleSheet.create({
   titleCompact: { fontSize: 22 },
   count: {
     color: "#9B94A4",
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     fontSize: 12,
     marginTop: 3,
   },
@@ -157,14 +158,14 @@ const styles = StyleSheet.create({
   },
   searchGlyph: {
     color: "#958E9F",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 18,
     marginRight: 7,
   },
   search: {
     color: "#F4F1EA",
     flex: 1,
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     // Anything under 16px makes iOS Safari zoom the page on focus, and the
     // viewport meta's shrink-to-fit=no leaves the user stuck zoomed in.
     fontSize: 16,
@@ -193,7 +194,7 @@ const styles = StyleSheet.create({
   viewOptionSelected: { backgroundColor: "#F4F1EA" },
   viewOptionText: {
     color: "#9B94A4",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 10,
   },
   viewOptionTextSelected: { color: "#15111F", fontWeight: "700" },
@@ -242,20 +243,20 @@ const styles = StyleSheet.create({
   },
   exampleLetter: {
     color: "#C9C3D0",
-    fontFamily: "Bricolage Grotesque",
+    fontFamily: displayFont,
     fontSize: 22,
     fontWeight: "800",
   },
   emptyKicker: {
     color: "#D7F36A",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 9,
     letterSpacing: 1.5,
     textTransform: "uppercase",
   },
   emptyTitle: {
     color: "#F4F1EA",
-    fontFamily: "Bricolage Grotesque",
+    fontFamily: displayFont,
     fontSize: 28,
     fontWeight: "900",
     lineHeight: 32,
@@ -264,7 +265,7 @@ const styles = StyleSheet.create({
   },
   emptyCopy: {
     color: "#A59EAE",
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     fontSize: 14,
     lineHeight: 21,
     marginTop: 12,
@@ -281,7 +282,7 @@ const styles = StyleSheet.create({
   },
   startButtonText: {
     color: "#15111F",
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     fontSize: 13,
     fontWeight: "800",
   },

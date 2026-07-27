@@ -3,6 +3,7 @@ import { Text, View } from "react-native";
 
 import { webPalette } from "../WebHomeScreen";
 import type { SavedAtlasProps } from "./SavedAtlas.web";
+import { monoFont } from "../../../lib/typography";
 
 /**
  * Defers the Saved Atlas — and with it React Flow and d3 — until the map is
@@ -36,7 +37,7 @@ export function SavedAtlasLoader(props: SavedAtlasProps) {
           <Text
             style={{
               color: webPalette.muted,
-              fontFamily: "IBM Plex Mono",
+              fontFamily: monoFont,
               fontSize: 10,
               letterSpacing: 1.5,
             }}

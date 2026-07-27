@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { MapNode } from "../../../lib/storage/discoveryMap";
 import type { ContentCategory } from "../../../types/content";
 import { thumbnailUrl } from "../../../lib/api/imageSizes";
+import { bodyFont, displayFont, monoFont } from "../../../lib/typography";
 
 const CATEGORY_ORDER: readonly ContentCategory[] = [
   "movies",
@@ -146,13 +147,13 @@ const styles = StyleSheet.create({
   categoryMark: { borderRadius: 999, height: 7, width: 7 },
   sectionTitle: {
     color: "#F4F1EA",
-    fontFamily: "Bricolage Grotesque",
+    fontFamily: displayFont,
     fontSize: 21,
     fontWeight: "800",
   },
   count: {
     color: "#8E8799",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 10,
     marginLeft: "auto",
   },
@@ -194,33 +195,33 @@ const styles = StyleSheet.create({
   },
   fallbackLetter: {
     color: "#F4F1EA",
-    fontFamily: "Bricolage Grotesque",
+    fontFamily: displayFont,
     fontSize: 20,
     fontWeight: "800",
   },
   copy: { flex: 1, minWidth: 0 },
   title: {
     color: "#F4F1EA",
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     fontSize: 15,
     fontWeight: "800",
   },
   subtitle: {
     color: "#A59EAE",
-    fontFamily: "DM Sans",
+    fontFamily: bodyFont,
     fontSize: 12,
     marginTop: 4,
   },
   meta: {
     color: "#8E8799",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 9,
     maxWidth: 210,
     textAlign: "right",
   },
   arrow: {
     color: "#8E8799",
-    fontFamily: "IBM Plex Mono",
+    fontFamily: monoFont,
     fontSize: 15,
   },
   arrowSelected: { color: "#D7F36A" },

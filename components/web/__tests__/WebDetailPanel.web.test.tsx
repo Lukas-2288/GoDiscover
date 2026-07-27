@@ -35,9 +35,23 @@ jest.mock("react-native", () => {
     React.createElement(tag, { ...mapProps(props), ref })
   );
   return {
+    // `lib/typography` resolves the font stack through Platform.select at
+    // module load, so this mock has to answer it or the import throws before a
+    // single test runs.
+    Platform: {
+      OS: "web",
+      select: (options: Record<string, unknown>) =>
+        options.web ?? options.default,
+    },
     Pressable: primitive("button"),
     ScrollView: primitive("div"),
-    StyleSheet: { create: (styles: unknown) => styles },
+    StyleSheet: {
+      create: (styles: unknown) => styles,
+      flatten: (style: unknown) =>
+        Array.isArray(style)
+          ? Object.assign({}, ...style.filter(Boolean))
+          : style,
+    },
     Text: primitive("span"),
     View: primitive("div"),
     useWindowDimensions: () => ({ width: 390, height: 844 }),

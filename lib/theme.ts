@@ -28,62 +28,90 @@ export type Palette = {
   success: string;
   warning: string;
   danger: string;
+  /**
+   * The arcade accents, named rather than numbered because the design uses them
+   * by name. `cream` is the card face — note this is *not* `surface`, which is
+   * the dark panel behind it; the two were easy to confuse when the web and
+   * native palettes were separate files.
+   */
+  cream: string;
+  violet: string;
+  tangerine: string;
+  mint: string;
+  lime: string;
 };
 
 export const darkPalette: Palette = {
   isDark: true,
-  bg: '#0a0a0a',
-  surface: '#141414',
+  bg: '#15111F',
+  surface: '#241B35',
   surfaceAlt: 'rgba(255,255,255,0.05)',
-  surfaceAltStrong: 'rgba(255,255,255,0.08)',
-  topBar: 'rgba(18,18,18,0.95)',
-  overlay: 'rgba(0,0,0,0.7)',
+  surfaceAltStrong: 'rgba(255,255,255,0.09)',
+  topBar: 'rgba(21,17,31,0.95)',
+  overlay: 'rgba(10,7,17,0.72)',
   pillDark: 'rgba(0,0,0,0.55)',
-  text: '#ffffff',
-  textSecondary: 'rgba(255,255,255,0.8)',
-  textMuted: 'rgba(255,255,255,0.55)',
-  textFaint: 'rgba(255,255,255,0.3)',
-  border: 'rgba(255,255,255,0.1)',
-  borderStrong: 'rgba(255,255,255,0.25)',
-  accent: '#9a4dff',
-  accentDeep: '#6a2fb3',
-  accentBgSoft: 'rgba(154,77,255,0.1)',
-  accentBgMed: 'rgba(154,77,255,0.2)',
-  accentBorder: 'rgba(154,77,255,0.35)',
-  onAccent: '#ffffff',
-  gradientMid: 'rgba(20,20,20,0.75)',
-  focus: '#B783FF',
-  success: '#4CD97B',
-  warning: '#FFD166',
+  text: '#F9F5EF',
+  textSecondary: 'rgba(249,245,239,0.8)',
+  textMuted: '#B8AFC7',
+  textFaint: 'rgba(249,245,239,0.34)',
+  border: 'rgba(255,255,255,0.16)',
+  borderStrong: 'rgba(255,255,255,0.32)',
+  // `accent` is used both as a fill (with `onAccent` on top) and as a
+  // foreground for icons and links, so it has to clear AA against `bg` either
+  // way. Lime manages 14.95:1 on the violet ground in both directions.
+  accent: '#D7F36A',
+  accentDeep: '#A8C43F',
+  accentBgSoft: 'rgba(215,243,106,0.12)',
+  accentBgMed: 'rgba(215,243,106,0.22)',
+  accentBorder: 'rgba(215,243,106,0.38)',
+  onAccent: '#15111F',
+  gradientMid: 'rgba(21,17,31,0.75)',
+  focus: '#B6F0D2',
+  success: '#B6F0D2',
+  warning: '#FF8A5B',
   danger: '#FF6B7A',
+  cream: '#F4F1EA',
+  violet: '#7C5CFC',
+  tangerine: '#FF8A5B',
+  mint: '#B6F0D2',
+  lime: '#D7F36A',
 };
 
 export const lightPalette: Palette = {
   isDark: false,
-  bg: '#f5f5f7',
-  surface: '#ffffff',
-  surfaceAlt: 'rgba(0,0,0,0.04)',
-  surfaceAltStrong: 'rgba(0,0,0,0.08)',
-  topBar: 'rgba(245,245,247,0.95)',
-  overlay: 'rgba(0,0,0,0.45)',
-  pillDark: 'rgba(0,0,0,0.55)',
-  text: '#0a0a0a',
-  textSecondary: 'rgba(0,0,0,0.78)',
-  textMuted: 'rgba(0,0,0,0.55)',
-  textFaint: 'rgba(0,0,0,0.35)',
-  border: 'rgba(0,0,0,0.12)',
-  borderStrong: 'rgba(0,0,0,0.3)',
-  accent: '#7b3bd4',
-  accentDeep: '#5a2ba0',
-  accentBgSoft: 'rgba(123,59,212,0.1)',
-  accentBgMed: 'rgba(123,59,212,0.2)',
-  accentBorder: 'rgba(123,59,212,0.35)',
-  onAccent: '#ffffff',
-  gradientMid: 'rgba(245,245,247,0.75)',
-  focus: '#6D28D9',
+  bg: '#F4F1EA',
+  surface: '#FFFFFF',
+  surfaceAlt: 'rgba(21,17,31,0.04)',
+  surfaceAltStrong: 'rgba(21,17,31,0.09)',
+  topBar: 'rgba(244,241,234,0.95)',
+  overlay: 'rgba(21,17,31,0.45)',
+  pillDark: 'rgba(21,17,31,0.55)',
+  text: '#15111F',
+  textSecondary: 'rgba(21,17,31,0.78)',
+  textMuted: '#5A5168',
+  textFaint: 'rgba(21,17,31,0.35)',
+  border: 'rgba(21,17,31,0.12)',
+  borderStrong: 'rgba(21,17,31,0.3)',
+  // Lime cannot be the light-mode accent: it manages 1.4:1 on cream, so every
+  // icon drawn in it would vanish. Violet clears 6.49:1 and keeps lime
+  // available as a fill, where dark text sits on top of it.
+  accent: '#5B2BE0',
+  accentDeep: '#43199F',
+  accentBgSoft: 'rgba(91,43,224,0.1)',
+  accentBgMed: 'rgba(91,43,224,0.2)',
+  accentBorder: 'rgba(91,43,224,0.35)',
+  onAccent: '#FFFFFF',
+  gradientMid: 'rgba(244,241,234,0.75)',
+  focus: '#43199F',
   success: '#187A3D',
   warning: '#8A5A00',
   danger: '#B42335',
+  cream: '#F4F1EA',
+  violet: '#5B2BE0',
+  // The dark-mode tangerine only reaches 2.3:1 on cream; this one clears AA.
+  tangerine: '#B4491F',
+  mint: '#187A3D',
+  lime: '#D7F36A',
 };
 
 const STORAGE_KEY = 'godiscover:theme-mode:v1';
