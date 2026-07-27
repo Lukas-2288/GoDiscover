@@ -4,6 +4,77 @@ Newest entries first. Format is defined in `AGENTS.md`.
 
 <!-- Entries appended below -->
 
+## 2026-07-26 — Discovery quality: deck memory, depth, undo, accent blue
+
+**Did:** Seven issues the user hit while using the site. Three shared one root —
+**the deck had no memory and no depth**. Every provider ended in `.slice(0, 5)`,
+nothing refilled the queue, and `grep` for `exclude|seen|rejected` across `lib/`
+returned no hits.
+
+- **Deck ran dry after ~5 skips.** `DeckState` gained a cursor; the controller
+  tops up in the background at two cards remaining. Crucially `exhausted` is set
+  only when a top-up actually returns nothing — an empty queue previously could
+  not be distinguished from "nobody asked for more yet". Two traps found by the
+  suite: a persistently failing provider retried forever (the failure cleared
+  `toppingUp`, re-arming the condition that started it → `topUpBlocked`), and
+  AsyncStorage leaked rejections between tests.
+- **"Not for me" did nothing.** `skipCurrent` popped the card and recorded
+  nothing, so the next randomize hit `popularity.desc` and returned the same
+  blockbusters. New `lib/storage/rejections.ts`: the item never returns, and a
+  trait rejected past a threshold inside a window stops being offered, capped so
+  a category can still fill a deck. TMDB takes it as `without_genres`; elsewhere
+  a post-filter. Search and Similar are exempt by design.
+- **Artists/Albums skewed 80s–90s.** `randomAlbums`/`randomArtists` passed **no
+  `year` at all**, leaving ordering to Discogs — a vinyl-collector catalogue.
+  `randomArtists` was worse: it parses artist names out of master-release
+  titles, inheriting the skew directly. Both now pick a weighted decade window.
+- **Similar repeated itself.** It asked for page 1 and took the top ten, every
+  time. New `similarTiers.ts` ladder: close → adjacent → loose → wander, each
+  paged before falling through, rung shown on the card, and an honest terminal
+  message instead of looping.
+- **Saving produced near-clones.** Provider-native similars score 0.9 vs
+  0.66–0.68 for traits, so they took every orbit slot. Both surfaces now offer
+  "More like this" / "Something different", remembered per category.
+- **No undo for a mis-tap.** `undoSkip` reuses the existing `restore()`, and
+  deletes the rejection — otherwise the card returns while its exclusion keeps
+  steering.
+- **The blue.** There was none in `webPalette`; it was four unrelated
+  `CATEGORY_THEMES[*].secondary` values. Measured: `#0095D8` is 5.52:1 on dark
+  but 2.96:1 on the cream card; `#006FA3` is 5.52:1 on white and 4.90:1 on cream
+  but 3.36:1 on dark. Neither works alone, so it is a light/dark pair with the
+  contrast floors asserted per surface.
+
+**Why:** User-reported issues after using the deployed site. Decisions taken:
+seamless top-up, exclude *and* damp, persist per account, use both blues.
+
+**Files:** `lib/storage/{rejections,owner}.ts`,
+`lib/discovery/{similarTiers,saveIntent,deckState,loadDiscovery,categoryThemes}.ts`,
+`lib/api/{tmdb,openlibrary,discogs}.ts`, `types/content.ts`,
+`components/discovery/{useDiscoveryController,UndoNotice,DetailSheet,DiscoveryCard}`,
+`components/web/map/SavedAtlas.web.tsx`, `app/index.tsx`, `app/index.web.tsx`.
+
+**Verification:** 344 tests / 343 passing, typecheck clean, web+iOS+Android
+exports pass, browser matrix 12/12.
+
+**Correction to the entry below:** I recorded the native "Similar to Arrival"
+reset failure as a real bug. It was not. Instrumenting it showed the label does
+clear; the test asserted through a promise chain not flushed inside `act()`, so
+`waitFor` polled a tree that had not re-rendered. Fixed, and that suite is green.
+
+**Follow-ups:**
+
+- `mapLayout`'s 200-node settle budget is the only failing test: asserts <750 ms,
+  takes ~1620 ms in this container against 701 ms on the user's Mac. Hardware,
+  not regression. Left alone rather than loosened.
+- Genre damping depends on `ResultItem.traits`, which providers fill only where
+  the API gives it away. Open Library subject matching is exact-after-normalise
+  via an alias table, so it under-tags rather than mis-tags; the alias list is
+  worth extending as real subjects are observed.
+- The era spread was reasoned structurally, not verified against the live
+  Discogs API — no token in this environment. Worth eyeballing once deployed.
+
+---
+
 ## 2026-07-26 — All three Saved Atlas residual blockers closed
 
 **Did:** Closed residual blockers 1 and 2 after the user chose to proceed from
