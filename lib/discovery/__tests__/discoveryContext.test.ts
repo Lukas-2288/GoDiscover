@@ -97,6 +97,39 @@ describe("discovery load context", () => {
     expect(loaded.map((entry) => entry.id)).toEqual(["iron-man"]);
   });
 
+  // Damping is a preference, not a filter. In a category where nearly
+  // everything carries the same genre, enforcing it absolutely would empty the
+  // deck after three rejections — reintroducing the dead end by another route.
+  it("yields the damped trait rather than returning nothing at all", () => {
+    const allOneGenre = [item("a", ["Fiction"]), item("b", ["Fiction"])];
+    const filtered = applyDiscoveryContext(
+      allOneGenre,
+      { dampedTraits: ["Fiction"] },
+      { dampTraits: true }
+    );
+    expect(filtered.map((entry) => entry.id)).toEqual(["a", "b"]);
+  });
+
+  it("still hides rejected items even when damping has to yield", () => {
+    const allOneGenre = [item("a", ["Fiction"]), item("b", ["Fiction"])];
+    const filtered = applyDiscoveryContext(
+      allOneGenre,
+      { dampedTraits: ["Fiction"], rejectedIds: new Set(["a"]) },
+      { dampTraits: true }
+    );
+    expect(filtered.map((entry) => entry.id)).toEqual(["b"]);
+  });
+
+  it("prefers undamped items whenever any exist", () => {
+    const mixed = [item("action", ["Action"]), item("doc", ["Documentary"])];
+    const filtered = applyDiscoveryContext(
+      mixed,
+      { dampedTraits: ["Action"] },
+      { dampTraits: true }
+    );
+    expect(filtered.map((entry) => entry.id)).toEqual(["doc"]);
+  });
+
   it("leaves untagged items alone", () => {
     const filtered = applyDiscoveryContext(
       [item("no-traits"), item("action", ["Action"])],

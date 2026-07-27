@@ -217,20 +217,51 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
  * providers whose API cannot express exclusion — anything carrying a damped
  * trait. Search is exempt from trait damping: an explicit query outranks a
  * standing preference, and silently hiding matches would look broken.
+ *
+ * Damping is a preference, not a filter, so it yields when it would leave
+ * nothing. A category where most items share one genre — books tagged only
+ * "Fiction", say — would otherwise go completely dark after three rejections,
+ * which is the dead end this whole change set exists to remove. Rejected and
+ * already-present items are always excluded; those are facts, not preferences.
  */
 export function applyDiscoveryContext(
   items: readonly ResultItem[],
   context: DiscoveryLoadContext,
   { dampTraits }: { dampTraits: boolean }
 ): ResultItem[] {
+  const alwaysExcluded = (item: ResultItem) =>
+    Boolean(context.rejectedIds?.has(item.id) || context.presentIds?.has(item.id));
+
+  const available = items.filter((item) => !alwaysExcluded(item));
   const damped = dampTraits ? new Set(context.dampedTraits ?? []) : null;
-  return items.filter((item) => {
-    if (context.rejectedIds?.has(item.id)) return false;
-    if (context.presentIds?.has(item.id)) return false;
-    if (damped?.size && item.traits?.some((trait) => damped.has(trait))) {
-      return false;
-    }
-    return true;
+  if (!damped?.size) return available;
+
+  const preferred = available.filter(
+    (item) => !item.traits?.some((trait) => damped.has(trait))
+  );
+  return preferred.length > 0 ? preferred : available;
+}
+
+/**
+ * Runs a request with damping, and repeats it without if that produced nothing.
+ *
+ * Providers that can express exclusion do it in the query — TMDB's
+ * `without_genres` — so an over-eager damp comes back genuinely empty and no
+ * amount of post-filtering can recover it. Asking again unfiltered is the only
+ * way to tell "you dislike this genre" apart from "there is nothing else here",
+ * and the second is never a good reason to hand the user an empty deck.
+ */
+async function withDampingFallback(
+  context: DiscoveryLoadContext,
+  fetch: (context: DiscoveryLoadContext) => Promise<ResultItem[]>
+): Promise<ResultItem[]> {
+  const damped = await fetch(context);
+  const preferred = applyDiscoveryContext(damped, context, { dampTraits: true });
+  if (preferred.length > 0 || !context.dampedTraits?.length) return preferred;
+
+  const relaxed: DiscoveryLoadContext = { ...context, dampedTraits: undefined };
+  return applyDiscoveryContext(await fetch(relaxed), relaxed, {
+    dampTraits: false,
   });
 }
 
@@ -247,16 +278,12 @@ export async function loadDiscovery(
     });
   }
   if (input.mode === "filter") {
-    return applyDiscoveryContext(
-      await provider.filter([...input.filters], context),
-      context,
-      { dampTraits: true }
+    return withDampingFallback(context, (used) =>
+      provider.filter([...input.filters], used)
     );
   }
   if (input.mode === "randomize") {
-    return applyDiscoveryContext(await provider.random(context), context, {
-      dampTraits: true,
-    });
+    return withDampingFallback(context, (used) => provider.random(used));
   }
   if (!("seed" in input)) throw new Error("Similar requires a source item");
 
