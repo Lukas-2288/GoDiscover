@@ -70,6 +70,7 @@ import {
 } from "../lib/discovery/loadDetail";
 import { SIMILAR_TIER_LABELS } from "../lib/discovery/similarTiers";
 import { SAVE_INTENT_LABELS } from "../lib/discovery/saveIntent";
+import { thumbnailUrl } from "../lib/api/imageSizes";
 
 export default function HomeScreen() {
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
@@ -617,7 +618,7 @@ export default function HomeScreen() {
                     {item.imageUrl ? (
                       <Image
                         accessible={false}
-                        source={{ uri: item.imageUrl }}
+                        source={{ uri: thumbnailUrl(item.imageUrl) }}
                         style={styles.recentImage}
                       />
                     ) : (
@@ -1047,7 +1048,7 @@ export default function HomeScreen() {
                               {item.imageUrl ? (
                                 <Image
                                   accessible={false}
-                                  source={{ uri: item.imageUrl }}
+                                  source={{ uri: thumbnailUrl(item.imageUrl) }}
                                   style={styles.savedItemImage}
                                 />
                               ) : (

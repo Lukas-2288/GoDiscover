@@ -11,6 +11,7 @@ import {
 
 import { getCategoryTheme, CATEGORY_ORDER } from "../../lib/discovery/categoryThemes";
 import { SIMILAR_TIER_LABELS, type SimilarTier } from "../../lib/discovery/similarTiers";
+import { thumbnailUrl } from "../../lib/api/imageSizes";
 import type { ContentDetail } from "../../lib/discovery/loadDetail";
 import type { ContentCategory, ResultItem } from "../../types/content";
 
@@ -182,7 +183,7 @@ export function ArchiveAtlas({
               return (
                 <Pressable key={`${item.category}:${item.id}`} accessibilityRole="button" onPress={() => onOpenRecent(item)} style={styles.recentTile}>
                   <View style={[styles.recentImage, { backgroundColor: theme.softDark }]}>
-                    {item.imageUrl ? <View style={[styles.recentImageFill, { backgroundImage: `url(${item.imageUrl})` } as any]} /> : <FontAwesome name={theme.icon} size={22} color={theme.accent} />}
+                    {item.imageUrl ? <View style={[styles.recentImageFill, { backgroundImage: `url(${thumbnailUrl(item.imageUrl)})` } as any]} /> : <FontAwesome name={theme.icon} size={22} color={theme.accent} />}
                   </View>
                   <Text style={styles.recentCategory}>{theme.label.toUpperCase()}</Text>
                   <Text style={styles.recentTitle} numberOfLines={2}>{item.title}</Text>

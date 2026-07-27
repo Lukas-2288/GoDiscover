@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 
 import type { AtlasArtworkData } from "./atlasGraph";
+import { thumbnailUrl } from "../../../lib/api/imageSizes";
 
 export type AtlasArtworkNodeDefinition = Node<
   AtlasArtworkData,
@@ -52,7 +53,7 @@ export function AtlasArtworkNode({
         <View
           style={[
             styles.image,
-            { backgroundImage: `url(${imageUrl})` } as any,
+            { backgroundImage: `url(${thumbnailUrl(imageUrl)})` } as any,
           ]}
         />
       ) : (

@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import type { MapNode } from "../../../lib/storage/discoveryMap";
 import type { ContentCategory } from "../../../types/content";
+import { thumbnailUrl } from "../../../lib/api/imageSizes";
 
 const CATEGORY_ORDER: readonly ContentCategory[] = [
   "movies",
@@ -87,7 +88,7 @@ export function SavedAtlasList({
                           <View
                             style={[
                               styles.thumbnailImage,
-                              { backgroundImage: `url(${node.imageUrl})` } as any,
+                              { backgroundImage: `url(${thumbnailUrl(node.imageUrl)})` } as any,
                             ]}
                           />
                         ) : (
