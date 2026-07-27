@@ -1,5 +1,6 @@
 import type { MovieDetail, ResultItem } from '../../types/content';
 import { cachedRequest } from './requestCache';
+import { pickRandomEraWindow, type EraWindow } from './discogs';
 
 const API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY;
 const BASE_URL = 'https://api.themoviedb.org/3';
@@ -91,16 +92,44 @@ export async function searchMovies(query: string, page = 1): Promise<ResultItem[
 export type RandomMovieParams = {
   page?: number;
   withoutGenres?: string[];
+  /** Injectable so a test can pin the decade rather than roll for it. */
+  era?: EraWindow;
 };
+
+/**
+ * Six decades, evenly weighted, from 1970.
+ *
+ * Film's canon travels better than pop music's — a 1974 film is a far easier
+ * recommendation than a 1974 single — so this reaches back further than the
+ * music equivalent. Move `yearFrom` on the first entry to retune.
+ */
+export const MOVIE_ERA_WINDOWS: readonly EraWindow[] = [
+  { yearFrom: 1970, yearTo: 1979, weight: 1 },
+  { yearFrom: 1980, yearTo: 1989, weight: 1 },
+  { yearFrom: 1990, yearTo: 1999, weight: 1 },
+  { yearFrom: 2000, yearTo: 2009, weight: 1 },
+  { yearFrom: 2010, yearTo: 2019, weight: 1 },
+  { yearFrom: 2020, yearTo: new Date().getFullYear(), weight: 1 },
+];
 
 export async function randomMovies(
   params: RandomMovieParams = {}
 ): Promise<ResultItem[]> {
-  const page = params.page ?? Math.floor(Math.random() * 20) + 1;
+  // The result set is scoped to one decade now, so deep pages are often empty.
+  const page = params.page ?? Math.floor(Math.random() * 5) + 1;
+  // Without a date window this was `popularity.desc` over the whole catalogue —
+  // and TMDB popularity is a *current* metric, so it returned whatever is out
+  // this week, every time. Hence nothing but 2025 and 2026.
+  const era = params.era ?? pickRandomEraWindow(Math.random, MOVIE_ERA_WINDOWS);
   const q: Record<string, string | number> = {
     sort_by: 'popularity.desc',
     page,
     include_adult: 'false',
+    'primary_release_date.gte': `${era.yearFrom}-01-01`,
+    'primary_release_date.lte': `${era.yearTo}-12-31`,
+    // Spreading the years surfaces the long tail, so require enough votes that
+    // a pick is at least a film somebody has seen.
+    'vote_count.gte': 200,
   };
   // `popularity.desc` is why rejecting one superhero film used to hand back
   // another: the blockbusters TMDB sorts to the top are heavily one genre.

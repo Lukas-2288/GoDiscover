@@ -785,6 +785,15 @@ export function useDiscoveryController(
     activeItem,
     /** True once a top-up came back empty — the archive really is finished. */
     deckExhausted: session?.deck.exhausted ?? false,
+    /**
+     * True when a background refill failed and the deck is out of cards. Held
+     * separately from `deckExhausted` because it is recoverable: the archive is
+     * not finished, the last request just did not come back. Without this the
+     * screen matched no render branch at all and simply went dead.
+     */
+    deckStalled:
+      (session?.deck.topUpBlocked ?? false) &&
+      (session?.deck.queue.length ?? 0) === 0,
     lastSkip: state.lastSkip,
     undoSkip,
     followSave,

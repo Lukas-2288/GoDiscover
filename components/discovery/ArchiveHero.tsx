@@ -51,20 +51,6 @@ export function ArchiveHero({
           />
         </Pressable>
       </View>
-
-      {/* Decorative only — the copy above already says everything this does. */}
-      <View
-        accessible={false}
-        aria-hidden
-        importantForAccessibility="no-hide-descendants"
-        style={[styles.stamp, { borderColor: palette.tangerine }]}
-      >
-        <Text style={[styles.stampText, { color: palette.tangerine }]}>EST.</Text>
-        <Text style={[styles.stampYear, { color: palette.text }]}>2026</Text>
-        <Text style={[styles.stampText, { color: palette.tangerine }]}>
-          KEEP LOOKING
-        </Text>
-      </View>
     </View>
   );
 }
@@ -90,9 +76,9 @@ export function SectionHeading({
 }
 
 const styles = StyleSheet.create({
-  // Wraps rather than forcing the stamp alongside the copy: on a narrow phone
-  // there is no room for both, and a row that cannot give is what pushed the
-  // same stamp off the edge of the website.
+  // Still a wrapping row rather than a plain block: it kept the hero from
+  // overflowing on a narrow phone when a decorative badge sat beside the copy,
+  // and it is what any future companion element would need.
   hero: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -133,27 +119,6 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 14,
     fontWeight: "800",
-  },
-  stamp: {
-    alignItems: "center",
-    borderRadius: 100,
-    borderWidth: 1,
-    height: 116,
-    justifyContent: "center",
-    marginTop: 8,
-    transform: [{ rotate: "8deg" }],
-    width: 116,
-  },
-  stampText: {
-    fontFamily: monoFont,
-    fontSize: 8,
-    letterSpacing: 1,
-  },
-  stampYear: {
-    fontFamily: displayFont,
-    fontSize: 24,
-    fontWeight: "900",
-    marginVertical: 3,
   },
   sectionHeading: { gap: 4 },
   sectionKicker: {

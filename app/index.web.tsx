@@ -692,7 +692,7 @@ function WebHomeScreen() {
       {section === "discover" ? (
         <View style={[styles.workspace, layout === "mobile" && styles.workspaceMobile]}>
           <View style={styles.workspaceMain}>
-            <WebDiscoveryStage category={selected ?? "movies"} activeItem={activeItem} nextItem={nextItem} loading={activeSession?.status === "loading"} reducedMotion={reducedMotion} onSkip={() => commit("skip")} onSave={() => commit("save")} onSimilar={() => activeItem && startSimilar(selected ?? "movies", activeItem)} onOpen={() => activeItem && openDetail(selected ?? "movies", activeItem)} notice={deckNotice} similarContext={activeSession?.deck.similarContext ?? null} exhausted={discovery.deckExhausted} controls={activeSession && selected ? (
+            <WebDiscoveryStage category={selected ?? "movies"} activeItem={activeItem} nextItem={nextItem} loading={activeSession?.status === "loading"} reducedMotion={reducedMotion} onSkip={() => commit("skip")} onSave={() => commit("save")} onSimilar={() => activeItem && startSimilar(selected ?? "movies", activeItem)} onOpen={() => activeItem && openDetail(selected ?? "movies", activeItem)} notice={deckNotice} similarContext={activeSession?.deck.similarContext ?? null} exhausted={discovery.deckExhausted} stalled={discovery.deckStalled} onRetry={() => void discovery.retry()} controls={activeSession && selected ? (
               <DiscoveryControls
                 category={selected}
                 activeAction={activeSession.activeAction}

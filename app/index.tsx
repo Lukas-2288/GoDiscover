@@ -833,6 +833,22 @@ export default function HomeScreen() {
             />
           ) : null}
 
+          {/* A refill that failed rather than came back empty. Recoverable —
+              the archive is not finished, the request just did not land — so
+              this offers a retry. Previously this combination matched no branch
+              at all and the screen simply went dead with no way out. */}
+          {selected &&
+          session &&
+          session.deck.queue.length === 0 &&
+          discoveryController.deckStalled ? (
+            <DiscoveryStatusCard
+              kind="error"
+              message={`Couldn't reach for more ${selected}. Check your connection and try again.`}
+              onRetry={() => void discoveryController.retry()}
+              palette={palette}
+            />
+          ) : null}
+
           {/* A top-up that came back with nothing new. Distinct from "empty":
               there is no point retrying the same path, so point elsewhere. */}
           {selected &&

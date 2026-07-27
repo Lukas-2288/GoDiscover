@@ -121,8 +121,12 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
   },
   books: {
     search: searchBooks,
-    random: randomBooks,
-    filter: (filters) => {
+    random: (context) =>
+      randomBooks({
+        page: context?.page,
+        withoutSubjects: context?.dampedTraits,
+      }),
+    filter: (filters, context) => {
       const range = yearRange(filters);
       const subjects = filters
         .map((filter) => OL_SUBJECTS[filter])
@@ -132,6 +136,7 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
         yearFrom: range?.yearFrom,
         yearTo: range?.yearTo,
         minRating: minimumRating(filters),
+        page: context?.page,
       });
     },
     similar: (item) => getSimilarBooks(item.id),
@@ -151,8 +156,8 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
   },
   artists: {
     search: searchArtists,
-    random: randomArtists,
-    filter: (filters) => {
+    random: (context) => randomArtists({ page: context?.page }),
+    filter: (filters, context) => {
       const range = yearRange(filters);
       const genres = filters
         .map((filter) => SPOTIFY_GENRE_MAP[filter])
@@ -161,6 +166,7 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
         genres: genres.length ? genres : undefined,
         yearFrom: range?.yearFrom,
         yearTo: range?.yearTo,
+        page: context?.page,
       });
     },
     similar: (item) => getSimilarArtists(item.id),
@@ -181,8 +187,8 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
   },
   albums: {
     search: searchAlbums,
-    random: randomAlbums,
-    filter: (filters) => {
+    random: (context) => randomAlbums({ page: context?.page }),
+    filter: (filters, context) => {
       const range = yearRange(filters);
       const genres = filters
         .map((filter) => SPOTIFY_GENRE_MAP[filter])
@@ -191,6 +197,7 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
         genres: genres.length ? genres : undefined,
         yearFrom: range?.yearFrom,
         yearTo: range?.yearTo,
+        page: context?.page,
       });
     },
     similar: (item) => getSimilarAlbums(item.id),

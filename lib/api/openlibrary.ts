@@ -58,7 +58,7 @@ function toResultItem(doc: OLSearchDoc): ResultItem {
     title: doc.title,
     subtitle: author,
     meta: rating,
-    imageUrl: coverUrl(doc.cover_i, 'M'),
+    imageUrl: coverUrl(doc.cover_i, 'L'),
     traits: bookTraits(doc.subject),
   };
 }
@@ -122,12 +122,33 @@ const RANDOM_SUBJECTS = [
   'biography', 'history', 'philosophy', 'thriller', 'horror',
 ];
 
-export async function randomBooks(): Promise<ResultItem[]> {
-  const subject = RANDOM_SUBJECTS[Math.floor(Math.random() * RANDOM_SUBJECTS.length)];
-  const offset = Math.floor(Math.random() * 100);
+export type RandomBookParams = {
+  page?: number;
+  withoutSubjects?: readonly string[];
+};
+
+const RANDOM_PAGE_SIZE = 20;
+
+export async function randomBooks(
+  params: RandomBookParams = {}
+): Promise<ResultItem[]> {
+  const available = params.withoutSubjects?.length
+    ? RANDOM_SUBJECTS.filter(
+        (subject) => !params.withoutSubjects!.some((damped) => OL_SUBJECTS[damped] === subject)
+      )
+    : RANDOM_SUBJECTS;
+  // Damping must never empty the shelf; if every subject is damped, ignore it
+  // and let the post-filter in loadDiscovery decide.
+  const pool = available.length > 0 ? available : RANDOM_SUBJECTS;
+  const subject = pool[Math.floor(Math.random() * pool.length)];
+  // The deck tops up by advancing a page. Without this every refill re-fetched
+  // the same window, dedup dropped the lot, and the deck died.
+  const offset = params.page
+    ? (params.page - 1) * RANDOM_PAGE_SIZE
+    : Math.floor(Math.random() * 100);
   const data = await ol<OLSearchResponse>('/search.json', {
     subject,
-    limit: 20,
+    limit: RANDOM_PAGE_SIZE,
     offset,
     sort: 'rating',
     fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
@@ -142,6 +163,8 @@ export type BookFilterParams = {
   yearFrom?: number;
   yearTo?: number;
   minRating?: number;
+  /** 1-based. Open Library paginates by offset, so this maps onto `offset`. */
+  page?: number;
 };
 
 export async function filterBooks(params: BookFilterParams): Promise<ResultItem[]> {
@@ -155,9 +178,13 @@ export async function filterBooks(params: BookFilterParams): Promise<ResultItem[
     qParts.push(`first_publish_year:[${params.yearFrom} TO 2099]`);
   }
   const q = qParts.join(' AND ') || '*:*';
+  const limit = 20;
   const data = await ol<OLSearchResponse>('/search.json', {
     q,
-    limit: 20,
+    limit,
+    // The filtered path had no pagination at all, so a filtered deck served the
+    // same handful of books on every refill and then went empty.
+    offset: params.page ? (params.page - 1) * limit : 0,
     sort: 'rating',
     fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
   });

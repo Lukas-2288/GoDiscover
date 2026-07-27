@@ -166,11 +166,6 @@ export function ArchiveAtlas({
             <FontAwesome name="long-arrow-right" size={16} color={webPalette.bg} />
           </Pressable>
         </View>
-        <View style={styles.heroStamp} accessible={false}>
-          <Text style={styles.heroStampText}>EST.</Text>
-          <Text style={styles.heroStampYear}>2026</Text>
-          <Text style={styles.heroStampText}>KEEP LOOKING</Text>
-        </View>
       </View>
 
       <View style={styles.sectionHeading}>
@@ -246,6 +241,8 @@ export function WebDiscoveryStage({
   notice,
   similarContext,
   exhausted = false,
+  stalled = false,
+  onRetry,
   controls,
 }: {
   category: ContentCategory;
@@ -263,6 +260,13 @@ export function WebDiscoveryStage({
   similarContext?: { sourceTitle: string; tier?: SimilarTier } | null;
   /** True only once a top-up has actually come back empty. */
   exhausted?: boolean;
+  /**
+   * True when a refill failed and the deck ran out — recoverable, unlike
+   * `exhausted`. Without it this combination showed "Lining up the next…"
+   * forever, which is a stall wearing a loading state's clothes.
+   */
+  stalled?: boolean;
+  onRetry?(): void;
   /**
    * Search and filters. Rendered inside the stage's ScrollView rather than
    * beside it, so the controls scroll with the deck on a phone instead of
@@ -302,6 +306,28 @@ export function WebDiscoveryStage({
     return stageWithControls(<><Text style={styles.stageKicker}>OPENING PORTAL</Text><Text style={styles.stageTitle}>Finding a new {theme.singular}...</Text><View style={styles.loadingBar}><View style={[styles.loadingFill, { backgroundColor: theme.accent }]} /></View></>);
   }
   if (!activeItem) {
+    if (stalled) {
+      return stageWithControls(
+        <>
+          <Text style={styles.stageKicker}>COULDN&apos;T REACH THE SHELF</Text>
+          <Text style={styles.stageTitle}>
+            Something went wrong finding more.
+          </Text>
+          {onRetry ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Try again"
+              onPress={onRetry}
+              style={[styles.primaryAction, { backgroundColor: theme.accent }]}
+            >
+              <Text style={[styles.primaryActionText, { color: theme.onAccent }]}>
+                Try again
+              </Text>
+            </Pressable>
+          ) : null}
+        </>
+      );
+    }
     // "The cabinet is quiet" used to show after five swipes, when the deck had
     // simply not been topped up yet — it read as a dead end. It is now reserved
     // for genuine exhaustion, and says what to do next.
@@ -552,7 +578,7 @@ const styles = StyleSheet.create({
   chrome: { alignItems: "center", borderBottomColor: webPalette.border, borderBottomWidth: 1, flexDirection: "row", gap: 28, justifyContent: "space-between", paddingHorizontal: 28, paddingVertical: 18 }, chromeMobile: { alignItems: "stretch", flexDirection: "column", gap: 12, paddingHorizontal: 16, paddingVertical: 12 }, navMobile: { justifyContent: "space-between", width: "100%" }, navItemMobile: { paddingHorizontal: 9 },
   wordmark: { flexShrink: 0, justifyContent: "center", minHeight: 44 }, wordmarkSmall: { color: webPalette.mint, fontFamily: monoFont, fontSize: 10, letterSpacing: 1.4 }, wordmarkLarge: { color: webPalette.text, fontFamily: displayFont, fontSize: 18, fontWeight: "800", marginTop: 3 },
   nav: { alignItems: "center", flexDirection: "row", flexShrink: 1, flexWrap: "wrap", gap: 6, justifyContent: "center" }, navItem: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 7, minHeight: 44, paddingHorizontal: 13 }, navItemActive: { backgroundColor: webPalette.lime }, navLabel: { color: webPalette.muted, fontFamily: bodyFont, fontSize: 13, fontWeight: "700" }, navLabelActive: { color: webPalette.bg }, chromeHint: { color: webPalette.muted, fontFamily: monoFont, fontSize: 9, maxWidth: 180, textAlign: "right" }, pressed: { opacity: 0.72 }, content: { flex: 1 },
-  archive: { alignSelf: "center", gap: 34, maxWidth: 1180, padding: 34, width: "100%" }, heroRow: { flexDirection: "row", flexWrap: "wrap", gap: 20, justifyContent: "space-between", minHeight: 260 }, heroCopy: { flexGrow: 1, flexShrink: 1, maxWidth: 700, minWidth: 260 }, eyebrow: { color: webPalette.tangerine, fontFamily: monoFont, fontSize: 11, letterSpacing: 2 }, heroTitle: { color: webPalette.text, fontFamily: displayFont, fontSize: 58, fontWeight: "900", letterSpacing: -2, lineHeight: 61, marginTop: 12 }, heroBody: { color: webPalette.muted, fontFamily: bodyFont, fontSize: 17, lineHeight: 26, maxWidth: 560, marginTop: 18 }, heroButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: webPalette.lime, borderRadius: 999, flexDirection: "row", gap: 12, justifyContent: "center", marginTop: 22, minHeight: 44, paddingHorizontal: 19 }, heroButtonText: { color: webPalette.bg, fontFamily: bodyFont, fontSize: 14, fontWeight: "800" }, heroStamp: { alignItems: "center", borderColor: webPalette.tangerine, borderRadius: 100, borderWidth: 1, height: 132, justifyContent: "center", marginTop: 10, transform: [{ rotate: "8deg" }], width: 132 }, heroStampText: { color: webPalette.tangerine, fontFamily: monoFont, fontSize: 9, letterSpacing: 1 }, heroStampYear: { color: webPalette.text, fontFamily: displayFont, fontSize: 26, fontWeight: "900", marginVertical: 4 },
+  archive: { alignSelf: "center", gap: 34, maxWidth: 1180, padding: 34, width: "100%" }, heroRow: { flexDirection: "row", flexWrap: "wrap", gap: 20, justifyContent: "space-between", minHeight: 260 }, heroCopy: { flexGrow: 1, flexShrink: 1, maxWidth: 700, minWidth: 260 }, eyebrow: { color: webPalette.tangerine, fontFamily: monoFont, fontSize: 11, letterSpacing: 2 }, heroTitle: { color: webPalette.text, fontFamily: displayFont, fontSize: 58, fontWeight: "900", letterSpacing: -2, lineHeight: 61, marginTop: 12 }, heroBody: { color: webPalette.muted, fontFamily: bodyFont, fontSize: 17, lineHeight: 26, maxWidth: 560, marginTop: 18 }, heroButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: webPalette.lime, borderRadius: 999, flexDirection: "row", gap: 12, justifyContent: "center", marginTop: 22, minHeight: 44, paddingHorizontal: 19 }, heroButtonText: { color: webPalette.bg, fontFamily: bodyFont, fontSize: 14, fontWeight: "800" },
   sectionHeading: { gap: 5 }, sectionHeadingInline: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionKicker: { color: webPalette.mint, fontFamily: monoFont, fontSize: 10, letterSpacing: 1.6 }, sectionTitle: { color: webPalette.text, fontFamily: displayFont, fontSize: 30, fontWeight: "900", marginTop: 4 }, sectionAside: { color: webPalette.muted, fontFamily: monoFont, fontSize: 9 }, atlasGrid: { flexDirection: "row", flexWrap: "wrap", gap: 13 }, atlasTile: { borderRadius: 22, borderWidth: 1, minHeight: 190, overflow: "hidden", padding: 19, position: "relative", width: "23.5%" }, atlasTilePressed: { opacity: 0.75, transform: [{ scale: 0.98 }] }, atlasOrb: { borderRadius: 999, height: 120, opacity: 0.16, position: "absolute", right: -18, top: -25, width: 120 }, atlasNumber: { fontFamily: monoFont, fontSize: 10, marginBottom: 26 }, atlasLabel: { color: webPalette.text, fontFamily: displayFont, fontSize: 25, fontWeight: "900", marginTop: 12 }, atlasHint: { bottom: 17, fontFamily: monoFont, fontSize: 9, position: "absolute" }, recentSection: { gap: 17 }, recentRow: { gap: 13 }, recentTile: { width: 150 }, recentImage: { alignItems: "center", borderRadius: 14, height: 112, justifyContent: "center", overflow: "hidden", width: 150 }, recentImageFill: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, width: "100%" as any }, recentCategory: { color: webPalette.tangerine, fontFamily: monoFont, fontSize: 9, marginTop: 10 }, recentTitle: { color: webPalette.text, fontFamily: bodyFont, fontSize: 14, fontWeight: "800", lineHeight: 18, marginTop: 4 },
   discoveryStage: { alignSelf: "center", maxWidth: 1040, padding: 34, paddingBottom: 104, width: "100%" }, discoveryStageMobile: { paddingBottom: 24, paddingHorizontal: 16 }, discoveryHeader: { alignItems: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" }, discoveryHeaderCopy: { flexBasis: 0, flexGrow: 1, flexShrink: 1, minWidth: 200 }, controlsSlot: { marginTop: 18 }, emptyStageWithControls: { justifyContent: "flex-start", paddingTop: 48 }, controlsSlotEmpty: { alignSelf: "stretch", marginTop: 32, maxWidth: 1040, width: "100%" }, discoveryHeading: { color: webPalette.text, fontFamily: displayFont, fontSize: 34, fontWeight: "900", marginTop: 6 }, discoveryHeadingMobile: { fontSize: 24, lineHeight: 28 }, portalTag: { borderRadius: 999, borderWidth: 1, fontFamily: monoFont, fontSize: 9, paddingHorizontal: 10, paddingVertical: 8 }, cardStage: { alignItems: "center", justifyContent: "center", minHeight: 610, position: "relative", width: "100%" }, peekCard: { borderRadius: 26, borderWidth: 1, height: 430, opacity: 0.55, padding: 20, position: "absolute", right: "12%" as any, top: 75, transform: [{ rotate: "5deg" }], width: 360 }, peekLabel: { color: webPalette.muted, fontFamily: monoFont, fontSize: 9 }, peekTitle: { color: webPalette.text, fontFamily: displayFont, fontSize: 23, fontWeight: "900", marginTop: 20 }, webCard: { backgroundColor: webPalette.surface, borderRadius: 28, maxWidth: 470, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 26, transform: [{ rotate: "-2deg" }], width: "100%" }, cardArt: { alignItems: "center", height: 310, justifyContent: "center", overflow: "hidden", position: "relative" }, cardArtImage: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, position: "absolute", width: "100%" as any }, cardBadge: { borderRadius: 999, left: 17, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", top: 17 }, cardBadgeText: { fontFamily: monoFont, fontSize: 9, fontWeight: "800" }, cardCopy: { padding: 22 }, cardCategory: { color: darkPalette.inkMuted, fontFamily: monoFont, fontSize: 9, letterSpacing: 1 }, cardTitle: { color: darkPalette.ink, fontFamily: displayFont, fontSize: 32, fontWeight: "900", lineHeight: 35, marginTop: 10 }, cardSubtitle: { color: darkPalette.inkSecondary, fontFamily: bodyFont, fontSize: 15, marginTop: 7 }, cardMeta: { color: darkPalette.inkMuted, fontFamily: monoFont, fontSize: 10, marginTop: 14 }, actionRow: { alignItems: "stretch", flexDirection: "row", gap: 10, justifyContent: "center" }, primaryAction: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, primaryActionText: { fontFamily: bodyFont, fontSize: 14, fontWeight: "900" }, secondaryAction: { alignItems: "center", borderColor: webPalette.border, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, secondaryActionText: { color: webPalette.text, fontFamily: bodyFont, fontSize: 13, fontWeight: "800" }, similarTierBanner: { color: webPalette.mint, fontFamily: monoFont, fontSize: 10, letterSpacing: 1.4, marginTop: 14 }, deckNotice: { alignItems: "center", alignSelf: "center", backgroundColor: webPalette.surface, borderRadius: 999, flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 16, maxWidth: 560, paddingHorizontal: 18, paddingVertical: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }, deckNoticePinned: { bottom: 24, left: 0, marginTop: 0, position: "fixed" as any, right: 0, zIndex: 20 }, deckNoticeText: { color: darkPalette.ink, fontFamily: bodyFont, fontSize: 13, fontWeight: "800" }, deckNoticeAction: { alignItems: "center", justifyContent: "center", minHeight: 44, paddingHorizontal: 10 }, deckNoticeActionText: { color: "#3C2E63", fontFamily: bodyFont, fontSize: 13, fontWeight: "900", textDecorationLine: "underline" }, keyboardHint: { color: webPalette.muted, fontFamily: monoFont, fontSize: 9, marginTop: 18, textAlign: "center" }, emptyStage: { alignItems: "center", flexGrow: 1, gap: 14, justifyContent: "center", minHeight: 300, padding: 34 }, stageKicker: { color: webPalette.tangerine, fontFamily: monoFont, fontSize: 10, letterSpacing: 1.5 }, stageTitle: { color: webPalette.text, fontFamily: displayFont, fontSize: 32, fontWeight: "900", textAlign: "center" }, loadingBar: { backgroundColor: webPalette.border, borderRadius: 999, height: 6, marginTop: 10, overflow: "hidden", width: 240 }, loadingFill: { height: "100%" as any, width: "55%" as any },
   atlasTileGrow: { flexGrow: 1 }, heroTitleMobile: { fontSize: 40, lineHeight: 43 }, webCardReduced: { transform: [] },

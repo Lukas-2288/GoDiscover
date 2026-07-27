@@ -1,5 +1,6 @@
 import type { AlbumDetail, ArtistDetail, ResultItem } from '../../types/content';
 import { cachedRequest } from './requestCache';
+import { similarArtistNames, stripDiscogsSuffix } from './lastfm';
 import { toPlainText } from './richText';
 
 const TOKEN = process.env.EXPO_PUBLIC_DISCOGS_TOKEN;
@@ -171,37 +172,42 @@ export type EraWindow = {
 };
 
 /**
- * Decade windows for unfiltered randomise.
+ * Decade windows for unfiltered randomise: four decades, evenly weighted, from
+ * 1990.
  *
  * Discogs is a record-collector catalogue: its `master` releases skew heavily
  * towards the vinyl era, and randomAlbums/randomArtists previously sent no
  * `year` at all, so Discogs' own ordering picked — and it kept picking the 70s
  * to 90s. Asking for an explicit decade is what puts recent music back in
- * rotation.
+ * rotation. An explicit Era filter still overrides all of this.
  *
- * Weighted towards this century because that is where the catalogue is thinnest
- * by default, not because older music matters less. Older decades stay well
- * represented; an explicit Era filter still overrides all of this.
+ * "Even across every decade" sounds neutral but is not: with 1960 as the floor
+ * there are four decades before 2000 and only two-and-a-bit after, so equal
+ * weights would put ~57% of picks in the last century — more old music than the
+ * lopsided weights this replaces (~41%), and the opposite of what was wanted.
+ * Starting at 1990 is genuinely even *and* lands pre-2000 at 25%.
+ *
+ * Move `yearFrom` on the first entry to retune; nothing else needs to change.
  */
 export const RANDOM_ERA_WINDOWS: readonly EraWindow[] = [
-  { yearFrom: 1960, yearTo: 1969, weight: 1 },
-  { yearFrom: 1970, yearTo: 1979, weight: 1 },
-  { yearFrom: 1980, yearTo: 1989, weight: 1 },
-  { yearFrom: 1990, yearTo: 1999, weight: 1.5 },
-  { yearFrom: 2000, yearTo: 2009, weight: 2 },
-  { yearFrom: 2010, yearTo: 2019, weight: 2.5 },
-  { yearFrom: 2020, yearTo: new Date().getFullYear(), weight: 2 },
+  { yearFrom: 1990, yearTo: 1999, weight: 1 },
+  { yearFrom: 2000, yearTo: 2009, weight: 1 },
+  { yearFrom: 2010, yearTo: 2019, weight: 1 },
+  { yearFrom: 2020, yearTo: new Date().getFullYear(), weight: 1 },
 ];
 
 /** Weighted pick over RANDOM_ERA_WINDOWS. `roll` is injectable for tests. */
-export function pickRandomEraWindow(roll: () => number = Math.random): EraWindow {
-  const total = RANDOM_ERA_WINDOWS.reduce((sum, window) => sum + window.weight, 0);
+export function pickRandomEraWindow(
+  roll: () => number = Math.random,
+  windows: readonly EraWindow[] = RANDOM_ERA_WINDOWS
+): EraWindow {
+  const total = windows.reduce((sum, window) => sum + window.weight, 0);
   let remaining = Math.min(Math.max(roll(), 0), 0.999_999_9) * total;
-  for (const window of RANDOM_ERA_WINDOWS) {
+  for (const window of windows) {
     remaining -= window.weight;
     if (remaining < 0) return window;
   }
-  return RANDOM_ERA_WINDOWS[RANDOM_ERA_WINDOWS.length - 1];
+  return windows[windows.length - 1];
 }
 
 export async function searchAlbums(query: string): Promise<ResultItem[]> {
@@ -224,13 +230,17 @@ export async function searchArtists(query: string): Promise<ResultItem[]> {
   return (data.results ?? []).slice(0, 5).map(artistItemToResult);
 }
 
-export async function randomAlbums(): Promise<ResultItem[]> {
+export type RandomMusicParams = { page?: number };
+
+export async function randomAlbums(
+  params: RandomMusicParams = {}
+): Promise<ResultItem[]> {
   const keys = Object.keys(DISCOGS_GENRE_MAP);
   const { genre, style } = DISCOGS_GENRE_MAP[keys[Math.floor(Math.random() * keys.length)]];
   const era = pickRandomEraWindow();
-  // Fewer pages than before: the result set is now scoped to one decade, so
-  // deep pages are often empty and would return nothing.
-  const page = Math.floor(Math.random() * 5) + 1;
+  // The deck's refill advances this. Without it every top-up asked for the
+  // same page, dedup dropped everything, and the deck ran dry.
+  const page = params.page ?? Math.floor(Math.random() * 5) + 1;
   const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
     type: 'master',
     genre,
@@ -251,13 +261,15 @@ export async function randomAlbums(): Promise<ResultItem[]> {
   return [...items].sort(() => Math.random() - 0.5).slice(0, 5).map(releaseToResult);
 }
 
-export async function randomArtists(): Promise<ResultItem[]> {
+export async function randomArtists(
+  params: RandomMusicParams = {}
+): Promise<ResultItem[]> {
   const keys = Object.keys(DISCOGS_GENRE_MAP);
   const { genre, style } = DISCOGS_GENRE_MAP[keys[Math.floor(Math.random() * keys.length)]];
   // Artists are parsed out of master-release titles below, so without a year
   // this inherits the release catalogue's vinyl-era skew directly.
   const era = pickRandomEraWindow();
-  const page = Math.floor(Math.random() * 5) + 1;
+  const page = params.page ?? Math.floor(Math.random() * 5) + 1;
   let data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
     type: 'master',
     genre,
@@ -451,6 +463,112 @@ export async function getArtistDetail(id: string): Promise<ArtistDetail> {
   };
 }
 
+/**
+ * A window of roughly a decade either side of the seed.
+ *
+ * Similar used to send no `year` at all, which put the entire Discogs
+ * catalogue in range — and that catalogue is a vinyl-era archive. Sharing a
+ * genre tag with something recorded fifty years earlier is not similarity.
+ */
+export function eraNeighbourhood(year?: number, span = 10): string | undefined {
+  if (!year || !Number.isFinite(year)) return undefined;
+  const now = new Date().getFullYear();
+  return `${year - span}-${Math.min(year + span, now)}`;
+}
+
+/**
+ * Narrowest query first, widening only when a rung comes back empty.
+ *
+ * `style` and `genre` used to be sent together, so a seed carrying no style
+ * silently fell back to the whole genre bucket with nothing left to narrow it.
+ * Ordering the attempts makes each widening deliberate and visible.
+ */
+function similarSearchAttempts(
+  style: string | undefined,
+  genre: string | undefined,
+  year: string | undefined
+): Record<string, string | number | undefined>[] {
+  const narrow = style ? { style } : { genre };
+  const attempts: Record<string, string | number | undefined>[] = [];
+  if (year) attempts.push({ ...narrow, year });
+  attempts.push({ ...narrow });
+  if (style && genre) {
+    if (year) attempts.push({ genre, year });
+    attempts.push({ genre });
+  }
+  return attempts;
+}
+
+async function searchSimilarMasters(
+  style: string | undefined,
+  genre: string | undefined,
+  year: string | undefined,
+  perPage: number
+): Promise<SearchReleaseItem[]> {
+  for (const attempt of similarSearchAttempts(style, genre, year)) {
+    const data = await discogs<SearchResponse<SearchReleaseItem>>(
+      '/database/search',
+      { type: 'master', per_page: perPage, ...attempt }
+    );
+    if (data.results?.length) return data.results;
+  }
+  return [];
+}
+
+/** One Discogs search per name, failures dropped rather than propagated. */
+async function mastersByArtistNames(
+  names: readonly string[],
+  perArtist: number
+): Promise<SearchReleaseItem[]> {
+  const found = await Promise.all(
+    names.map(async (name) => {
+      try {
+        const data = await discogs<SearchResponse<SearchReleaseItem>>(
+          '/database/search',
+          { q: name, type: 'master', per_page: perArtist }
+        );
+        return data.results ?? [];
+      } catch {
+        return [];
+      }
+    })
+  );
+  return found.flat();
+}
+
+async function artistsByName(names: readonly string[]): Promise<ResultItem[]> {
+  const found = await Promise.all(
+    names.map(async (name) => {
+      try {
+        const data = await discogs<SearchResponse<SearchArtistItem>>(
+          '/database/search',
+          { q: name, type: 'artist', per_page: 1 }
+        );
+        return data.results?.[0];
+      } catch {
+        return undefined;
+      }
+    })
+  );
+  const out: ResultItem[] = [];
+  const seen = new Set<string>();
+  names.forEach((name, index) => {
+    const match = found[index];
+    if (seen.has(name.toLowerCase())) return;
+    seen.add(name.toLowerCase());
+    out.push({
+      id: match ? String(match.id) : `name:${encodeURIComponent(name)}`,
+      // Last.fm's spelling is the one the user would recognise; Discogs adds
+      // disambiguation suffixes like "Eden (5)".
+      title: name,
+      subtitle: 'Artist',
+      meta: '',
+      imageUrl: match ? cleanImage(match.cover_image || match.thumb) : undefined,
+    });
+  });
+  return out;
+}
+
 export async function getSimilarAlbums(
   id: string,
   options: { deterministic?: boolean } = {}
@@ -462,26 +580,50 @@ export async function getSimilarAlbums(
   } catch {
     release = await discogs<ReleaseInfo>(`/releases/${id}`);
   }
+  const order = options.deterministic
+    ? stableResultOrder
+    : () => Math.random() - 0.5;
+  const finish = (items: readonly SearchReleaseItem[]): ResultItem[] =>
+    [...items]
+      .filter((r) => String(r.id) !== id && r.cover_image)
+      .sort(order)
+      .slice(0, 10)
+      .map(releaseToResult);
+
+  // Last.fm knows Chappell Roan sits next to Sabrina Carpenter. Discogs only
+  // knows they share a tag, which is how "The Giver" once came back with a 1975
+  // trucker album. Prefer the source that has an actual opinion; without a key
+  // this returns nothing and the tag search below runs exactly as before.
+  const seedArtist = release.artists?.[0]?.name;
+  if (seedArtist) {
+    const neighbours = await similarArtistNames(seedArtist, 6);
+    if (neighbours.length > 0) {
+      const seedTitle = release.title?.trim().toLowerCase();
+      const byNeighbour = (await mastersByArtistNames(neighbours, 3)).filter(
+        (r) => parseTitle(r.title).album.trim().toLowerCase() !== seedTitle
+      );
+      const items = finish(byNeighbour);
+      // A thin result is worse than a broad one; fall through if it did not
+      // find enough to fill a rung.
+      if (items.length >= 3) return items;
+    }
+  }
+
   const style = release.styles?.[0];
   const genre = release.genres?.[0];
   if (!style && !genre) return [];
-  const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
-    type: 'master',
-    style,
-    genre,
-    per_page: 30,
-  });
-  const items = data.results ?? [];
-  return [...items]
-    .filter((r) => String(r.id) !== id && r.cover_image)
-    .sort(options.deterministic ? stableResultOrder : () => Math.random() - 0.5)
-    .slice(0, 10)
-    .map(releaseToResult);
+  return finish(
+    await searchSimilarMasters(
+      style,
+      genre,
+      eraNeighbourhood(release.year),
+      30
+    )
+  );
 }
 
 export async function getSimilarArtists(id: string): Promise<ResultItem[]> {
   let artistName: string;
-  let firstReleaseId: number | undefined;
   if (id.startsWith('name:')) {
     artistName = decodeURIComponent(id.slice(5));
     const search = await discogs<SearchResponse<SearchArtistItem>>('/database/search', {
@@ -493,39 +635,53 @@ export async function getSimilarArtists(id: string): Promise<ResultItem[]> {
     const realId = String(search.results[0].id);
     return getSimilarArtists(realId);
   }
+  const artist = await discogs<ArtistInfo>(`/artists/${id}`);
+  artistName = artist.name;
+
+  // Same reasoning as albums: listening data beats a shared genre tag.
+  const neighbours = await similarArtistNames(artistName, 10);
+  if (neighbours.length > 0) {
+    const resolved = await artistsByName(neighbours);
+    if (resolved.length >= 3) return resolved.slice(0, 10);
+  }
+
   const releases = await discogs<ArtistReleases>(`/artists/${id}/releases`, {
     sort: 'year',
     sort_order: 'desc',
     per_page: 5,
   });
-  const artist = await discogs<ArtistInfo>(`/artists/${id}`);
-  artistName = artist.name;
-  firstReleaseId = (releases.releases ?? []).find((r) => r.type === 'master')?.id;
-  if (!firstReleaseId) return [];
+  const firstRelease = (releases.releases ?? []).find((r) => r.type === 'master');
+  if (!firstRelease) return [];
   let style: string | undefined;
   let genre: string | undefined;
+  let year: number | undefined = firstRelease.year;
   try {
-    const master = await discogs<{ main_release: number; styles?: string[]; genres?: string[] }>(
-      `/masters/${firstReleaseId}`
-    );
+    const master = await discogs<{
+      main_release: number;
+      styles?: string[];
+      genres?: string[];
+      year?: number;
+    }>(`/masters/${firstRelease.id}`);
     style = master.styles?.[0];
     genre = master.genres?.[0];
+    year = master.year ?? year;
   } catch {
     return [];
   }
   if (!style && !genre) return [];
-  const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
-    type: 'master',
+  const results = await searchSimilarMasters(
     style,
     genre,
-    per_page: 50,
-  });
-  const seen = new Set<string>([artistName.toLowerCase()]);
+    eraNeighbourhood(year),
+    50
+  );
+  const seen = new Set<string>([stripDiscogsSuffix(artistName).toLowerCase()]);
   const out: ResultItem[] = [];
-  for (const r of data.results ?? []) {
+  for (const r of results) {
     const { artist: a } = parseTitle(r.title);
-    if (a === 'Various' || seen.has(a.toLowerCase())) continue;
-    seen.add(a.toLowerCase());
+    const key = stripDiscogsSuffix(a).toLowerCase();
+    if (a === 'Various' || seen.has(key)) continue;
+    seen.add(key);
     out.push({
       id: `name:${encodeURIComponent(a)}`,
       title: a,
