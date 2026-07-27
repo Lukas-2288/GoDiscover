@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import type { Session } from "@supabase/auth-js";
 
 import { WebShell, ArchiveAtlas, WebDetailPanel, WebDiscoveryStage, resolveWebLayout, webPalette, type WebSection } from "../components/web/WebHomeScreen";
@@ -723,11 +723,17 @@ function WebHomeScreen() {
         </View>
       ) : null}
       {section === "account" ? (
-        <View style={styles.accountView}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.accountView,
+            layout === "mobile" && styles.accountViewMobile,
+          ]}
+        >
           <Text style={styles.accountKicker}>YOUR CONTROL ROOM</Text>
-          <Text style={styles.accountTitle}>{authSession ? "Your map is synced." : "Keep your constellation."}</Text>
+          <Text style={[styles.accountTitle, layout === "mobile" && styles.accountTitleMobile]}>{authSession ? "Your map is synced." : "Keep your constellation."}</Text>
           {authSession ? <><Text style={styles.accountBody}>{authSession.user.email}</Text><Pressable accessibilityRole="button" onPress={() => void supabase.auth.signOut()} style={styles.authButton}><Text style={styles.authButtonText}>Sign out</Text></Pressable></> : <View style={styles.authCard}><Text style={styles.accountBody}>Sign in to keep your saved discoveries available across devices.</Text><TextInput accessibilityLabel="Email" autoCapitalize="none" keyboardType="email-address" placeholder="Email" placeholderTextColor={webPalette.muted} value={authEmail} onChangeText={setAuthEmail} style={styles.authInput} /><TextInput accessibilityLabel="Password" secureTextEntry placeholder="Password" placeholderTextColor={webPalette.muted} value={authPassword} onChangeText={setAuthPassword} style={styles.authInput} /><Pressable accessibilityRole="button" onPress={() => void submitAuth()} style={styles.authButton}><Text style={styles.authButtonText}>{authMode === "signin" ? "Sign in" : "Create account"}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setAuthMode((mode) => mode === "signin" ? "signup" : "signin")}><Text style={styles.authSwitch}>{authMode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}</Text></Pressable>{authMessage ? <Text style={styles.authMessage}>{authMessage}</Text> : null}</View>}
-        </View>
+        </ScrollView>
       ) : null}
       {detailSelection && layout === "mobile" ? <View style={styles.mobileDetail}><WebDetailPanel item={detailSelection.item} category={detailSelection.category} detail={detail} saved={savedItems.some((item) => item.category === detailSelection.category && item.id === detailSelection.item.id)} loading={detailLoading} presentation="sheet" onClose={section === "atlas" ? restoreAtlasOverview : () => setDetailSelection(null)} onSave={toggleDetailSave} onSimilar={() => startSimilar(detailSelection.category, detailSelection.item)} onShare={() => void shareItem(detailSelection.category, detailSelection.item)} {...responsiveOrbitProps} /></View> : null}
     </WebShell>
@@ -746,5 +752,5 @@ function getShareLabel(category: ContentCategory): string {
 }
 
 const styles = StyleSheet.create({
-  workspace: { flex: 1, flexDirection: "row" }, workspaceMobile: { flexDirection: "column" }, workspaceMain: { flex: 1 }, mapWorkspace: { flex: 1, flexDirection: "row", position: "relative" }, atlasPortraitDrawer: { bottom: 0, left: 0, position: "absolute", right: 0, zIndex: 2 }, accountView: { alignSelf: "center", maxWidth: 720, padding: 48, width: "100%" }, accountKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.7 }, accountTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 48, fontWeight: "900", marginTop: 10 }, accountBody: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 16, lineHeight: 24, marginTop: 12 }, authCard: { backgroundColor: "#241B35", borderRadius: 24, gap: 12, marginTop: 28, maxWidth: 460, padding: 24 }, authInput: { backgroundColor: "#34264A", borderColor: webPalette.border, borderRadius: 12, borderWidth: 1, color: webPalette.text, fontFamily: "DM Sans", minHeight: 48, paddingHorizontal: 14 }, authButton: { alignItems: "center", backgroundColor: webPalette.lime, borderRadius: 999, minHeight: 46, justifyContent: "center", marginTop: 4, paddingHorizontal: 20 }, authButtonText: { color: webPalette.bg, fontFamily: "DM Sans", fontWeight: "900" }, authSwitch: { color: webPalette.mint, fontFamily: "DM Sans", fontSize: 13, paddingVertical: 8, textAlign: "center" }, authMessage: { color: webPalette.tangerine, fontFamily: "DM Sans", fontSize: 13, marginTop: 5 }, mobileDetail: { bottom: 0, left: 0, position: "absolute", right: 0 },
+  workspace: { flex: 1, flexDirection: "row" }, workspaceMobile: { flexDirection: "column" }, workspaceMain: { flex: 1 }, mapWorkspace: { flex: 1, flexDirection: "row", position: "relative" }, atlasPortraitDrawer: { bottom: 0, left: 0, maxHeight: "80%", paddingBottom: "env(safe-area-inset-bottom)" as any, position: "absolute", right: 0, zIndex: 2 }, accountView: { alignSelf: "center", maxWidth: 720, padding: 48, width: "100%" }, accountViewMobile: { paddingHorizontal: 20, paddingVertical: 28 }, accountKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.7 }, accountTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 48, fontWeight: "900", marginTop: 10 }, accountTitleMobile: { fontSize: 32, lineHeight: 36 }, accountBody: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 16, lineHeight: 24, marginTop: 12 }, authCard: { backgroundColor: "#241B35", borderRadius: 24, gap: 12, marginTop: 28, maxWidth: 460, padding: 24 }, authInput: { backgroundColor: "#34264A", borderColor: webPalette.border, borderRadius: 12, borderWidth: 1, color: webPalette.text, fontFamily: "DM Sans", fontSize: 16, minHeight: 48, paddingHorizontal: 14 }, authButton: { alignItems: "center", backgroundColor: webPalette.lime, borderRadius: 999, minHeight: 46, justifyContent: "center", marginTop: 4, paddingHorizontal: 20 }, authButtonText: { color: webPalette.bg, fontFamily: "DM Sans", fontWeight: "900" }, authSwitch: { color: webPalette.mint, fontFamily: "DM Sans", fontSize: 13, lineHeight: 44, minHeight: 44, textAlign: "center" }, authMessage: { color: webPalette.tangerine, fontFamily: "DM Sans", fontSize: 13, marginTop: 5 }, mobileDetail: { bottom: 0, left: 0, maxHeight: "80%", paddingBottom: "env(safe-area-inset-bottom)" as any, position: "absolute", right: 0 },
 });

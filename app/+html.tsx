@@ -10,7 +10,10 @@ export default function Root({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        {/* viewport-fit=cover lets the bottom-anchored sheet and drawer pad
+            themselves clear of the iPhone home indicator via
+            env(safe-area-inset-bottom). */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
 
         {/* 
           Disable body scrolling on web. This makes ScrollView components work closer to how they do on native. 

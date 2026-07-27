@@ -336,9 +336,16 @@ function measureInPage({ primary, touchTargetMinimum, zoomFontSize }) {
 
   const all = [...document.querySelectorAll("body *")].filter(isVisible);
 
+  // The atlas is a pan-and-zoom canvas: its node layer is deliberately larger
+  // than the window and React Flow clips it. Measuring its bounding box as
+  // "overflow" reports a defect that does not exist. Reaching those nodes is
+  // covered by run-saved-atlas-browser-smoke.mjs instead.
+  const isPannableCanvas = (element) => Boolean(element.closest(".react-flow"));
+
   let worstOverflow = null;
   let worstUnreachable = null;
   for (const element of all) {
+    if (isPannableCanvas(element)) continue;
     const rect = element.getBoundingClientRect();
     const overflowRight = Math.round(rect.right - viewportWidth);
     const overflowLeft = Math.round(-rect.left);

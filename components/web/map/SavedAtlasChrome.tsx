@@ -9,18 +9,21 @@ export function SavedAtlasHeader({
   view,
   onQueryChange,
   onViewChange,
+  compact = false,
 }: {
   count: number;
   query: string;
   view: SavedAtlasView;
   onQueryChange(query: string): void;
   onViewChange(view: SavedAtlasView): void;
+  /** Trims the header on a phone so the map itself still fits the viewport. */
+  compact?: boolean;
 }) {
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, compact && styles.headerCompact]}>
       <View style={styles.heading}>
         <Text style={styles.kicker}>YOUR COLLECTION</Text>
-        <Text style={styles.title}>Saved Atlas</Text>
+        <Text style={[styles.title, compact && styles.titleCompact]}>Saved Atlas</Text>
         <Text style={styles.count}>
           {count} {count === 1 ? "work" : "works"} in your collection
         </Text>
@@ -112,6 +115,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingVertical: 20,
   },
+  headerCompact: { gap: 10, paddingHorizontal: 16, paddingVertical: 10 },
   heading: { minWidth: 220 },
   kicker: {
     color: "#958E9F",
@@ -127,6 +131,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.6,
     marginTop: 3,
   },
+  titleCompact: { fontSize: 22 },
   count: {
     color: "#9B94A4",
     fontFamily: "DM Sans",
@@ -160,9 +165,13 @@ const styles = StyleSheet.create({
     color: "#F4F1EA",
     flex: 1,
     fontFamily: "DM Sans",
-    fontSize: 13,
+    // Anything under 16px makes iOS Safari zoom the page on focus, and the
+    // viewport meta's shrink-to-fit=no leaves the user stuck zoomed in.
+    fontSize: 16,
+    // The frame around it was already 44px tall, but the input is the thing a
+    // finger has to land on.
+    minHeight: 44,
     outlineStyle: "none",
-    paddingVertical: 9,
   } as any,
   viewToggle: {
     alignItems: "center",

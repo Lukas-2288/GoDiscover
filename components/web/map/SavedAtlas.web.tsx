@@ -373,8 +373,9 @@ function SavedAtlasInner({
   const activeNode = flowNodes.find((node) => node.id === spatialNodeId) ?? null;
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, isMobileSheet && styles.rootCompact]}>
       <SavedAtlasHeader
+        compact={isMobileSheet}
         count={nodes.length}
         query={query}
         view={view}
@@ -404,7 +405,12 @@ function SavedAtlasInner({
           style={{
             background: "#15111F",
             flex: 1,
-            minHeight: 520,
+            // A flat 520px floor pushed the zoom controls, which sit at the
+            // bottom-left of this box, off a short viewport — and body
+            // scrolling is disabled, so they were simply gone. On a phone the
+            // map takes whatever `flex: 1` leaves rather than asserting a
+            // height the viewport may not have.
+            minHeight: isMobileSheet ? 0 : 520,
             position: "relative",
             width: "100%",
           }}
@@ -554,6 +560,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#15111F",
     flex: 1,
     minHeight: 620,
+  },
+  // Body scrolling is disabled, so a 620px floor on a 393px-tall landscape
+  // phone does not scroll — it just puts the map and its zoom controls off the
+  // bottom of the screen. `flex: 1` gives the atlas the room that exists.
+  rootCompact: {
+    minHeight: 0,
   },
   orbitPanel: { backgroundColor: "rgba(33, 27, 42, 0.96)", borderColor: "rgba(244, 241, 234, 0.18)", borderRadius: 8, borderWidth: 1, maxWidth: 390, padding: 15, position: "absolute", right: 20, top: 18, width: "42%" as any },
   orbitKicker: { color: "#D7F36A", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1.4 },

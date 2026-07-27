@@ -30,7 +30,7 @@ export function SavedAtlasLoader(props: SavedAtlasProps) {
             alignItems: "center",
             flex: 1,
             justifyContent: "center",
-            minHeight: 520,
+            minHeight: props.layout === "mobile" ? 0 : 520,
           }}
         >
           <Text

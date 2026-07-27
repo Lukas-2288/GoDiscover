@@ -8,6 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import type { StyleProp, ViewStyle } from "react-native";
 
 import { getCategoryTheme, CATEGORY_ORDER } from "../../lib/discovery/categoryThemes";
 import { SIMILAR_TIER_LABELS, type SimilarTier } from "../../lib/discovery/similarTiers";
@@ -42,11 +43,29 @@ export const webPalette: WebPalette = {
   border: "rgba(255,255,255,0.16)",
 };
 
+export const MOBILE_MAX_WIDTH = 700;
+/**
+ * A phone held sideways is 852x393 — wide enough to pass a width-only test and
+ * far too short for the two-column workspace and its fixed 360px detail rail.
+ * Height has to be part of the decision or every phone in landscape is served
+ * a tablet layout.
+ */
+export const MOBILE_MAX_HEIGHT = 500;
+
 export function resolveWebLayout(width: number, height: number): WebLayoutMode {
-  if (width < 700) return "mobile";
+  if (width < MOBILE_MAX_WIDTH || height < MOBILE_MAX_HEIGHT) return "mobile";
   if (height > width) return "tabletPortrait";
-  if (width < 1200 || height > width) return "tabletLandscape";
-  return "desktop";
+  return width < 1200 ? "tabletLandscape" : "desktop";
+}
+
+/**
+ * Every component that used to test `width < 700` on its own now asks this, so
+ * the shell, the deck and the detail panel cannot disagree about whether they
+ * are on a phone.
+ */
+export function useIsMobileLayout(): boolean {
+  const { width, height } = useWindowDimensions();
+  return resolveWebLayout(width, height) === "mobile";
 }
 
 export function WebShell({
@@ -60,7 +79,7 @@ export function WebShell({
   savedCount: number;
   children: React.ReactNode;
 }) {
-  const { width } = useWindowDimensions();
+  const isMobile = useIsMobileLayout();
   const nav = [
     ["archive", "Archive", "th-large"],
     ["discover", "Discover", "compass"],
@@ -73,7 +92,7 @@ export function WebShell({
       {/* Four nav items only get ~176px beside a non-shrinking wordmark at 390px,
           so they wrapped onto four rows and pushed the deck below the fold.
           On mobile the nav takes its own full-width row instead. */}
-      <View style={[styles.chrome, width < 700 && styles.chromeMobile]}>
+      <View style={[styles.chrome, isMobile && styles.chromeMobile]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="GoDiscover home"
@@ -83,7 +102,7 @@ export function WebShell({
           <Text style={styles.wordmarkSmall}>GO / DISCOVER</Text>
           <Text style={styles.wordmarkLarge}>a culture arcade</Text>
         </Pressable>
-        <View style={[styles.nav, width < 700 && styles.navMobile]} accessibilityRole="tablist">
+        <View style={[styles.nav, isMobile && styles.navMobile]} accessibilityRole="tablist">
           {nav.map(([value, label, icon]) => (
             <Pressable
               key={value}
@@ -92,7 +111,7 @@ export function WebShell({
               onPress={() => onSectionChange(value)}
               style={({ pressed }) => [
                 styles.navItem,
-                width < 700 && styles.navItemMobile,
+                isMobile && styles.navItemMobile,
                 section === value && styles.navItemActive,
                 pressed && styles.pressed,
               ]}
@@ -102,7 +121,7 @@ export function WebShell({
             </Pressable>
           ))}
         </View>
-        {width >= 700 ? <Text style={styles.chromeHint}>A FIELD GUIDE FOR YOUR NEXT OBSESSION</Text> : null}
+        {!isMobile ? <Text style={styles.chromeHint}>A FIELD GUIDE FOR YOUR NEXT OBSESSION</Text> : null}
       </View>
       <View style={styles.content}>{children}</View>
     </View>
@@ -121,13 +140,14 @@ export function ArchiveAtlas({
   onSurprise(): void;
 }) {
   const { width } = useWindowDimensions();
-  const tileWidth = width < 700 ? "47%" : width < 1100 ? "48%" : "23.5%";
+  const isMobile = useIsMobileLayout();
+  const tileWidth = isMobile ? "47%" : width < 1100 ? "48%" : "23.5%";
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.archive}>
       <View style={styles.heroRow}>
         <View style={styles.heroCopy}>
           <Text style={styles.eyebrow}>THE ARCHIVE IS OPEN</Text>
-          <Text style={[styles.heroTitle, width < 700 && styles.heroTitleMobile]}>Find a new{ "\n" }favourite rabbit hole.</Text>
+          <Text style={[styles.heroTitle, isMobile && styles.heroTitleMobile]}>Find a new{ "\n" }favourite rabbit hole.</Text>
           <Text style={styles.heroBody}>
             Browse the shelves, follow a strange connection, and let the next great thing find you.
           </Text>
@@ -233,48 +253,64 @@ export function WebDiscoveryStage({
   /** True only once a top-up has actually come back empty. */
   exhausted?: boolean;
 }) {
-  const { width, height } = useWindowDimensions();
+  const { height } = useWindowDimensions();
+  const isMobile = useIsMobileLayout();
   const theme = getCategoryTheme(category);
-  // The follow-up bar sits under the actions, and at 610 the stack ran past the
-  // fold on a 1440x900 laptop — an Undo you have to scroll to find is no Undo.
-  // Give the artwork whatever is left rather than a fixed height.
-  // Mobile carries a taller chrome and an extra tag row, so it needs a bigger
-  // reserve or the action row lands below the fold.
-  const chromeReserve = width < 700 ? 470 : 330;
-  const cardStageHeight = Math.max(300, Math.min(610, height - chromeReserve));
+  // This used to subtract a hand-measured `chromeReserve` from the viewport to
+  // keep the action row above a fold that could not be scrolled past. The stage
+  // scrolls now, so the artwork just takes a sensible share of the viewport and
+  // anything below it is reachable rather than lost.
+  const cardStageHeight = Math.max(300, Math.min(610, height - 300));
+  // Body scrolling is disabled app-wide, so without this the action row, the
+  // undo bar and the keyboard hint are simply unreachable on a short viewport.
+  const stage = (contentStyle: StyleProp<ViewStyle>, children: React.ReactNode) => (
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={contentStyle}
+    >
+      {children}
+    </ScrollView>
+  );
   if (!activeItem && loading) {
-    return <View style={styles.emptyStage}><Text style={styles.stageKicker}>OPENING PORTAL</Text><Text style={styles.stageTitle}>Finding a new {theme.singular}...</Text><View style={styles.loadingBar}><View style={[styles.loadingFill, { backgroundColor: theme.accent }]} /></View></View>;
+    return stage(styles.emptyStage, <><Text style={styles.stageKicker}>OPENING PORTAL</Text><Text style={styles.stageTitle}>Finding a new {theme.singular}...</Text><View style={styles.loadingBar}><View style={[styles.loadingFill, { backgroundColor: theme.accent }]} /></View></>);
   }
   if (!activeItem) {
     // "The cabinet is quiet" used to show after five swipes, when the deck had
     // simply not been topped up yet — it read as a dead end. It is now reserved
     // for genuine exhaustion, and says what to do next.
-    return exhausted ? (
-      <View style={styles.emptyStage}>
-        <Text style={styles.stageKicker}>THAT&apos;S THE WHOLE SHELF</Text>
-        <Text style={styles.stageTitle}>
-          You&apos;ve seen every {theme.singular} we can find down this path.
-        </Text>
-        <Text style={styles.keyboardHint}>
-          TRY ANOTHER CATEGORY, OR LOOSEN YOUR FILTERS
-        </Text>
-      </View>
-    ) : (
-      <View style={styles.emptyStage}>
-        <Text style={styles.stageKicker}>FETCHING MORE</Text>
-        <Text style={styles.stageTitle}>Lining up the next {theme.singular}...</Text>
-        <View style={styles.loadingBar}>
-          <View style={[styles.loadingFill, { backgroundColor: theme.accent }]} />
-        </View>
-      </View>
-    );
+    return exhausted
+      ? stage(
+          styles.emptyStage,
+          <>
+            <Text style={styles.stageKicker}>THAT&apos;S THE WHOLE SHELF</Text>
+            <Text style={styles.stageTitle}>
+              You&apos;ve seen every {theme.singular} we can find down this path.
+            </Text>
+            <Text style={styles.keyboardHint}>
+              TRY ANOTHER CATEGORY, OR LOOSEN YOUR FILTERS
+            </Text>
+          </>
+        )
+      : stage(
+          styles.emptyStage,
+          <>
+            <Text style={styles.stageKicker}>FETCHING MORE</Text>
+            <Text style={styles.stageTitle}>
+              Lining up the next {theme.singular}...
+            </Text>
+            <View style={styles.loadingBar}>
+              <View style={[styles.loadingFill, { backgroundColor: theme.accent }]} />
+            </View>
+          </>
+        );
   }
-  return (
-    <View style={[styles.discoveryStage, width < 700 && styles.discoveryStageMobile]}>
+  return stage(
+    [styles.discoveryStage, isMobile && styles.discoveryStageMobile],
+    <>
       <View style={styles.discoveryHeader}>
         <View>
           <Text style={styles.sectionKicker}>DISCOVERY / {theme.label.toUpperCase()}</Text>
-          <Text style={[styles.discoveryHeading, width < 700 && styles.discoveryHeadingMobile]}>One good thing leads to another.</Text>
+          <Text style={[styles.discoveryHeading, isMobile && styles.discoveryHeadingMobile]}>One good thing leads to another.</Text>
         </View>
         <Text style={[styles.portalTag, { color: theme.accent, borderColor: theme.accent }]}>{theme.badge}</Text>
       </View>
@@ -289,7 +325,7 @@ export function WebDiscoveryStage({
         </Text>
       ) : null}
       <View style={[styles.cardStage, { minHeight: cardStageHeight }]}>
-        {nextItem ? <View style={[styles.peekCard, { borderColor: theme.accent, backgroundColor: theme.softDark }]} accessible={false}><Text style={styles.peekLabel}>NEXT IN THE STACK</Text><Text style={styles.peekTitle}>{nextItem.title}</Text></View> : null}
+        {nextItem && !isMobile ? <View style={[styles.peekCard, { borderColor: theme.accent, backgroundColor: theme.softDark }]} accessible={false}><Text style={styles.peekLabel}>NEXT IN THE STACK</Text><Text style={styles.peekTitle}>{nextItem.title}</Text></View> : null}
         <Pressable accessibilityRole="button" accessibilityLabel={`Open details for ${activeItem.title}`} onPress={onOpen} style={[styles.webCard, reducedMotion && styles.webCardReduced]}>
           <View style={[styles.cardArt, { backgroundColor: theme.softDark }]}>
             {activeItem.imageUrl ? <View style={[styles.cardArtImage, { backgroundImage: `url(${activeItem.imageUrl})` } as any]} /> : <FontAwesome name={theme.icon} size={62} color={theme.accent} />}
@@ -303,7 +339,7 @@ export function WebDiscoveryStage({
           </View>
         </Pressable>
       </View>
-      <View style={[styles.actionRow, width < 700 && styles.actionRowMobile]}>
+      <View style={[styles.actionRow, isMobile && styles.actionRowMobile]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Not for me" onPress={onSkip} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>← Not for me</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Save" onPress={onSave} style={[styles.primaryAction, { backgroundColor: theme.accent }]}><Text style={[styles.primaryActionText, { color: theme.onAccent }]}>Save to map</Text><FontAwesome name="plus" size={14} color={theme.onAccent} /></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Find similar" onPress={onSimilar} style={styles.secondaryAction}><Text style={styles.secondaryActionText}>Find similar →</Text></Pressable>
@@ -311,7 +347,7 @@ export function WebDiscoveryStage({
       {notice ? (
         <View
           accessibilityLiveRegion="polite"
-          style={[styles.deckNotice, width >= 700 && styles.deckNoticePinned]}
+          style={[styles.deckNotice, !isMobile && styles.deckNoticePinned]}
         >
           <Text style={styles.deckNoticeText}>{notice.message}</Text>
           {notice.actions?.map((action) => (
@@ -338,7 +374,7 @@ export function WebDiscoveryStage({
         </View>
       ) : null}
       <Text style={styles.keyboardHint}>ARROWS TO DECIDE · S TO SAVE · U TO UNDO · ENTER FOR DETAILS</Text>
-    </View>
+    </>
   );
 }
 
@@ -387,7 +423,7 @@ export function WebDetailPanel({
   onSkipAtlasRecommendation?(id: string): void;
   onReseedAtlasRecommendation?(id: string): void;
 }) {
-  const { width } = useWindowDimensions();
+  const isMobile = useIsMobileLayout();
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<{ focus?(): void } | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -400,8 +436,14 @@ export function WebDetailPanel({
   if (!item || !category) return null;
   const theme = getCategoryTheme(category);
   const description = detail ? detailDescription(detail) : "Open the full detail card to see why this one belongs in your orbit.";
+  // A long field note plus eight orbit recommendations easily outruns a phone
+  // sheet or the tablet drawer's 80% cap, and neither had anything to scroll.
   const panel = (
-    <View style={[styles.detailPanel, presentation === "drawer" && styles.detailPanelDrawer, (presentation === "sheet" || width < 700) && styles.detailPanelMobile]} accessibilityLabel={presentation === "sheet" ? undefined : `${item.title} details`}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      style={[styles.detailPanel, presentation === "drawer" && styles.detailPanelDrawer, (presentation === "sheet" || isMobile) && styles.detailPanelMobile]}
+      contentContainerStyle={styles.detailPanelContent}
+      accessibilityLabel={presentation === "sheet" ? undefined : `${item.title} details`}>
       <View style={styles.detailTop}><Text style={[styles.sectionKicker, { color: theme.accent }]}>{theme.label.toUpperCase()} / FIELD NOTE</Text><Pressable ref={closeRef as any} accessibilityRole="button" accessibilityLabel="Close details" onPress={onClose} style={styles.closeButton}><Text style={styles.closeText}>×</Text></Pressable></View>
       <Text style={styles.detailTitle}>{item.title}</Text>
       <Text style={styles.detailSubtitle}>{item.subtitle}</Text>
@@ -431,7 +473,7 @@ export function WebDetailPanel({
           </View>
         ))}
       </> : null}
-    </View>
+    </ScrollView>
   );
   if (presentation !== "sheet") return panel;
   const handleSheetKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -482,11 +524,11 @@ function detailDescription(detail: ContentDetail): string {
 const styles = StyleSheet.create({
   shell: { backgroundColor: webPalette.bg, flex: 1, minHeight: "100vh" as any },
   chrome: { alignItems: "center", borderBottomColor: webPalette.border, borderBottomWidth: 1, flexDirection: "row", gap: 28, justifyContent: "space-between", paddingHorizontal: 28, paddingVertical: 18 }, chromeMobile: { alignItems: "stretch", flexDirection: "column", gap: 12, paddingHorizontal: 16, paddingVertical: 12 }, navMobile: { justifyContent: "space-between", width: "100%" }, navItemMobile: { paddingHorizontal: 9 },
-  wordmark: { flexShrink: 0 }, wordmarkSmall: { color: webPalette.mint, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.4 }, wordmarkLarge: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 18, fontWeight: "800", marginTop: 3 },
+  wordmark: { flexShrink: 0, justifyContent: "center", minHeight: 44 }, wordmarkSmall: { color: webPalette.mint, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.4 }, wordmarkLarge: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 18, fontWeight: "800", marginTop: 3 },
   nav: { alignItems: "center", flexDirection: "row", flexShrink: 1, flexWrap: "wrap", gap: 6, justifyContent: "center" }, navItem: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 7, minHeight: 44, paddingHorizontal: 13 }, navItemActive: { backgroundColor: webPalette.lime }, navLabel: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 13, fontWeight: "700" }, navLabelActive: { color: webPalette.bg }, chromeHint: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, maxWidth: 180, textAlign: "right" }, pressed: { opacity: 0.72 }, content: { flex: 1 },
-  archive: { alignSelf: "center", gap: 34, maxWidth: 1180, padding: 34, width: "100%" }, heroRow: { flexDirection: "row", justifyContent: "space-between", minHeight: 260 }, heroCopy: { maxWidth: 700 }, eyebrow: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 11, letterSpacing: 2 }, heroTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 58, fontWeight: "900", letterSpacing: -2, lineHeight: 61, marginTop: 12 }, heroBody: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 17, lineHeight: 26, maxWidth: 560, marginTop: 18 }, heroButton: { alignItems: "center", backgroundColor: webPalette.lime, borderRadius: 999, flexDirection: "row", gap: 12, marginTop: 22, paddingHorizontal: 19, paddingVertical: 12 }, heroButtonText: { color: webPalette.bg, fontFamily: "DM Sans", fontSize: 14, fontWeight: "800" }, heroStamp: { alignItems: "center", borderColor: webPalette.tangerine, borderRadius: 100, borderWidth: 1, height: 132, justifyContent: "center", marginTop: 10, transform: [{ rotate: "8deg" }], width: 132 }, heroStampText: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1 }, heroStampYear: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 26, fontWeight: "900", marginVertical: 4 },
+  archive: { alignSelf: "center", gap: 34, maxWidth: 1180, padding: 34, width: "100%" }, heroRow: { flexDirection: "row", flexWrap: "wrap", gap: 20, justifyContent: "space-between", minHeight: 260 }, heroCopy: { flexGrow: 1, flexShrink: 1, maxWidth: 700, minWidth: 260 }, eyebrow: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 11, letterSpacing: 2 }, heroTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 58, fontWeight: "900", letterSpacing: -2, lineHeight: 61, marginTop: 12 }, heroBody: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 17, lineHeight: 26, maxWidth: 560, marginTop: 18 }, heroButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: webPalette.lime, borderRadius: 999, flexDirection: "row", gap: 12, justifyContent: "center", marginTop: 22, minHeight: 44, paddingHorizontal: 19 }, heroButtonText: { color: webPalette.bg, fontFamily: "DM Sans", fontSize: 14, fontWeight: "800" }, heroStamp: { alignItems: "center", borderColor: webPalette.tangerine, borderRadius: 100, borderWidth: 1, height: 132, justifyContent: "center", marginTop: 10, transform: [{ rotate: "8deg" }], width: 132 }, heroStampText: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1 }, heroStampYear: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 26, fontWeight: "900", marginVertical: 4 },
   sectionHeading: { gap: 5 }, sectionHeadingInline: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" }, sectionKicker: { color: webPalette.mint, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.6 }, sectionTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 30, fontWeight: "900", marginTop: 4 }, sectionAside: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, atlasGrid: { flexDirection: "row", flexWrap: "wrap", gap: 13 }, atlasTile: { borderRadius: 22, borderWidth: 1, minHeight: 190, overflow: "hidden", padding: 19, position: "relative", width: "23.5%" }, atlasTilePressed: { opacity: 0.75, transform: [{ scale: 0.98 }] }, atlasOrb: { borderRadius: 999, height: 120, opacity: 0.16, position: "absolute", right: -18, top: -25, width: 120 }, atlasNumber: { fontFamily: "IBM Plex Mono", fontSize: 10, marginBottom: 26 }, atlasLabel: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 25, fontWeight: "900", marginTop: 12 }, atlasHint: { bottom: 17, fontFamily: "IBM Plex Mono", fontSize: 9, position: "absolute" }, recentSection: { gap: 17 }, recentRow: { gap: 13 }, recentTile: { width: 150 }, recentImage: { alignItems: "center", borderRadius: 14, height: 112, justifyContent: "center", overflow: "hidden", width: 150 }, recentImageFill: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, width: "100%" as any }, recentCategory: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 10 }, recentTitle: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 14, fontWeight: "800", lineHeight: 18, marginTop: 4 },
-  discoveryStage: { alignSelf: "center", maxWidth: 1040, padding: 34, paddingBottom: 104, width: "100%" }, discoveryStageMobile: { paddingBottom: 24, paddingHorizontal: 16 }, discoveryHeader: { alignItems: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" }, discoveryHeading: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 34, fontWeight: "900", marginTop: 6 }, discoveryHeadingMobile: { fontSize: 24, lineHeight: 28 }, portalTag: { borderRadius: 999, borderWidth: 1, fontFamily: "IBM Plex Mono", fontSize: 9, paddingHorizontal: 10, paddingVertical: 8 }, cardStage: { alignItems: "center", justifyContent: "center", minHeight: 610, position: "relative" }, peekCard: { borderRadius: 26, borderWidth: 1, height: 430, opacity: 0.55, padding: 20, position: "absolute", right: "12%" as any, top: 75, transform: [{ rotate: "5deg" }], width: 360 }, peekLabel: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, peekTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 23, fontWeight: "900", marginTop: 20 }, webCard: { backgroundColor: webPalette.surface, borderRadius: 28, maxWidth: 470, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 26, transform: [{ rotate: "-2deg" }], width: "100%" }, cardArt: { alignItems: "center", height: 310, justifyContent: "center", overflow: "hidden", position: "relative" }, cardArtImage: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, position: "absolute", width: "100%" as any }, cardBadge: { borderRadius: 999, left: 17, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", top: 17 }, cardBadgeText: { fontFamily: "IBM Plex Mono", fontSize: 9, fontWeight: "800" }, cardCopy: { padding: 22 }, cardCategory: { color: "#6D5B88", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1 }, cardTitle: { color: "#171225", fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", lineHeight: 35, marginTop: 10 }, cardSubtitle: { color: "#4A4057", fontFamily: "DM Sans", fontSize: 15, marginTop: 7 }, cardMeta: { color: "#857896", fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 14 }, actionRow: { alignItems: "stretch", flexDirection: "row", gap: 10, justifyContent: "center" }, primaryAction: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, primaryActionText: { fontFamily: "DM Sans", fontSize: 14, fontWeight: "900" }, secondaryAction: { alignItems: "center", borderColor: webPalette.border, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, secondaryActionText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "800" }, similarTierBanner: { color: webPalette.mint, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.4, marginTop: 14 }, deckNotice: { alignItems: "center", alignSelf: "center", backgroundColor: webPalette.surface, borderRadius: 999, flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 16, maxWidth: 560, paddingHorizontal: 18, paddingVertical: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }, deckNoticePinned: { bottom: 24, left: 0, marginTop: 0, position: "fixed" as any, right: 0, zIndex: 20 }, deckNoticeText: { color: "#171225", fontFamily: "DM Sans", fontSize: 13, fontWeight: "800" }, deckNoticeAction: { alignItems: "center", justifyContent: "center", minHeight: 44, paddingHorizontal: 10 }, deckNoticeActionText: { color: "#3C2E63", fontFamily: "DM Sans", fontSize: 13, fontWeight: "900", textDecorationLine: "underline" }, keyboardHint: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 18, textAlign: "center" }, emptyStage: { alignItems: "center", flex: 1, gap: 14, justifyContent: "center", minHeight: 520, padding: 34 }, stageKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.5 }, stageTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", textAlign: "center" }, loadingBar: { backgroundColor: webPalette.border, borderRadius: 999, height: 6, marginTop: 10, overflow: "hidden", width: 240 }, loadingFill: { height: "100%" as any, width: "55%" as any },
+  discoveryStage: { alignSelf: "center", maxWidth: 1040, padding: 34, paddingBottom: 104, width: "100%" }, discoveryStageMobile: { paddingBottom: 24, paddingHorizontal: 16 }, discoveryHeader: { alignItems: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" }, discoveryHeading: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 34, fontWeight: "900", marginTop: 6 }, discoveryHeadingMobile: { fontSize: 24, lineHeight: 28 }, portalTag: { borderRadius: 999, borderWidth: 1, fontFamily: "IBM Plex Mono", fontSize: 9, paddingHorizontal: 10, paddingVertical: 8 }, cardStage: { alignItems: "center", justifyContent: "center", minHeight: 610, position: "relative", width: "100%" }, peekCard: { borderRadius: 26, borderWidth: 1, height: 430, opacity: 0.55, padding: 20, position: "absolute", right: "12%" as any, top: 75, transform: [{ rotate: "5deg" }], width: 360 }, peekLabel: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9 }, peekTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 23, fontWeight: "900", marginTop: 20 }, webCard: { backgroundColor: webPalette.surface, borderRadius: 28, maxWidth: 470, overflow: "hidden", shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 26, transform: [{ rotate: "-2deg" }], width: "100%" }, cardArt: { alignItems: "center", height: 310, justifyContent: "center", overflow: "hidden", position: "relative" }, cardArtImage: { backgroundPosition: "center" as any, backgroundSize: "cover" as any, height: "100%" as any, position: "absolute", width: "100%" as any }, cardBadge: { borderRadius: 999, left: 17, paddingHorizontal: 10, paddingVertical: 6, position: "absolute", top: 17 }, cardBadgeText: { fontFamily: "IBM Plex Mono", fontSize: 9, fontWeight: "800" }, cardCopy: { padding: 22 }, cardCategory: { color: "#6D5B88", fontFamily: "IBM Plex Mono", fontSize: 9, letterSpacing: 1 }, cardTitle: { color: "#171225", fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", lineHeight: 35, marginTop: 10 }, cardSubtitle: { color: "#4A4057", fontFamily: "DM Sans", fontSize: 15, marginTop: 7 }, cardMeta: { color: "#857896", fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 14 }, actionRow: { alignItems: "stretch", flexDirection: "row", gap: 10, justifyContent: "center" }, primaryAction: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 9, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, primaryActionText: { fontFamily: "DM Sans", fontSize: 14, fontWeight: "900" }, secondaryAction: { alignItems: "center", borderColor: webPalette.border, borderRadius: 999, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 }, secondaryActionText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "800" }, similarTierBanner: { color: webPalette.mint, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.4, marginTop: 14 }, deckNotice: { alignItems: "center", alignSelf: "center", backgroundColor: webPalette.surface, borderRadius: 999, flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 16, maxWidth: 560, paddingHorizontal: 18, paddingVertical: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }, deckNoticePinned: { bottom: 24, left: 0, marginTop: 0, position: "fixed" as any, right: 0, zIndex: 20 }, deckNoticeText: { color: "#171225", fontFamily: "DM Sans", fontSize: 13, fontWeight: "800" }, deckNoticeAction: { alignItems: "center", justifyContent: "center", minHeight: 44, paddingHorizontal: 10 }, deckNoticeActionText: { color: "#3C2E63", fontFamily: "DM Sans", fontSize: 13, fontWeight: "900", textDecorationLine: "underline" }, keyboardHint: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 18, textAlign: "center" }, emptyStage: { alignItems: "center", flexGrow: 1, gap: 14, justifyContent: "center", minHeight: 300, padding: 34 }, stageKicker: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, letterSpacing: 1.5 }, stageTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 32, fontWeight: "900", textAlign: "center" }, loadingBar: { backgroundColor: webPalette.border, borderRadius: 999, height: 6, marginTop: 10, overflow: "hidden", width: 240 }, loadingFill: { height: "100%" as any, width: "55%" as any },
   atlasTileGrow: { flexGrow: 1 }, heroTitleMobile: { fontSize: 40, lineHeight: 43 }, webCardReduced: { transform: [] },
-  actionRowMobile: { flexDirection: "column" }, detailPanel: { backgroundColor: "#241B35", borderLeftColor: webPalette.border, borderLeftWidth: 1, minHeight: 300, padding: 28, width: 360 }, detailPanelDrawer: { borderLeftWidth: 0, borderTopColor: webPalette.border, borderTopWidth: 1, maxHeight: "80%" as any, width: "100%" as any }, detailPanelMobile: { borderLeftWidth: 0, width: "100%" as any }, detailTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, closeButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 }, closeText: { color: webPalette.muted, fontSize: 28, lineHeight: 30 }, drawerToggle: { alignSelf: "flex-start", justifyContent: "center", minHeight: 44, marginTop: 8 }, drawerToggleText: { color: webPalette.lime, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" }, detailTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 35, fontWeight: "900", lineHeight: 38, marginTop: 22 }, detailSubtitle: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 15, marginTop: 9 }, detailMeta: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 15 }, detailLoading: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 14, marginTop: 34 }, detailDescription: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 15, lineHeight: 23, marginTop: 28 }, detailActions: { gap: 10, marginTop: 30 }, atlasOrbitError: { color: "#F4C7A1", fontFamily: "DM Sans", fontSize: 12, marginTop: 14 }, atlasOrbitResult: { borderTopColor: webPalette.border, borderTopWidth: 1, marginTop: 12, paddingTop: 12 }, atlasOrbitCopy: { minWidth: 180 }, atlasOrbitTitle: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" }, atlasOrbitReason: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 4 }, atlasOrbitActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 9 }, atlasOrbitAction: { alignItems: "center", borderColor: webPalette.border, borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 10 }, atlasOrbitSave: { backgroundColor: webPalette.violet, borderColor: webPalette.violet }, atlasOrbitActionText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 11, fontWeight: "800" }, atlasOrbitSaveText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 11, fontWeight: "900" },
+  actionRowMobile: { flexDirection: "column" }, detailPanel: { backgroundColor: "#241B35", borderLeftColor: webPalette.border, borderLeftWidth: 1, flexGrow: 0, flexShrink: 0, width: 360 }, detailPanelContent: { minHeight: 300, padding: 28 }, detailPanelDrawer: { borderLeftWidth: 0, borderTopColor: webPalette.border, borderTopWidth: 1, maxHeight: "80%" as any, width: "100%" as any }, detailPanelMobile: { borderLeftWidth: 0, width: "100%" as any }, detailTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, closeButton: { alignItems: "center", height: 44, justifyContent: "center", width: 44 }, closeText: { color: webPalette.muted, fontSize: 28, lineHeight: 30 }, drawerToggle: { alignSelf: "flex-start", justifyContent: "center", minHeight: 44, marginTop: 8 }, drawerToggleText: { color: webPalette.lime, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" }, detailTitle: { color: webPalette.text, fontFamily: "Bricolage Grotesque", fontSize: 35, fontWeight: "900", lineHeight: 38, marginTop: 22 }, detailSubtitle: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 15, marginTop: 9 }, detailMeta: { color: webPalette.tangerine, fontFamily: "IBM Plex Mono", fontSize: 10, marginTop: 15 }, detailLoading: { color: webPalette.muted, fontFamily: "DM Sans", fontSize: 14, marginTop: 34 }, detailDescription: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 15, lineHeight: 23, marginTop: 28 }, detailActions: { gap: 10, marginTop: 30 }, atlasOrbitError: { color: "#F4C7A1", fontFamily: "DM Sans", fontSize: 12, marginTop: 14 }, atlasOrbitResult: { borderTopColor: webPalette.border, borderTopWidth: 1, marginTop: 12, paddingTop: 12 }, atlasOrbitCopy: { minWidth: 180 }, atlasOrbitTitle: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 13, fontWeight: "900" }, atlasOrbitReason: { color: webPalette.muted, fontFamily: "IBM Plex Mono", fontSize: 9, marginTop: 4 }, atlasOrbitActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 9 }, atlasOrbitAction: { alignItems: "center", borderColor: webPalette.border, borderRadius: 5, borderWidth: 1, justifyContent: "center", minHeight: 44, paddingHorizontal: 10 }, atlasOrbitSave: { backgroundColor: webPalette.violet, borderColor: webPalette.violet }, atlasOrbitActionText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 11, fontWeight: "800" }, atlasOrbitSaveText: { color: webPalette.text, fontFamily: "DM Sans", fontSize: 11, fontWeight: "900" },
 });

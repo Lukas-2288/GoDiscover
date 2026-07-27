@@ -19,6 +19,17 @@ const authOptions = () =>
     memoryStorage()
   );
 
+// Typed so `mock.calls[n][1]` is a RequestInit rather than an empty tuple.
+const recordingFetch = (body: string | null = null) =>
+  jest.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(body, { status: 200 })
+  );
+
+const headersOf = (
+  call: [RequestInfo | URL, RequestInit?] | undefined
+): Headers => new Headers(call?.[1]?.headers);
+
 const sessionWith = (token: string) => ({
   data: { session: { access_token: token } },
 });
@@ -32,7 +43,7 @@ describe("authenticatedFetch", () => {
       .fn()
       .mockResolvedValueOnce(sessionWith("first-token"))
       .mockResolvedValueOnce(sessionWith("refreshed-token"));
-    const baseFetch = jest.fn(async () => new Response(null));
+    const baseFetch = recordingFetch();
 
     const wrapped = authenticatedFetch(
       ANON_KEY,
@@ -43,7 +54,7 @@ describe("authenticatedFetch", () => {
     await wrapped("https://example.test/rest/v1/saved_items");
 
     const tokens = baseFetch.mock.calls.map((call) =>
-      new Headers((call[1] as RequestInit).headers).get("Authorization")
+      headersOf(call).get("Authorization")
     );
     expect(tokens).toEqual([
       "Bearer first-token",
@@ -53,7 +64,7 @@ describe("authenticatedFetch", () => {
 
   it("sends the anon key when nobody is signed in", async () => {
     const getSession = jest.fn().mockResolvedValue({ data: { session: null } });
-    const baseFetch = jest.fn(async () => new Response(null));
+    const baseFetch = recordingFetch();
 
     const wrapped = authenticatedFetch(
       ANON_KEY,
@@ -62,16 +73,14 @@ describe("authenticatedFetch", () => {
     );
     await wrapped("https://example.test/rest/v1/saved_items");
 
-    const headers = new Headers(
-      (baseFetch.mock.calls[0][1] as RequestInit).headers
-    );
+    const headers = headersOf(baseFetch.mock.calls[0]);
     expect(headers.get("Authorization")).toBe(`Bearer ${ANON_KEY}`);
     expect(headers.get("apikey")).toBe(ANON_KEY);
   });
 
   it("keeps an explicitly supplied Authorization header", async () => {
     const getSession = jest.fn().mockResolvedValue(sessionWith("session-token"));
-    const baseFetch = jest.fn(async () => new Response(null));
+    const baseFetch = recordingFetch();
 
     const wrapped = authenticatedFetch(
       ANON_KEY,
@@ -82,16 +91,14 @@ describe("authenticatedFetch", () => {
       headers: { Authorization: "Bearer caller-token" },
     });
 
-    expect(
-      new Headers((baseFetch.mock.calls[0][1] as RequestInit).headers).get(
-        "Authorization"
-      )
-    ).toBe("Bearer caller-token");
+    expect(headersOf(baseFetch.mock.calls[0]).get("Authorization")).toBe(
+      "Bearer caller-token"
+    );
   });
 
   it("preserves the rest of the request init", async () => {
     const getSession = jest.fn().mockResolvedValue(sessionWith("token"));
-    const baseFetch = jest.fn(async () => new Response(null));
+    const baseFetch = recordingFetch();
 
     const wrapped = authenticatedFetch(
       ANON_KEY,
@@ -103,9 +110,9 @@ describe("authenticatedFetch", () => {
       body: '{"id":"1"}',
     });
 
-    const init = baseFetch.mock.calls[0][1] as RequestInit;
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe('{"id":"1"}');
+    const init = baseFetch.mock.calls[0][1];
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe('{"id":"1"}');
   });
 });
 
@@ -165,7 +172,7 @@ describe("createSupabaseClient", () => {
   });
 
   it("sends the live session token on a PostgREST request", async () => {
-    const baseFetch = jest.fn(async () => new Response("[]", { status: 200 }));
+    const baseFetch = recordingFetch('[]');
     const client = createSupabaseClient(PROJECT_URL, ANON_KEY, {
       auth: authOptions(),
       fetch: baseFetch as never,
@@ -176,10 +183,8 @@ describe("createSupabaseClient", () => {
 
     await client.from("saved_items").select("id");
 
-    const [url, init] = baseFetch.mock.calls[0] as [string, RequestInit];
-    expect(String(url)).toContain(`${PROJECT_URL}/rest/v1/saved_items`);
-    expect(new Headers(init.headers).get("Authorization")).toBe(
-      "Bearer live-token"
-    );
+    const call = baseFetch.mock.calls[0];
+    expect(String(call[0])).toContain(`${PROJECT_URL}/rest/v1/saved_items`);
+    expect(headersOf(call).get("Authorization")).toBe("Bearer live-token");
   });
 });
