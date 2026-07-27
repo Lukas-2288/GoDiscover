@@ -1041,3 +1041,43 @@ it("takes its top and bottom padding from the device's safe area", async () => {
   expect(topBar.paddingTop).not.toBe(54);
   expect(scrollContent.paddingBottom).toBe(40 + insets.bottom);
 });
+
+// ── The archive landing ────────────────────────────────────────────────────
+//
+// The app used to open straight onto a category picker with no framing. The
+// site opens on a hero that says what the place is; these lock in that the app
+// now does the same, and that the hero steps aside once you are in the deck.
+
+it("opens on the archive landing rather than a bare picker", async () => {
+  render(<HomeScreen />);
+  await act(async () => undefined);
+
+  expect(screen.getByText("Find a new\nfavourite rabbit hole.")).toBeTruthy();
+  expect(screen.getByText("01 / CHOOSE A DOOR")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Surprise me" })).toBeTruthy();
+});
+
+it("sends the hero's Surprise me straight into a deck", async () => {
+  render(<HomeScreen />);
+  await act(async () => undefined);
+
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me" }));
+
+  expect(await screen.findByRole("button", { name: /Movies\. Arrival/ })).toBeTruthy();
+});
+
+it("clears the landing once a category is open, so the deck owns the screen", async () => {
+  render(<HomeScreen />);
+  await act(async () => undefined);
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  await act(async () => undefined);
+
+  expect(screen.queryByText("01 / CHOOSE A DOOR")).toBeNull();
+  // The two Surprise buttons must never coexist: the hero's is labelled
+  // "Surprise me" and the deck's "Surprise me with a movie", and an exact-match
+  // query for the former would otherwise be ambiguous about which it found.
+  expect(screen.queryByRole("button", { name: "Surprise me" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Surprise me with a movie" })
+  ).toBeTruthy();
+});

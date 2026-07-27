@@ -14,6 +14,7 @@ import {
   type CategoryPattern,
 } from "../../lib/discovery/categoryThemes";
 import type { Palette } from "../../lib/theme";
+import { displayFont, monoFont } from "../../lib/typography";
 import type { ContentCategory } from "../../types/content";
 
 export type CategoryPickerProps = {
@@ -121,7 +122,7 @@ export function CategoryPicker({
 
   return (
     <View style={styles.grid}>
-      {CATEGORY_ORDER.map((category) => {
+      {CATEGORY_ORDER.map((category, index) => {
         const theme = getCategoryTheme(category);
         const isSelected = selected === category;
         return (
@@ -144,6 +145,13 @@ export function CategoryPicker({
             ]}
           >
             <CategoryPatternView pattern={theme.pattern} color={theme.accent} />
+            <Text
+              accessible={false}
+              importantForAccessibility="no-hide-descendants"
+              style={[styles.tileNumber, { color: theme.accent }]}
+            >
+              0{index + 1}
+            </Text>
             <View style={styles.tileContent}>
               <FontAwesome
                 accessible={false}
@@ -153,6 +161,13 @@ export function CategoryPicker({
               />
               <Text style={[styles.tileLabel, { color: palette.text }]}>
                 {theme.label}
+              </Text>
+              <Text
+                accessible={false}
+                importantForAccessibility="no-hide-descendants"
+                style={[styles.tileHint, { color: theme.accent }]}
+              >
+                OPEN PORTAL ↗
               </Text>
             </View>
           </Pressable>
@@ -176,7 +191,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     justifyContent: "flex-end",
-    minHeight: 112,
+    minHeight: 138,
     overflow: "hidden",
     padding: 16,
   },
@@ -191,9 +206,23 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   tileLabel: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontFamily: displayFont,
+    fontSize: 19,
+    fontWeight: "900",
     letterSpacing: 0.2,
+  },
+  tileNumber: {
+    fontFamily: monoFont,
+    fontSize: 10,
+    left: 16,
+    position: "absolute",
+    top: 14,
+    zIndex: 1,
+  },
+  tileHint: {
+    fontFamily: monoFont,
+    fontSize: 9,
+    letterSpacing: 0.6,
   },
   compactButton: {
     alignItems: "center",

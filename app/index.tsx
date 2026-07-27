@@ -46,6 +46,7 @@ import { signInWithGoogle } from "../lib/auth/oauth";
 import { Palette, ThemeMode, setThemeMode } from "../lib/theme";
 import { useAppTheme } from "../components/useAppTheme";
 import { getCategoryTheme } from "../lib/discovery/categoryThemes";
+import { ArchiveHero, SectionHeading } from "../components/discovery/ArchiveHero";
 import { CategoryPicker } from "../components/discovery/CategoryPicker";
 // @ts-expect-error Expo resolves the platform-specific .native/.web module.
 import DiscoveryAnnouncer from "../components/discovery/DiscoveryAnnouncer";
@@ -447,6 +448,16 @@ export default function HomeScreen() {
     clearDetail();
   };
 
+  /**
+   * The landing's "Surprise me" goes straight to cards, the way the site's
+   * does. Picking a category tile deliberately still stops at the controls, so
+   * you can search or filter before committing to a deck.
+   */
+  const handleSurprise = () => {
+    handleCategorySelect("movies");
+    void discoveryController.submit("randomize");
+  };
+
   const openStoredItem = (category: ContentCategory, item: ResultItem) => {
     discoveryController.selectCategory(category);
     openDetail({ category, item, origin: "stored" });
@@ -582,6 +593,16 @@ export default function HomeScreen() {
         testID="discovery-scroll"
       >
         <View style={styles.discoveryContent}>
+          {categoryPickerExpanded ? (
+            <>
+              <ArchiveHero palette={palette} onSurprise={handleSurprise} />
+              <SectionHeading
+                kicker="01 / CHOOSE A DOOR"
+                title="Explore the archive"
+                palette={palette}
+              />
+            </>
+          ) : null}
           <CategoryPicker
             selected={selected}
             compact={Boolean(selected) && !categoryPickerExpanded}
@@ -595,9 +616,11 @@ export default function HomeScreen() {
             (session.deck.queue.length === 0 &&
               session.activeRequest === null)) ? (
             <View style={styles.recentsSection}>
-              <View style={styles.recentsHeader}>
-                <Text style={styles.recentsTitle}>Recently viewed</Text>
-              </View>
+              <SectionHeading
+                kicker="02 / PICK UP THE THREAD"
+                title="Recently viewed"
+                palette={palette}
+              />
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
