@@ -9,7 +9,7 @@ jest.mock("@expo/vector-icons/FontAwesome", () => {
   };
 });
 
-import { ScrollView } from "react-native";
+import { ScrollView, Text } from "react-native";
 
 import {
   ArchiveAtlas,
@@ -70,6 +70,26 @@ describe("web digital arcade layout", () => {
       <WebDiscoveryStage {...stageProps} {...(overrides as object)} />
     );
     expect(UNSAFE_getAllByType(ScrollView).length).toBeGreaterThan(0);
+  });
+
+  // The site had no way to filter at all. The controls have to survive every
+  // stage state, not just the one with a card — an exhausted deck is exactly
+  // when someone wants to change the query, and sending them back to the
+  // archive to start over would be the wrong answer.
+  it.each([
+    ["a card", { activeItem: card }],
+    ["the loading state", { activeItem: null, loading: true }],
+    ["the exhausted state", { activeItem: null, exhausted: true }],
+    ["the refilling state", { activeItem: null }],
+  ])("keeps search and filters reachable while showing %s", (_name, overrides) => {
+    const { getByText } = render(
+      <WebDiscoveryStage
+        {...stageProps}
+        {...(overrides as object)}
+        controls={<Text>Search and filters</Text>}
+      />
+    );
+    expect(getByText("Search and filters")).toBeTruthy();
   });
 
   it("opens archive category portals and surprise mode", () => {

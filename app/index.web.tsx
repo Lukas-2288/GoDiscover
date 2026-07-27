@@ -28,6 +28,8 @@ import type { OrbitRecommendation } from "../components/web/map/orbitGraph";
 import type { ContentCategory, ResultItem } from "../types/content";
 import { supabase } from "../lib/supabase";
 import { bodyFont, displayFont, monoFont } from "../lib/typography";
+import { DiscoveryControls } from "../components/discovery/DiscoveryControls";
+import { darkPalette } from "../lib/theme";
 
 const EMPTY_MAP_SNAPSHOT: MapSnapshot = {
   version: 1,
@@ -690,7 +692,23 @@ function WebHomeScreen() {
       {section === "discover" ? (
         <View style={[styles.workspace, layout === "mobile" && styles.workspaceMobile]}>
           <View style={styles.workspaceMain}>
-            <WebDiscoveryStage category={selected ?? "movies"} activeItem={activeItem} nextItem={nextItem} loading={activeSession?.status === "loading"} reducedMotion={reducedMotion} onSkip={() => commit("skip")} onSave={() => commit("save")} onSimilar={() => activeItem && startSimilar(selected ?? "movies", activeItem)} onOpen={() => activeItem && openDetail(selected ?? "movies", activeItem)} notice={deckNotice} similarContext={activeSession?.deck.similarContext ?? null} exhausted={discovery.deckExhausted} />
+            <WebDiscoveryStage category={selected ?? "movies"} activeItem={activeItem} nextItem={nextItem} loading={activeSession?.status === "loading"} reducedMotion={reducedMotion} onSkip={() => commit("skip")} onSave={() => commit("save")} onSimilar={() => activeItem && startSimilar(selected ?? "movies", activeItem)} onOpen={() => activeItem && openDetail(selected ?? "movies", activeItem)} notice={deckNotice} similarContext={activeSession?.deck.similarContext ?? null} exhausted={discovery.deckExhausted} controls={activeSession && selected ? (
+              <DiscoveryControls
+                category={selected}
+                activeAction={activeSession.activeAction}
+                query={activeSession.searchQuery}
+                filters={activeSession.selectedFilters}
+                openSection={activeSession.openSection}
+                loading={activeSession.status === "loading"}
+                palette={darkPalette}
+                onActionChange={discovery.setAction}
+                onQueryChange={discovery.setQuery}
+                onToggleFilter={discovery.toggleFilter}
+                onOpenSection={discovery.setOpenSection}
+                onClearFilters={discovery.clearFilters}
+                onSubmit={discovery.submit}
+              />
+            ) : null} />
           </View>
           {panelSelection && layout !== "mobile" ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
         </View>
