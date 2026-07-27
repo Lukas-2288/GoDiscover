@@ -3,7 +3,7 @@ import { Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimens
 import type { Session } from "@supabase/supabase-js";
 
 import { WebShell, ArchiveAtlas, WebDetailPanel, WebDiscoveryStage, resolveWebLayout, webPalette, type WebSection } from "../components/web/WebHomeScreen";
-import { SavedAtlas } from "../components/web/map/SavedAtlas.web";
+import { SavedAtlasLoader } from "../components/web/map/SavedAtlasLoader.web";
 import { useDiscoveryController } from "../components/discovery/useDiscoveryController";
 import { useReducedMotion } from "../components/discovery/useReducedMotion";
 import { useClientOnlyValue } from "../components/useClientOnlyValue";
@@ -696,7 +696,7 @@ function WebHomeScreen() {
       ) : null}
       {section === "atlas" ? (
         <View style={styles.mapWorkspace}>
-          <SavedAtlas
+          <SavedAtlasLoader
             nodes={mapSnapshot.nodes}
             edges={mapSnapshot.edges}
             selectedId={selectedNodeId}

@@ -87,7 +87,7 @@ export function SavedAtlas(props: SavedAtlasProps) {
   );
 }
 
-type SavedAtlasProps = {
+export type SavedAtlasProps = {
   nodes: readonly MapNode[];
   edges: readonly MapEdge[];
   selectedId: string | null;

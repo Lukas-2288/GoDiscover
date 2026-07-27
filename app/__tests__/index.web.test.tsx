@@ -135,6 +135,14 @@ jest.mock("../../components/web/WebHomeScreen", () => {
   };
 });
 
+// The app defers the atlas behind React.lazy so React Flow and d3 stay out of
+// the first-load bundle. Substituting the loader keeps these renders
+// synchronous while still exercising the SavedAtlas mock below.
+jest.mock("../../components/web/map/SavedAtlasLoader.web", () => ({
+  SavedAtlasLoader: (props: Record<string, unknown>) =>
+    require("../../components/web/map/SavedAtlas.web").SavedAtlas(props),
+}));
+
 jest.mock("../../components/web/map/SavedAtlas.web", () => {
   const React = require("react");
   const { Pressable, Text: MockText, View } = require("react-native");
