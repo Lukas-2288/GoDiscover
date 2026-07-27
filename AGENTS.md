@@ -92,7 +92,20 @@ npx expo export --platform web     --output-dir /tmp/gd-web     --clear
 npx expo export --platform ios     --output-dir /tmp/gd-ios     --clear
 npx expo export --platform android --output-dir /tmp/gd-android --clear
 git diff --check
+
+# Layout across the device matrix. Must report "PASS — 24 cells clean";
+# exits non-zero on any finding. Run against a web export, not a dev server.
+CHROME_BIN=<chromium> node scripts/run-responsive-audit.mjs /tmp/gd-web
 ```
+
+**Any change touching web layout must re-run the responsive audit.** The web
+build disables body scrolling (`ScrollViewStyleReset` in `app/+html.tsx` emits
+`body{overflow:hidden}`), so a section without a `ScrollView` cannot be scrolled
+at all and anything past the fold is unreachable rather than merely awkward.
+That failure is invisible in a desktop browser and total on a phone. Components
+must ask `useIsMobileLayout()` rather than testing `width < 700` themselves, or
+the shell, the deck and the detail panel end up disagreeing about whether they
+are on a phone.
 
 Supabase row-level security cannot be verified from code. Migrations and
 `supabase/rls.sql` are executable documentation — a human must apply them in the

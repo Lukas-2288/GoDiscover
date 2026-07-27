@@ -4,6 +4,73 @@ Newest entries first. Format is defined in `AGENTS.md`.
 
 <!-- Entries appended below -->
 
+## 2026-07-27 — Supabase slimming, then multi-device support
+
+**Did:** Two asks: go ahead with the Supabase slimming, and research then plan
+how the website behaves on tablets and phones. Fonts explicitly left alone.
+
+**Supabase.** `createClient` builds five sub-clients in its constructor; the app
+calls two. Confirmed the other three were shipping by grepping the built bundle
+for `RealtimeChannel`, `StorageApiError` and `FunctionsHttpError` — all present,
+all unreachable. Composed `AuthClient` and `PostgrestClient` directly instead:
+entry bundle 2,262,037 → 2,159,978 bytes (102 KB, 4%).
+
+Two details had to match supabase-js exactly rather than merely work. The auth
+storage key is derived from the project ref (`sb-<ref>-auth-token`) and existing
+sessions live under it, so deriving it differently would have signed everyone
+out. And supabase-js re-resolves the access token on *every* PostgREST request;
+binding it once would keep working until expiry and then start failing RLS on
+the saved-items upserts — silent data loss an hour into a session. The test
+asserts a *refreshed* token reaches the second request, not just any token.
+
+**Devices.** Built `scripts/run-responsive-audit.mjs`: 4 sections × 6 viewports,
+reporting content past the viewport edge, content below the fold with no
+scrollable ancestor, unreachable primary actions, sub-44px touch targets, and
+sub-16px inputs. Baseline 55 findings across 24 cells; now 0.
+
+The root cause was that the page cannot scroll — `ScrollViewStyleReset` emits
+`body{overflow:hidden}` and only two components had a ScrollView. Discover,
+Account and the detail sheet had no scroll path at all, so 415px of the deck on
+a phone in landscape, 198px of the account form, and 20px even on a laptop were
+unreachable rather than merely awkward. Also: `resolveWebLayout` keyed "mobile"
+off width alone, handing an 852×393 phone the two-column workspace; both text
+inputs were under 16px, which makes iOS Safari zoom with no way back; the
+bottom-anchored sheets sat under the home indicator; the archive hero stamp hung
+360px off an iPhone SE because RNW Views default to `flexShrink: 0`; and the
+atlas asserted a 620px root on viewports 393px tall.
+
+**Measured result:** audit 55 → 0 findings. Atlas smoke passes at all four
+breakpoints. Throttled phone-profile FCP median 1736 → 1572 ms with 100 KB less
+JS — no speed regression, which was the user's stated condition.
+
+**Why:** The user asked for research first. Measuring before changing anything
+is what turned a vague "how does it look on tablet" into a specific, ordered
+list — and the scroll finding, which is the whole ballgame, is invisible from a
+desktop browser.
+
+**Files:** `lib/auth/supabaseClient.ts` (new), `lib/supabase.ts`,
+`app/index.web.tsx`, `app/index.tsx`, `app/+html.tsx`, `package.json`,
+`components/web/WebHomeScreen.tsx`, `components/web/map/SavedAtlas.web.tsx`,
+`components/web/map/SavedAtlasChrome.tsx`,
+`components/web/map/SavedAtlasLoader.web.tsx`,
+`scripts/run-responsive-audit.mjs` (new),
+`lib/auth/__tests__/supabaseClient.test.ts` (new),
+`components/web/__tests__/WebHomeScreen.test.tsx`.
+
+**Follow-ups:**
+- One self-inflicted regression, caught by the existing atlas smoke and fixed
+  before landing: moving the detail panel into a ScrollView initially put its
+  box (width, background, borders) on the content container, so the desktop rail
+  lost its 360px width. The box belongs to the scroll container.
+- The audit skips elements inside `.react-flow` — it is a pan-and-zoom canvas
+  whose node layer is deliberately larger than the window, so measuring its
+  bounding box reported overflow that does not exist. Reachability there stays
+  covered by `run-saved-atlas-browser-smoke.mjs`.
+- `supabase/rls.sql` still needs applying by hand.
+- `mapLayout`'s 200-node budget still fails in this container (~920–1180 ms vs
+  the 750 ms assertion; 701 ms on the user's Mac). Hardware-dependent, left
+  alone.
+
 ## 2026-07-27 — Performance: measured first, then three changes
 
 **Did:** Asked to improve speed. Measured before touching anything, which is
