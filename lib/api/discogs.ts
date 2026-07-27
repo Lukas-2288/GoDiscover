@@ -1,5 +1,6 @@
 import type { AlbumDetail, ArtistDetail, ResultItem } from '../../types/content';
 import { cachedRequest } from './requestCache';
+import { toPlainText } from './richText';
 
 const TOKEN = process.env.EXPO_PUBLIC_DISCOGS_TOKEN;
 const API_BASE = 'https://api.discogs.com';
@@ -441,7 +442,7 @@ export async function getArtistDetail(id: string): Promise<ArtistDetail> {
       artist.uri ?? `https://www.discogs.com/artist/${artist.id}`,
     genres: profileMetadata.genres ?? [],
     styles: profileMetadata.styles ?? [],
-    description: artist.profile ?? "",
+    description: toPlainText(artist.profile),
     releaseYear: profileMetadata.year
       ? String(profileMetadata.year)
       : unique[0]?.year

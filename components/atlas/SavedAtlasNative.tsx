@@ -1,6 +1,7 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   Image,
   PanResponder,
   Pressable,
@@ -8,7 +9,9 @@ import {
   Text,
   TextInput,
   View,
+  type GestureResponderEvent,
   type LayoutChangeEvent,
+  type PanResponderGestureState,
 } from "react-native";
 import Svg, { Line, Text as SvgText } from "react-native-svg";
 
@@ -66,9 +69,13 @@ export function SavedAtlasNative({
   const [view, setView] = useState<"map" | "list">("map");
   const [query, setQuery] = useState("");
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
-  const [camera, setCamera] = useState<AtlasCamera>({ x: 0, y: 0, scale: 1 });
-  const cameraRef = useRef(camera);
-  cameraRef.current = camera;
+  // The camera lives in Animated values, not state. Bound straight into the
+  // transform, a drag moves the map without re-rendering the graph — rendering
+  // every node and edge per frame is why panning felt broken rather than merely
+  // slow.
+  const translate = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const scale = useRef(new Animated.Value(1)).current;
+  const cameraRef = useRef<AtlasCamera>({ x: 0, y: 0, scale: 1 });
   // A pinch needs the camera and finger spread from the moment it began; the
   // gesture reports absolute positions, not deltas.
   const gestureStart = useRef<{
@@ -78,8 +85,10 @@ export function SavedAtlasNative({
   } | null>(null);
   const fittedSignature = useRef<string | null>(null);
 
-  const detailMode: ZoomDetailMode =
-    camera.scale >= 1.5 ? "close" : camera.scale >= 0.75 ? "medium" : "far";
+  // The one thing zoom changes that React must know about. It moves between
+  // three bands, not continuously, so it re-renders a handful of times across a
+  // whole pinch rather than sixty times a second.
+  const [detailMode, setDetailMode] = useState<ZoomDetailMode>("medium");
 
   const positions = useMemo(() => createAtlasLayout(nodes, edges), [edges, nodes]);
   const flowNodes = useMemo(
@@ -104,35 +113,47 @@ export function SavedAtlasNative({
     [nodes, query]
   );
 
-  const applyCamera = (next: AtlasCamera) => {
-    cameraRef.current = next;
-    setCamera(next);
-  };
+  const applyCamera = useCallback(
+    (next: AtlasCamera) => {
+      cameraRef.current = next;
+      translate.setValue({ x: next.x, y: next.y });
+      scale.setValue(next.scale);
+      const band = detailBandFor(next.scale);
+      setDetailMode((current) => (current === band ? current : band));
+    },
+    [scale, translate]
+  );
 
-  // Frame the whole atlas the first time it has both a size and some nodes, and
-  // again whenever the set of nodes changes — but not on every pan, or the
-  // camera would fight the user.
+  // Frame the whole atlas once it has both a size and some nodes, and again
+  // whenever the set of nodes changes — but never on a pan, or the camera would
+  // fight the user for control.
   const signature = `${nodes.length}:${edges.length}:${viewport.width}x${viewport.height}`;
-  if (
-    viewport.width > 0 &&
-    flowNodes.length > 0 &&
-    fittedSignature.current !== signature
-  ) {
+  useEffect(() => {
+    if (viewport.width === 0 || flowNodes.length === 0) return;
+    if (fittedSignature.current === signature) return;
     fittedSignature.current = signature;
-    const fitted = fitCameraToNodes(flowNodes, viewport);
-    cameraRef.current = fitted;
-    // Safe during render: this is derived state reacting to a changed input,
-    // and the guard above makes it run once per signature rather than looping.
-    setCamera(fitted);
-  }
+    applyCamera(fitCameraToNodes(flowNodes, viewport));
+    // `flowNodes` changes identity with the detail band, which `applyCamera`
+    // can set — depending on it here would re-fit mid-pinch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyCamera, signature, viewport]);
 
   const panResponder = useMemo(
-    () =>
-      PanResponder.create({
+    () => {
+      // A tap should still reach the node under it, so nothing is claimed until
+      // the finger travels. Past that point this is a drag on the map.
+      const claim = (
+        _event: GestureResponderEvent,
+        gesture: PanResponderGestureState
+      ) => Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4;
+
+      return PanResponder.create({
         onStartShouldSetPanResponder: () => false,
-        // Let a tap through to a node; only claim the gesture once it moves.
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          Math.abs(gesture.dx) > 4 || Math.abs(gesture.dy) > 4,
+        // Claimed on the *capture* phase because the nodes are Pressables and
+        // cover most of the canvas: on the bubble phase a drag that began on a
+        // node never reached the map at all, which is most drags.
+        onMoveShouldSetPanResponderCapture: claim,
+        onMoveShouldSetPanResponder: claim,
         onPanResponderGrant: (event) => {
           const touches = event.nativeEvent.touches;
           gestureStart.current = {
@@ -164,8 +185,11 @@ export function SavedAtlasNative({
         onPanResponderTerminate: () => {
           gestureStart.current = null;
         },
-      }),
-    []
+        // Once a drag is under way it belongs to the map until the finger lifts.
+        onPanResponderTerminationRequest: () => false,
+      });
+    },
+    [applyCamera]
   );
 
   const zoomBy = (factor: number) => {
@@ -277,14 +301,14 @@ export function SavedAtlasNative({
           testID="atlas-canvas"
           {...panResponder.panHandlers}
         >
-          <View
+          <Animated.View
             style={[
               styles.world,
               {
                 transform: [
-                  { translateX: camera.x },
-                  { translateY: camera.y },
-                  { scale: camera.scale },
+                  { translateX: translate.x },
+                  { translateY: translate.y },
+                  { scale },
                 ],
               },
             ]}
@@ -340,7 +364,7 @@ export function SavedAtlasNative({
                   onPress={() => onSelect(node.data.node)}
                 />
               ))}
-          </View>
+          </Animated.View>
 
           <View style={styles.zoomControls}>
             {([
@@ -370,6 +394,12 @@ export function SavedAtlasNative({
       )}
     </View>
   );
+}
+
+/** Zoom bands, matching the thresholds `resolveZoomDetail` uses. */
+function detailBandFor(scale: number): ZoomDetailMode {
+  if (scale >= 1.5) return "close";
+  return scale >= 0.75 ? "medium" : "far";
 }
 
 // Matches the canvas the shared layout projects node positions into.

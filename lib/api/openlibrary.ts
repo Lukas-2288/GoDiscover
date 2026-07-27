@@ -1,5 +1,6 @@
 import type { BookDetail, ResultItem } from '../../types/content';
 import { cachedRequest } from './requestCache';
+import { toPlainText } from './richText';
 
 const BASE_URL = 'https://openlibrary.org';
 const COVER_BASE = 'https://covers.openlibrary.org/b/id';
@@ -175,10 +176,13 @@ export async function getBookDetail(id: string, fallback?: { title: string; imag
   const authors = await Promise.all(
     authorKeys.slice(0, 3).map((k) => ol<OLAuthor>(`${k}.json`).then((a) => a.name).catch(() => ''))
   );
-  const description =
+  // Open Library descriptions are HTML, and were reaching the screen as
+  // literal `<p><i>…</i></p>`.
+  const description = toPlainText(
     typeof work.description === 'string'
       ? work.description
-      : work.description?.value ?? '';
+      : work.description?.value
+  );
   const year = work.first_publish_date ? parseInt(work.first_publish_date.slice(0, 4), 10) : undefined;
   return {
     id,

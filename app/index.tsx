@@ -130,6 +130,9 @@ export default function HomeScreen() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [savedOpen, setSavedOpen] = useState(false);
   const [atlasOpen, setAtlasOpen] = useState(false);
+  // Pins the page while a card is being swiped, so the deck and the scroll
+  // view stop fighting over the same finger.
+  const [swiping, setSwiping] = useState(false);
   const [mapSnapshot, setMapSnapshot] = useState<MapSnapshot>({
     version: 1,
     nodes: [],
@@ -678,6 +681,7 @@ export default function HomeScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!swiping}
         testID="discovery-scroll"
       >
         <View style={styles.discoveryContent}>
@@ -876,6 +880,7 @@ export default function HomeScreen() {
               reducedMotion={reducedMotion}
               disabled={session.status === "loading"}
               onCommit={(item, decision) => void commitFromDeck(item, decision)}
+              onSwipeActiveChange={setSwiping}
               onOpenDetail={(item) =>
                 openDetail({ category: selected, item, origin: "deck" })
               }

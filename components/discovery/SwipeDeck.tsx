@@ -13,6 +13,8 @@ import {
   Text,
   View,
   useWindowDimensions,
+  type GestureResponderEvent,
+  type PanResponderGestureState,
 } from "react-native";
 
 import { getCategoryTheme } from "../../lib/discovery/categoryThemes";
@@ -40,6 +42,11 @@ export type SwipeDeckProps = {
   onCommit(item: ResultItem, decision: CardDecision, source: "gesture" | "button"): void;
   onOpenDetail(item: ResultItem): void;
   onSimilar(item: ResultItem): void;
+  /**
+   * Fires while a swipe owns the finger, so the screen can stop its ScrollView
+   * scrolling underneath. Without it the page slides around mid-swipe.
+   */
+  onSwipeActiveChange?(active: boolean): void;
 };
 
 export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function SwipeDeck(
@@ -52,6 +59,7 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
     onCommit,
     onOpenDetail,
     onSimilar,
+    onSwipeActiveChange,
   },
   forwardedRef
 ) {
@@ -63,6 +71,12 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
   const pan = useRef(new Animated.ValueXY()).current;
   const activeCardRef = useRef<DiscoveryCardHandle>(null);
   const commitLocked = useRef(false);
+  const swipeActive = useRef(false);
+  // The deck takes the height of the card actually on top. Without this the
+  // absolutely-positioned cards behind it — which can be taller, because a
+  // longer title wraps to more lines — grew past the deck and painted over
+  // the action row, reading as two cards stacked on screen at once.
+  const [activeCardHeight, setActiveCardHeight] = useState<number | null>(null);
   const [committing, setCommitting] = useState(false);
   const motion = getMotionSpec(reducedMotion);
 
@@ -121,17 +135,36 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
     [activeItem, deckWidth, disabled, motion.commitDurationMs, onCommit, pan, reducedMotion]
   );
 
+  const setSwipeActive = useCallback(
+    (active: boolean) => {
+      if (swipeActive.current === active) return;
+      swipeActive.current = active;
+      onSwipeActiveChange?.(active);
+    },
+    [onSwipeActiveChange]
+  );
+
   const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          !disabled && !commitLocked.current && shouldClaimSwipe(gesture.dx, gesture.dy),
+    () => {
+      const claim = (_event: GestureResponderEvent, gesture: PanResponderGestureState) =>
+        !disabled &&
+        !commitLocked.current &&
+        shouldClaimSwipe(gesture.dx, gesture.dy);
+
+      return PanResponder.create({
+        // Claim on the *capture* phase. On the bubble phase the enclosing
+        // vertical ScrollView regularly won the gesture first, which is why the
+        // swipe only worked if you happened to move almost perfectly sideways.
+        onMoveShouldSetPanResponderCapture: claim,
+        onMoveShouldSetPanResponder: claim,
+        onPanResponderGrant: () => setSwipeActive(true),
         onPanResponderMove: (_event, gesture) => {
           if (!commitLocked.current) {
             pan.setValue({ x: gesture.dx, y: gesture.dy });
           }
         },
         onPanResponderRelease: (_event, gesture) => {
+          setSwipeActive(false);
           const decision = resolveSwipeDecision({
             translationX: gesture.dx,
             velocityX: gesture.vx,
@@ -144,10 +177,17 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
             resetPan();
           }
         },
-        onPanResponderTerminate: resetPan,
-        onPanResponderTerminationRequest: () => true,
-      }),
-    [deckWidth, disabled, pan, requestCommit, resetPan]
+        onPanResponderTerminate: () => {
+          setSwipeActive(false);
+          resetPan();
+        },
+        // The whole bug: agreeing to this let the ScrollView take the swipe
+        // away part-way through, so the card stopped following the finger.
+        // Once a swipe has started it belongs to the card until it ends.
+        onPanResponderTerminationRequest: () => false,
+      });
+    },
+    [deckWidth, disabled, pan, requestCommit, resetPan, setSwipeActive]
   );
 
   if (!activeItem) return null;
@@ -180,7 +220,14 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
 
   return (
     <View style={styles.layout}>
-      <View style={[styles.deck, { width: deckWidth }]} testID="swipe-deck">
+      <View
+        style={[
+          styles.deck,
+          { width: deckWidth },
+          activeCardHeight === null ? null : { height: activeCardHeight },
+        ]}
+        testID="swipe-deck"
+      >
         <View
           accessibilityElementsHidden={false}
           style={[styles.cardLayer, styles.activeLayer]}
@@ -188,6 +235,14 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
         >
           <Animated.View
             {...panResponder.panHandlers}
+            onLayout={(event) => {
+              const { height } = event.nativeEvent.layout;
+              // Ignore the sub-pixel jitter a re-layout produces; only a real
+              // change of card should resize the deck.
+              setActiveCardHeight((current) =>
+                current !== null && Math.abs(current - height) < 1 ? current : height
+              );
+            }}
             style={[
               styles.activeCard,
               reducedMotion
@@ -299,6 +354,7 @@ const styles = StyleSheet.create({
   },
   deck: {
     alignSelf: "center",
+    overflow: "hidden",
     position: "relative",
   },
   cardLayer: {
@@ -311,7 +367,11 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   behindLayer: {
+    bottom: 0,
     left: 0,
+    // `bottom: 0` alongside the `top` offset each card sets pins the behind
+    // cards inside the deck rather than letting them size themselves.
+    overflow: "hidden",
     position: "absolute",
     width: "100%",
   },
