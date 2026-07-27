@@ -11,9 +11,49 @@ export type DiscoveryStatusCardProps =
       onAction(): void;
       palette: Palette;
     }
-  | { kind: "error"; message: string; onRetry(): void; palette: Palette };
+  | { kind: "error"; message: string; onRetry(): void; palette: Palette }
+  /**
+   * The end of the road, distinct from "empty". Empty means this request found
+   * nothing and another one might; exhausted means the deck topped up and came
+   * back with nothing new, so retrying the same path is pointless. Saying so
+   * plainly beats a dead end that looks like a bug.
+   */
+  | {
+      kind: "exhausted";
+      label: string;
+      hint: string;
+      actionLabel: string;
+      onAction(): void;
+      palette: Palette;
+    };
 
 export function DiscoveryStatusCard(props: DiscoveryStatusCardProps) {
+  if (props.kind === "exhausted") {
+    return (
+      <View
+        accessibilityLiveRegion="polite"
+        style={[styles.card, { backgroundColor: props.palette.surface, borderColor: props.palette.border }]}
+      >
+        <Text style={[styles.label, { color: props.palette.text }]}>{props.label}</Text>
+        <Text style={[styles.hint, { color: props.palette.textMuted }]}>{props.hint}</Text>
+        <Pressable
+          accessibilityLabel={props.actionLabel}
+          accessibilityRole="button"
+          onPress={props.onAction}
+          style={({ pressed }) => [
+            styles.action,
+            {
+              backgroundColor: props.palette.accent,
+              opacity: pressed ? 0.8 : 1,
+            },
+          ]}
+        >
+          <Text style={[styles.actionLabel, { color: props.palette.onAccent }]}>{props.actionLabel}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   if (props.kind === "loading") {
     return (
       <View
@@ -104,6 +144,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     lineHeight: 25,
+    textAlign: "center",
+  },
+  hint: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: -8,
     textAlign: "center",
   },
   action: {

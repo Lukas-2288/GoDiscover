@@ -967,3 +967,77 @@ it("does not restore focus from a slow Similar request after category navigation
 
   expect(deckFocusMock()).not.toHaveBeenCalled();
 });
+
+// ── Deck states between "there is a card" and "there is nothing" ────────────
+//
+// The deck refills in the background once it drops to two cards. If the last
+// card is committed before that lands, the queue is empty while the session
+// status is still "ready" — which matched none of the screen's render branches
+// and left the user staring at blank space. These two tests cover the gap from
+// both ends: the refill still running, and the refill having come back empty.
+
+it("says it is fetching while the deck refills, instead of going blank", async () => {
+  const pendingTopUp = deferred<ResultItem[]>();
+  jest
+    .mocked(loadDiscovery)
+    .mockResolvedValueOnce([arrival])
+    .mockReturnValueOnce(pendingTopUp.promise);
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: "Not for me" }));
+
+  expect(await screen.findByText("Lining up the next movie...")).toBeTruthy();
+
+  await act(async () => {
+    pendingTopUp.resolve([moonlight]);
+    await pendingTopUp.promise;
+  });
+  await waitFor(() =>
+    expect(screen.queryByText("Lining up the next movie...")).toBeNull()
+  );
+});
+
+it("names the end of the shelf once a refill comes back empty", async () => {
+  jest
+    .mocked(loadDiscovery)
+    .mockResolvedValueOnce([arrival])
+    .mockResolvedValue([]);
+
+  render(<HomeScreen />);
+  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
+  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
+  fireEvent.press(await screen.findByRole("button", { name: "Not for me" }));
+
+  // Distinct from the "No movies found" empty state: this one says the path is
+  // finished rather than inviting the same request again.
+  expect(
+    await screen.findByText(
+      "You've seen every movie we can find down this path."
+    )
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Try another category, or loosen your filters.")
+  ).toBeTruthy();
+});
+
+it("takes its top and bottom padding from the device's safe area", async () => {
+  render(<HomeScreen />);
+  await act(async () => undefined);
+
+  const insets = (global as unknown as {
+    __MOCK_SAFE_AREA_INSETS__: { bottom: number; top: number };
+  }).__MOCK_SAFE_AREA_INSETS__;
+  const topBar = StyleSheet.flatten(
+    screen.getByTestId("top-bar").props.style
+  );
+  const scrollContent = StyleSheet.flatten(
+    screen.getByTestId("discovery-scroll").props.contentContainerStyle
+  );
+
+  // The old values were a hardcoded 54 and 40, right on exactly one handset.
+  expect(topBar.paddingTop).toBe(insets.top + 12);
+  expect(topBar.paddingTop).not.toBe(54);
+  expect(scrollContent.paddingBottom).toBe(40 + insets.bottom);
+});

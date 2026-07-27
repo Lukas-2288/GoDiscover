@@ -6,12 +6,15 @@ import {
 } from "@react-navigation/native";
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import "react-native-reanimated";
 
-import { useColorScheme } from "@/components/useColorScheme";
+import { useAppTheme } from "@/components/useAppTheme";
 import { useClientOnlyValue } from "@/components/useClientOnlyValue";
+import { hydrateThemeMode } from "@/lib/theme";
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -43,6 +46,12 @@ export default function RootLayout() {
     }
   }, [loaded]);
 
+  // Read the stored light/dark preference before anything paints, so the app
+  // does not flash the system theme on the way to the chosen one.
+  useEffect(() => {
+    void hydrateThemeMode();
+  }, []);
+
   const hydrated = useClientOnlyValue(false, true);
   if (!hydrated || !loaded) {
     return null;
@@ -52,14 +61,20 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+  // The user's own light/dark choice, not the raw system scheme. Reading the
+  // system scheme here meant forcing dark on a light-mode phone left the
+  // navigation theme and the status bar on the wrong side of the app.
+  const { palette } = useAppTheme();
 
   return (
-    <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-      </Stack>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider value={palette.isDark ? DarkTheme : DefaultTheme}>
+        <StatusBar style={palette.isDark ? "light" : "dark"} />
+        <Stack>
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+        </Stack>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

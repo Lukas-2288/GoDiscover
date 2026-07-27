@@ -7,6 +7,7 @@ module.exports = {
   moduleNameMapper: {
     "^d3-timer$": "<rootDir>/test/d3TimerSync.js",
   },
+  setupFiles: ["<rootDir>/test/setup.js"],
   testMatch: [
     "<rootDir>/**/__tests__/**/*.test.ts",
     "<rootDir>/**/__tests__/**/*.test.tsx",

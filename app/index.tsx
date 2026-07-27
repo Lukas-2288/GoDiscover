@@ -18,8 +18,11 @@ import {
   Text,
   View,
   TextInput,
-  useColorScheme,
 } from "react-native";
+import {
+  useSafeAreaInsets,
+  type EdgeInsets,
+} from "react-native-safe-area-context";
 import type {
   ContentCategory,
   ResultItem,
@@ -40,13 +43,9 @@ import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents"
 import { supabase } from "../lib/supabase";
 import type { Session } from "@supabase/auth-js";
 import { signInWithGoogle } from "../lib/auth/oauth";
-import {
-  Palette,
-  ThemeMode,
-  resolvePalette,
-  loadThemeMode,
-  saveThemeMode,
-} from "../lib/theme";
+import { Palette, ThemeMode, setThemeMode } from "../lib/theme";
+import { useAppTheme } from "../components/useAppTheme";
+import { getCategoryTheme } from "../lib/discovery/categoryThemes";
 import { CategoryPicker } from "../components/discovery/CategoryPicker";
 // @ts-expect-error Expo resolves the platform-specific .native/.web module.
 import DiscoveryAnnouncer from "../components/discovery/DiscoveryAnnouncer";
@@ -71,6 +70,11 @@ import {
 import { SIMILAR_TIER_LABELS } from "../lib/discovery/similarTiers";
 import { SAVE_INTENT_LABELS } from "../lib/discovery/saveIntent";
 import { thumbnailUrl } from "../lib/api/imageSizes";
+
+/** The deck's copy reads better in the singular: "the next movie", not "movies". */
+function singularFor(category: ContentCategory): string {
+  return getCategoryTheme(category).singular;
+}
 
 export default function HomeScreen() {
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
@@ -122,18 +126,15 @@ export default function HomeScreen() {
   const [authLoading, setAuthLoading] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
-  const systemScheme = useColorScheme();
-
-  const palette = useMemo(
-    () => resolvePalette(themeMode, systemScheme === "dark"),
-    [themeMode, systemScheme]
-  );
-  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const { mode: themeMode, palette } = useAppTheme();
+  // Insets rather than a hardcoded 54/40: the status bar is 20pt on a phone
+  // without a notch and 59pt on one with, and the home indicator only exists on
+  // some devices. The old constants were right on exactly one handset.
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => makeStyles(palette, insets), [palette, insets]);
 
   const changeThemeMode = (mode: ThemeMode) => {
     setThemeMode(mode);
-    saveThemeMode(mode);
   };
 
   const openAccount = () => {
@@ -147,10 +148,6 @@ export default function HomeScreen() {
     setAccountSavedMutationError(null);
     setAccountOpen(false);
   };
-
-  useEffect(() => {
-    loadThemeMode().then(setThemeMode);
-  }, []);
 
   useEffect(() => {
     runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => {});
@@ -512,7 +509,7 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       {/* Top Bar */}
-      <View style={styles.topBar}>
+      <View style={styles.topBar} testID="top-bar">
         <View style={styles.topBarLeft}>
           <Pressable
             accessibilityLabel="Open account"
@@ -581,6 +578,7 @@ export default function HomeScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        testID="discovery-scroll"
       >
         <View style={styles.discoveryContent}>
           <CategoryPicker
@@ -699,6 +697,38 @@ export default function HomeScreen() {
                 "Something went wrong while finding recommendations."
               }
               onRetry={() => void discoveryController.retry()}
+              palette={palette}
+            />
+          ) : null}
+
+          {/* The deck refills in the background once it drops to two cards. If
+              the last card is committed before that lands, the queue is empty
+              while the status is still "ready" — which matched none of the
+              states below and left the screen blank. */}
+          {selected &&
+          session &&
+          session.deck.queue.length === 0 &&
+          session.deck.toppingUp ? (
+            <DiscoveryStatusCard
+              kind="loading"
+              label={`Lining up the next ${singularFor(selected)}...`}
+              palette={palette}
+              reducedMotion={reducedMotion}
+            />
+          ) : null}
+
+          {/* A top-up that came back with nothing new. Distinct from "empty":
+              there is no point retrying the same path, so point elsewhere. */}
+          {selected &&
+          session &&
+          session.deck.queue.length === 0 &&
+          discoveryController.deckExhausted ? (
+            <DiscoveryStatusCard
+              kind="exhausted"
+              label={`You've seen every ${singularFor(selected)} we can find down this path.`}
+              hint="Try another category, or loosen your filters."
+              actionLabel="Start something new"
+              onAction={() => void discoveryController.submit("randomize")}
               palette={palette}
             />
           ) : null}
@@ -1389,16 +1419,16 @@ export default function HomeScreen() {
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, insets: EdgeInsets) => StyleSheet.create({
   // ── Layout ──
   container: { backgroundColor: c.bg, flex: 1 },
   scrollView: { flex: 1 },
-  scrollContent: { paddingBottom: 40 },
+  scrollContent: { paddingBottom: 40 + insets.bottom },
 
   // ── Top Bar ──
   topBar: {
     backgroundColor: c.topBar,
-    paddingTop: 54,
+    paddingTop: insets.top + 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1589,7 +1619,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: "85%",
-    paddingBottom: 40,
+    paddingBottom: 24 + insets.bottom,
     borderWidth: 1,
     borderColor: c.border,
     borderBottomWidth: 0,

@@ -107,3 +107,53 @@ export function resolvePalette(mode: ThemeMode, systemIsDark: boolean): Palette 
   if (mode === 'light') return lightPalette;
   return systemIsDark ? darkPalette : lightPalette;
 }
+
+/**
+ * The chosen mode lives in a module-level store rather than component state,
+ * because two trees need it and they must agree: the screen paints itself from
+ * the resolved palette, while the root layout drives the navigation theme and
+ * the status bar. When only the screen knew, forcing dark on a light-mode phone
+ * left the status bar drawing dark text over a near-black bar.
+ *
+ * A store rather than a context so `useAppTheme` works anywhere — including in
+ * tests that render a screen on its own — with no provider to remember.
+ */
+let currentMode: ThemeMode = 'system';
+const modeListeners = new Set<() => void>();
+
+function emitModeChange(): void {
+  for (const listener of modeListeners) listener();
+}
+
+export function getThemeMode(): ThemeMode {
+  return currentMode;
+}
+
+export function subscribeThemeMode(listener: () => void): () => void {
+  modeListeners.add(listener);
+  return () => {
+    modeListeners.delete(listener);
+  };
+}
+
+/** Applies immediately and persists in the background. */
+export function setThemeMode(mode: ThemeMode): void {
+  if (mode === currentMode) return;
+  currentMode = mode;
+  emitModeChange();
+  void saveThemeMode(mode);
+}
+
+/** Reads the stored preference once at startup. */
+export async function hydrateThemeMode(): Promise<void> {
+  const stored = await loadThemeMode();
+  if (stored === currentMode) return;
+  currentMode = stored;
+  emitModeChange();
+}
+
+/** Test seam: drops the in-memory preference back to its initial value. */
+export function resetThemeModeForTests(): void {
+  currentMode = 'system';
+  modeListeners.clear();
+}
