@@ -4,6 +4,70 @@ Newest entries first. Format is defined in `AGENTS.md`.
 
 <!-- Entries appended below -->
 
+## 2026-07-27 — The app catches up with the site
+
+**Did:** Cleared the app's bugs and gave it the website's identity, in six
+phases. Six commits on `claude/website-improvement-handoff-iolxey`.
+
+**Bugs (`d51f476`).** Four, all of which the web had fixed and native had not.
+The deck went *blank* while refilling — `topUpStarted` sets `deck.toppingUp` but
+leaves the status "ready", which matched none of the screen's render branches.
+The exhausted state existed in the controller (`deckExhausted`) and only the web
+ever read it. Safe areas were a hardcoded 54 and 40, right on exactly one
+handset, while `react-native-safe-area-context` sat unused in the dependencies.
+And forcing a theme broke the status bar, because the screen honoured the user's
+choice while `_layout` fed `ThemeProvider` the raw system scheme.
+
+**Shared tokens (`4b68b0d`).** The two platforms each declared their own colour
+literals, so "make them match" meant copying hex between files. `webPalette` is
+now projected from `lib/theme.ts` and a test asserts the projection. Along the
+way: **the fonts had never loaded on either platform** — 89 references to
+"Bricolage Grotesque", "IBM Plex Mono" and "DM Sans" with no `@font-face`, no
+webfont link and no font file anywhere. Replaced with a deliberate system stack
+in `lib/typography.ts`, zero bytes, per the user's call.
+
+**Native identity (`2b655fa`).** The app's card now carries the site's cream
+face and dark ink. Writing the contrast test caught a genuine AA failure that
+came *from* the site: `#857896` is 3.63:1 on cream. Fixed on both.
+
+**Front door (`a978350`).** The app opened onto a bare picker; it now opens on
+the same landing the site does.
+
+**Web filters (`00fa6be`).** The site could not filter at all. `DiscoveryControls`
+is pure React Native, so this was wiring, not porting.
+
+**Saved Atlas (`e5567c0`).** The last gap. Mostly a filing problem: `atlasGraph`,
+`orbitGraph` and `SavedAtlasList` were already platform-free and merely sat under
+`components/web/`. Only the renderer had to be built.
+
+**Measured result:** 418 tests pass (from 375), responsive audit stays 24/24,
+atlas smoke passes at all four breakpoints, all three exports succeed. Web
+bundle unchanged; iOS +220 KB for `react-native-svg`.
+
+**Why:** The user asked to fix the app's bugs and match the site while keeping
+what the app already did. Worth recording that the gap ran *both* ways — the
+site had no filtering at all, which is why Phase 5 exists.
+
+**Files:** `lib/theme.ts`, `lib/typography.ts` (new), `lib/discovery/atlasCamera.ts`
+(new), `lib/discovery/atlasGraph.ts` + `orbitGraph.ts` (moved from
+`components/web/map/`), `components/atlas/` (new: `SavedAtlasNative.tsx`,
+`SavedAtlasList.tsx` moved), `components/discovery/ArchiveHero.tsx` (new),
+`components/useAppTheme.ts` (new), `app/index.tsx`, `app/index.web.tsx`,
+`app/_layout.tsx`, `components/web/WebHomeScreen.tsx`, `test/setup.js` (new).
+
+**Follow-ups:**
+- Trail recording on native saves was folded in despite not being selected: a
+  native atlas without it shows the phone's own saves as orphan nodes. Easy to
+  drop if unwanted.
+- The jest setup mocks safe-area insets with *realistic notch metrics* rather
+  than the library's all-zero mock — padding derived from a zero inset is
+  indistinguishable from padding that ignores insets, which was the bug.
+- The native atlas has pan, pinch, zoom buttons, fit-view, search and a list
+  view. It does not yet have the orbit/recommendation flow the web map has.
+- `supabase/rls.sql` still needs applying by hand.
+- `mapLayout`'s 200-node budget still fails in this container (~920–1220 ms vs
+  the 750 ms assertion; 701 ms on the user's Mac). Hardware-dependent.
+
 ## 2026-07-27 — Supabase slimming, then multi-device support
 
 **Did:** Two asks: go ahead with the Supabase slimming, and research then plan
