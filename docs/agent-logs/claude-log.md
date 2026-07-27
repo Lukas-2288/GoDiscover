@@ -4,6 +4,61 @@ Newest entries first. Format is defined in `AGENTS.md`.
 
 <!-- Entries appended below -->
 
+## 2026-07-27 — Overnight: integration tests, a damping hazard, and the website UI
+
+**Did:** Continued unsupervised after the seven fixes landed. Two things found by
+testing rather than reading, and one by actually looking at the site.
+
+- **Damping could re-create the dead end.** Writing an end-to-end test surfaced
+  it: books are frequently tagged only "Fiction", so rejecting three crossed the
+  threshold and excluded the whole category. `MAX_DAMPED_TRAITS` capped how many
+  traits were damped; nothing capped what damping could *cost*. Damping is now a
+  preference, not a filter — `applyDiscoveryContext` prefers undamped items but
+  returns the damped ones over nothing, and Randomize/Filter repeat the request
+  undamped when the damped one comes back empty. The second half matters because
+  TMDB excludes in the query itself, so no post-filter can recover it.
+- **New `discoveryFlow.integration.test.tsx`** exercises the real controller,
+  reducer, `loadDiscovery`, similarity ladder and rejection storage together —
+  only the provider is faked. Fifteen consecutive skips, damping after three
+  rejections, a rejected title never returning, undo restoring *and* un-damping,
+  Similar widening, honest exhaustion.
+- **The website never had the undo or save-intent bar.** They were wired only
+  into `app/index.tsx`, the *native* screen. The site renders `WebHomeScreen`,
+  which had neither — while its keyboard hint promised "U TO UNDO". Now wired,
+  pinned on desktop (it rendered at 904px against a 900px viewport), in flow on
+  mobile where pinning collided with the actions.
+- **"THE CABINET IS QUIET"** — the copy from the original report — showed
+  whenever the queue was briefly empty. Now reserved for genuine exhaustion.
+- **Three pre-existing mobile defects**, all content rendering outside a 390px
+  viewport: a 469px heading in a 322px box, the portal tag at x=572 because the
+  header never wrapped, and four nav items on four rows beside a non-shrinking
+  wordmark. The browser was zooming out to 572px; it now reports 390 with no
+  overflow and the deck actions are reachable without scrolling.
+
+**Why:** User asked me to keep going overnight. Chose test-and-verify work over
+the risky native-bundle refactor.
+
+**Files:** `lib/discovery/loadDiscovery.ts`,
+`components/discovery/__tests__/discoveryFlow.integration.test.tsx`,
+`components/web/WebHomeScreen.tsx`, `app/index.web.tsx`, `AGENTS.md`.
+
+**Verification:** 353 tests / 352 passing, typecheck clean, web+iOS+Android
+exports, atlas browser matrix 12/12, plus real-browser screenshots of the deck,
+skip-undo and save-intent states at 390×844 and 1440×900.
+
+**Follow-ups:**
+
+- Native bundle bloat now has a precise root cause in `AGENTS.md`
+  (`expo-router/_ctx.ios.js` matches an *optional* `.web` group). Deferred: dead
+  weight, not a runtime bug, and the fix is a structural refactor of two large
+  files touching the build. Wanted a human call before doing it.
+- On mobile the follow-up bar sits below the fold in flow. Reachable, but a
+  bottom-sheet treatment would be better — that is a design call, not a defect.
+- `mapLayout`'s 200-node budget still the only failing test; hardware-dependent.
+- The visual driver stubs `fetch` because there are no API keys here. Real
+  provider behaviour — especially the Discogs era spread — is still unverified
+  against live data.
+
 ## 2026-07-26 — Discovery quality: deck memory, depth, undo, accent blue
 
 **Did:** Seven issues the user hit while using the site. Three shared one root —
