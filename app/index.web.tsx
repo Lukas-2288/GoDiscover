@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
-import type { Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/auth-js";
 
 import { WebShell, ArchiveAtlas, WebDetailPanel, WebDiscoveryStage, resolveWebLayout, webPalette, type WebSection } from "../components/web/WebHomeScreen";
 import { SavedAtlasLoader } from "../components/web/map/SavedAtlasLoader.web";

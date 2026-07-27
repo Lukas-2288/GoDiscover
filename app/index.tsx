@@ -38,7 +38,7 @@ import {
 } from "../lib/storage/savedMutations";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
 import { supabase } from "../lib/supabase";
-import type { Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/auth-js";
 import { signInWithGoogle } from "../lib/auth/oauth";
 import {
   Palette,
