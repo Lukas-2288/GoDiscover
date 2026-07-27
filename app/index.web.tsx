@@ -18,6 +18,7 @@ import { loadMapRecommendationSeed } from "../lib/discovery/mapRecommendationAda
 import { findMapRecommendations } from "../lib/discovery/mapRecommendations";
 import {
   DEFAULT_SAVE_INTENT,
+  SAVE_INTENT_LABELS,
   applySaveIntent,
   type SaveIntent,
 } from "../lib/discovery/saveIntent";
@@ -102,6 +103,30 @@ function WebHomeScreen() {
   const { activeItem } = discovery;
   const activeSession = selected ? discovery.state.sessions[selected] : null;
   const nextItem = activeSession?.deck.queue[1] ?? null;
+
+  // The deck's follow-up bar. A save offers a direction; a skip offers the way
+  // back. Neither existed on web before — the keyboard hint promised "U TO
+  // UNDO" against nothing.
+  const { lastSave, lastSkip, actionError } = discovery.state;
+  const deckNotice = actionError
+    ? { message: actionError }
+    : lastSave
+    ? {
+        message: `Saved ${lastSave.item.title}`,
+        onUndo: () => void discovery.undo(),
+        actions: (["more-like-this", "something-different"] as const).map(
+          (intent) => ({
+            label: SAVE_INTENT_LABELS[intent],
+            onPress: () => void discovery.followSave(lastSave.item, intent),
+          })
+        ),
+      }
+    : lastSkip
+    ? {
+        message: `Not for me: ${lastSkip.item.title}`,
+        onUndo: () => void discovery.undoSkip(),
+      }
+    : null;
 
   useEffect(() => {
     let authEventObserved = false;
@@ -664,7 +689,7 @@ function WebHomeScreen() {
       {section === "discover" ? (
         <View style={[styles.workspace, layout === "mobile" && styles.workspaceMobile]}>
           <View style={styles.workspaceMain}>
-            <WebDiscoveryStage category={selected ?? "movies"} activeItem={activeItem} nextItem={nextItem} loading={activeSession?.status === "loading"} reducedMotion={reducedMotion} onSkip={() => commit("skip")} onSave={() => commit("save")} onSimilar={() => activeItem && startSimilar(selected ?? "movies", activeItem)} onOpen={() => activeItem && openDetail(selected ?? "movies", activeItem)} />
+            <WebDiscoveryStage category={selected ?? "movies"} activeItem={activeItem} nextItem={nextItem} loading={activeSession?.status === "loading"} reducedMotion={reducedMotion} onSkip={() => commit("skip")} onSave={() => commit("save")} onSimilar={() => activeItem && startSimilar(selected ?? "movies", activeItem)} onOpen={() => activeItem && openDetail(selected ?? "movies", activeItem)} notice={deckNotice} similarContext={activeSession?.deck.similarContext ?? null} exhausted={discovery.deckExhausted} />
           </View>
           {panelSelection && layout !== "mobile" ? <WebDetailPanel item={panelSelection.item} category={panelSelection.category} detail={detail} saved={savedItems.some((item) => item.category === panelSelection.category && item.id === panelSelection.item.id)} loading={detailLoading} onClose={() => { setDetailSelection(null); setSelectedNodeId(null); }} onSave={toggleDetailSave} onSimilar={() => startSimilar(panelSelection.category, panelSelection.item)} onShare={() => void shareItem(panelSelection.category, panelSelection.item)} /> : null}
         </View>

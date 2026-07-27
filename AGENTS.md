@@ -45,13 +45,33 @@ before concluding something doesn't exist.
 - **Never break native.** The map is web-only (`app/index.web.tsx`,
   `components/web/map/`). Native must keep exporting cleanly — verify with
   `npx expo export --platform ios`.
-  Known gap: the map code is *intended* to be shaken out of native bundles, but
-  is not. `saved-atlas-flow` — a string that exists only in
-  `SavedAtlas.web.tsx` — appears 11 times in the iOS Hermes bundle, so
-  `@xyflow/react` and `d3-force` are being pulled in through Expo Router's
-  route enumeration. Harmless at runtime (the router never renders the `.web`
-  route on native) but it is dead weight. Unresolved; see the 2026-07-26
-  claude-log entry.
+  Known gap: the web tree is *intended* to be shaken out of native bundles, but
+  is not. Markers unique to `app/index.web.tsx` ("Removed from saved atlas"),
+  `components/web/WebHomeScreen.tsx` ("Collapse detail drawer") and
+  `SavedAtlas.web.tsx` ("saved-atlas-flow", ×11) all appear in the iOS Hermes
+  bundle, so `@xyflow/react` and `d3-force` ship to native too.
+
+  **Root cause** — `node_modules/expo-router/_ctx.ios.js` builds its route
+  context with:
+
+  ```
+  .*(?:\.android|\.web)?\.[tj]sx?$
+  ```
+
+  The `(?:\.web)?` group is *optional*, so `./index.web.tsx` matches the native
+  route context and is bundled. Expo Router dedupes it by route name at
+  runtime, so nothing renders — but the module is already in the bundle.
+
+  **Fix** — keep exactly one route file per route and platform-split *below*
+  `app/`: `app/index.tsx` becomes a re-export of `../components/home`, with
+  `home.tsx` and `home.web.tsx` beside each other. Metro's platform resolution
+  does apply to ordinary imports, so native never reaches the web variant.
+  Editing the regex is not an option (it lives in `node_modules`), and stubbing
+  `.web.tsx` to an empty module via `resolveRequest` risks Expo Router
+  registering a route with no default export.
+
+  Not a runtime bug — dead weight only. Deferred as a refactor of two large
+  files that touches the build; see the 2026-07-27 claude-log entry.
 - **Don't widen scope.** Finish what was asked. If you find an adjacent problem,
   note it in your log entry's Follow-ups rather than fixing it uninvited.
 - **Report honestly.** If tests fail, say so with the output. If you skipped a
