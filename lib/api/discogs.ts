@@ -287,22 +287,12 @@ export async function randomArtists(
       per_page: 50,
     });
   }
-  const seen = new Set<string>();
-  const out: ResultItem[] = [];
-  for (const r of data.results ?? []) {
-    const { artist } = parseTitle(r.title);
-    if (artist === 'Various' || seen.has(artist.toLowerCase())) continue;
-    seen.add(artist.toLowerCase());
-    out.push({
-      id: `name:${encodeURIComponent(artist)}`,
-      title: artist,
-      subtitle: 'Artist',
-      meta: '',
-      imageUrl: cleanImage(r.cover_image || r.thumb),
-    });
-    if (out.length === 5) break;
-  }
-  return out;
+  const candidates = artistNameCandidates(
+    data.results ?? [],
+    5 * ARTIST_CANDIDATE_MULTIPLIER
+  );
+  const artists = await artistsByName(candidates, { requireMatch: true });
+  return artists.slice(0, 5);
 }
 
 export async function filterAlbums(params: MusicFilterParams): Promise<ResultItem[]> {
@@ -345,25 +335,15 @@ export async function filterArtists(params: MusicFilterParams): Promise<ResultIt
     per_page: 50,
     page,
   });
-  const seen = new Set<string>();
-  const out: ResultItem[] = [];
   const artistSource = params.deterministic
     ? [...(data.results ?? [])].sort(stableResultOrder)
     : data.results ?? [];
-  for (const r of artistSource) {
-    const { artist } = parseTitle(r.title);
-    if (artist === 'Various' || seen.has(artist.toLowerCase())) continue;
-    seen.add(artist.toLowerCase());
-    out.push({
-      id: `name:${encodeURIComponent(artist)}`,
-      title: artist,
-      subtitle: 'Artist',
-      meta: '',
-      imageUrl: cleanImage(r.cover_image || r.thumb),
-    });
-    if (out.length === 5) break;
-  }
-  return out;
+  const candidates = artistNameCandidates(
+    artistSource,
+    5 * ARTIST_CANDIDATE_MULTIPLIER
+  );
+  const artists = await artistsByName(candidates, { requireMatch: true });
+  return artists.slice(0, 5);
 }
 
 type ArtistInfo = {
@@ -516,7 +496,7 @@ async function searchSimilarMasters(
 }
 
 /** One Discogs search per name, failures dropped rather than propagated. */
-async function mastersByArtistNames(
+export async function mastersByArtistNames(
   names: readonly string[],
   perArtist: number
 ): Promise<SearchReleaseItem[]> {
@@ -536,7 +516,24 @@ async function mastersByArtistNames(
   return found.flat();
 }
 
-async function artistsByName(names: readonly string[]): Promise<ResultItem[]> {
+export type ArtistsByNameOptions = {
+  /**
+   * Drop names Discogs cannot resolve instead of falling back to a `name:` id.
+   *
+   * A caller browsing artists wants real artists — a name that resolves to
+   * nothing is usually not an artist at all, which is exactly the junk the
+   * deck used to be full of. A caller following a similarity edge would rather
+   * show an unresolved name than a gap, so that path leaves this off.
+   */
+  requireMatch?: boolean;
+  /** Per-artist `meta`, keyed by the name passed in. */
+  metaByName?: ReadonlyMap<string, string>;
+};
+
+export async function artistsByName(
+  names: readonly string[],
+  options: ArtistsByNameOptions = {}
+): Promise<ResultItem[]> {
   const found = await Promise.all(
     names.map(async (name) => {
       try {
@@ -555,6 +552,7 @@ async function artistsByName(names: readonly string[]): Promise<ResultItem[]> {
   names.forEach((name, index) => {
     const match = found[index];
     if (seen.has(name.toLowerCase())) return;
+    if (!match && options.requireMatch) return;
     seen.add(name.toLowerCase());
     out.push({
       id: match ? String(match.id) : `name:${encodeURIComponent(name)}`,
@@ -562,12 +560,42 @@ async function artistsByName(names: readonly string[]): Promise<ResultItem[]> {
       // disambiguation suffixes like "Eden (5)".
       title: name,
       subtitle: 'Artist',
-      meta: '',
+      meta: options.metaByName?.get(name) ?? '',
       imageUrl: match ? cleanImage(match.cover_image || match.thumb) : undefined,
     });
   });
   return out;
 }
+
+/**
+ * Artist names worth resolving, taken from master-release titles.
+ *
+ * Discogs' `type=artist` search does not honour `genre` or `year` reliably, so
+ * a genre- or era-constrained artist deck has to be sampled from releases and
+ * resolved afterwards rather than queried directly.
+ */
+function artistNameCandidates(
+  results: readonly SearchReleaseItem[],
+  limit: number
+): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const result of results) {
+    const { artist } = parseTitle(result.title);
+    // "Various" is a compilation credit, not an artist.
+    const name = stripDiscogsSuffix(artist);
+    if (!name || name === 'Various') continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+    if (names.length === limit) break;
+  }
+  return names;
+}
+
+/** Resolve twice the wanted count, since some names are not real artists. */
+const ARTIST_CANDIDATE_MULTIPLIER = 2;
 
 export async function getSimilarAlbums(
   id: string,
