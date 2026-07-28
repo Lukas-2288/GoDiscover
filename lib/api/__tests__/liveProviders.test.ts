@@ -156,11 +156,58 @@ live("whether Last.fm is answering at all", () => {
         neighbours.join(", ") || "(nothing)"
       }`
     );
+    // "Key set, nothing back" has several very different causes and the app
+    // cannot tell them apart by design, so ask Last.fm directly and print
+    // whatever it says rather than leaving the reader to guess again.
+    if (neighbours.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log(await describeLastfmFailure("Chappell Roan"));
+    }
     // A key that is set but answers nothing for a well-known artist is a bad
     // key, not a quiet one.
     expect(neighbours.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Why Last.fm said nothing, in the words of Last.fm.
+ *
+ * Two details make the raw response worth reading. Last.fm answers HTTP 200
+ * with an error *body* — `{"error":10,"message":"Invalid API key"}` — so the
+ * status alone is actively misleading. And the codes point at different fixes:
+ * 10 is a bad key, 29 is rate limiting, 6 is an artist it does not know.
+ */
+async function describeLastfmFailure(artist: string): Promise<string> {
+  const key = process.env.EXPO_PUBLIC_LASTFM_API_KEY ?? "";
+  // Printed into a terminal that gets pasted into chat, so never the whole key.
+  const masked =
+    key.length > 8
+      ? `${key.slice(0, 4)}…${key.slice(-4)} (${key.length} chars)`
+      : `(${key.length} chars)`;
+  const url =
+    `https://ws.audioscrobbler.com/2.0/?method=artist.getsimilar` +
+    `&artist=${encodeURIComponent(artist)}&autocorrect=1&limit=8` +
+    `&api_key=${encodeURIComponent(key)}&format=json`;
+
+  const lines = [
+    `  Key loaded from .env: ${masked}`,
+    "  Compare that against the key you used with curl. A mismatch means the",
+    "  .env line is being parsed differently than you expect (stray quotes, a",
+    "  trailing comment, a duplicate line); a match means the key or account is.",
+  ];
+  try {
+    const res = await fetch(url);
+    const body = (await res.text()).slice(0, 400);
+    lines.push(`  Last.fm HTTP ${res.status}`, `  Body: ${body}`);
+  } catch (error) {
+    lines.push(
+      `  The request itself failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+  return `\nWhy Last.fm returned nothing:\n${lines.join("\n")}`;
+}
 
 live("whether What's New is actually new", () => {
   // Every provider expresses "new" differently — a date window, a sort, a year
