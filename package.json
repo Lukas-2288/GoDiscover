@@ -8,7 +8,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "export:web": "expo export --platform web",
-    "deploy:web": "expo export --platform web && npx eas-cli@latest deploy --platform web",
+    "deploy:web": "expo export --platform web && npx eas-cli@latest deploy --prod",
+    "deploy:web:preview": "expo export --platform web && npx eas-cli@latest deploy",
     "test": "jest --runInBand",
     "typecheck": "tsc --noEmit"
   },

@@ -172,9 +172,14 @@ npx eas-cli@latest init    # one-time; writes extra.eas.projectId into app.json
 npm run deploy:web         # exports to dist/ and uploads, prints the live URL
 ```
 
-`deploy:web` re-exports every time, because `eas deploy` uploads whatever is
-already in `dist/` rather than rebuilding. Read the note on `EXPO_PUBLIC_`
-variables below before pointing anyone else at the URL.
+`deploy:web` publishes to the project's production URL, which stays the same
+across deploys — that is the one worth bookmarking. `deploy:web:preview` puts the
+same build on a throwaway URL instead, for checking something without touching
+what other people have open. The first deploy prompts once for the subdomain.
+
+Both re-export first, because `eas deploy` uploads whatever is already in `dist/`
+rather than rebuilding. Read the note on `EXPO_PUBLIC_` variables below before
+pointing anyone else at the URL.
 
 Worth knowing what the deployed site does and does not cover: web renders
 `WebDiscoveryStage` (`components/web/WebHomeScreen.tsx`), not the native
