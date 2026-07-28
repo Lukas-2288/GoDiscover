@@ -12,6 +12,7 @@ type TMDBMovie = {
   overview: string;
   release_date: string;
   vote_average: number;
+  vote_count?: number;
   poster_path: string | null;
   backdrop_path: string | null;
   genre_ids?: number[];
@@ -140,6 +141,58 @@ export async function randomMovies(
   const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', q);
   const shuffled = [...data.results].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, 5).map(toResultItem);
+}
+
+/** How far back "new" reaches. A season, not a week — see `freshMovies`. */
+export const FRESH_MOVIE_WINDOW_DAYS = 120;
+/**
+ * Far below the 200 randomise uses. A film out for three weeks has not had
+ * time to collect votes, so the usual floor would exclude everything actually
+ * new; this only has to exclude entries with no audience at all.
+ */
+export const FRESH_MOVIE_MIN_VOTES = 20;
+
+function isoDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+export type FreshMovieParams = {
+  page?: number;
+  withoutGenres?: string[];
+  /** Injectable so a test can pin the window without mocking the clock. */
+  now?: Date;
+};
+
+/**
+ * Recent cinema and streaming releases, newest first.
+ *
+ * `/movie/now_playing` looks like the obvious endpoint and is the wrong one:
+ * it is scoped to a region, runs only a couple of pages deep, carries no vote
+ * floor, and takes no `without_genres` — so "Not for me" could not steer it.
+ * A date-windowed discover query keeps all of that.
+ */
+export async function freshMovies(
+  params: FreshMovieParams = {}
+): Promise<ResultItem[]> {
+  const now = params.now ?? new Date();
+  const from = new Date(now.getTime() - FRESH_MOVIE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const q: Record<string, string | number> = {
+    sort_by: 'primary_release_date.desc',
+    page: params.page ?? 1,
+    include_adult: 'false',
+    'primary_release_date.gte': isoDate(from),
+    // Without an upper bound, sorting by date descending returns films that
+    // have not come out yet — announced dates run years ahead.
+    'primary_release_date.lte': isoDate(now),
+    'vote_count.gte': FRESH_MOVIE_MIN_VOTES,
+    // Theatrical and digital. Excludes festival-only and physical-media
+    // entries, which are dated by a release nobody could have watched.
+    with_release_type: '2|3',
+  };
+  const withoutGenreIds = toGenreIds(params.withoutGenres);
+  if (withoutGenreIds) q.without_genres = withoutGenreIds;
+  const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', q);
+  return data.results.slice(0, 5).map(toResultItem);
 }
 
 /** Maps filter labels to a TMDB `with_genres`/`without_genres` value. */

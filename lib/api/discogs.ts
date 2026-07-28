@@ -63,7 +63,7 @@ function cleanImage(url?: string): string | undefined {
   return url;
 }
 
-function releaseToResult(r: SearchReleaseItem): ResultItem {
+export function releaseToResult(r: SearchReleaseItem): ResultItem {
   const { artist, album } = parseTitle(r.title);
   return {
     id: String(r.id),
@@ -231,6 +231,59 @@ export async function searchArtists(query: string): Promise<ResultItem[]> {
 }
 
 export type RandomMusicParams = { page?: number };
+
+export type FreshMusicParams = {
+  page?: number;
+  /** Injectable so a test can pin the window without mocking the clock. */
+  now?: Date;
+};
+
+/**
+ * Years a music deck will accept as "new".
+ *
+ * Two, not one. Discogs is a catalogue built by contributors, so a release is
+ * listed when somebody gets round to entering it — asking only for the current
+ * year returns almost nothing each January, and thin results for months after.
+ */
+function freshMusicYears(now: Date): number[] {
+  const year = now.getFullYear();
+  return [year, year - 1];
+}
+
+/** Master releases from the current year, falling back a year when thin. */
+async function freshMasters(
+  params: FreshMusicParams,
+  perPage: number
+): Promise<SearchReleaseItem[]> {
+  const page = params.page ?? 1;
+  for (const year of freshMusicYears(params.now ?? new Date())) {
+    const data = await discogs<SearchResponse<SearchReleaseItem>>(
+      '/database/search',
+      { type: 'master', year: String(year), per_page: perPage, page }
+    );
+    if (data.results?.length) return data.results;
+  }
+  return [];
+}
+
+export async function freshAlbums(
+  params: FreshMusicParams = {}
+): Promise<ResultItem[]> {
+  const results = await freshMasters(params, 20);
+  return results.slice(0, 5).map(releaseToResult);
+}
+
+export async function freshArtists(
+  params: FreshMusicParams = {}
+): Promise<ResultItem[]> {
+  const results = await freshMasters(params, 50);
+  const candidates = artistNameCandidates(
+    results,
+    5 * ARTIST_CANDIDATE_MULTIPLIER
+  );
+  const artists = await artistsByName(candidates, { requireMatch: true });
+  return artists.slice(0, 5);
+}
 
 export async function randomAlbums(
   params: RandomMusicParams = {}

@@ -8,7 +8,9 @@ import {
 } from "react-native";
 
 import { ERA_FILTERS, GENRE_FILTERS, RATING_FILTERS } from "../../constants/Filters";
+import { hasLastfmKey } from "../../lib/api/lastfm";
 import { getCategoryTheme } from "../../lib/discovery/categoryThemes";
+import { supportsUnderground } from "../../lib/discovery/undergroundMode";
 import {
   ERA_ANY_FILTER,
   RATING_ANY_FILTER,
@@ -186,6 +188,10 @@ export function DiscoveryControls({
       : null;
   const searchDisabled = loading || query.trim().length === 0;
   const surpriseArticle = category === "albums" ? "an" : "a";
+  // Offered only where there is something real behind it: listener counts come
+  // from Last.fm, which covers music and nothing else, and says nothing at all
+  // without a key. A button that cannot answer is worse than no button.
+  const showUnderground = supportsUnderground(category) && hasLastfmKey();
 
   const submitSearch = () => {
     if (!searchDisabled) onSubmit("search");
@@ -251,6 +257,62 @@ export function DiscoveryControls({
             Filter {categoryLabel}
           </Text>
         </Pressable>
+
+        <Pressable
+          accessibilityLabel={`Show new ${categoryLabel}`}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: loading }}
+          disabled={loading}
+          onPress={() => onSubmit("fresh")}
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+              opacity: loading ? 0.5 : 1,
+            },
+            pressed && styles.pressed,
+          ]}
+        >
+          <FontAwesome
+            accessible={false}
+            name="bolt"
+            size={15}
+            color={palette.text}
+          />
+          <Text style={[styles.secondaryButtonText, { color: palette.text }]}>
+            What&rsquo;s New
+          </Text>
+        </Pressable>
+
+        {showUnderground ? (
+          <Pressable
+            accessibilityLabel={`Find underground ${categoryLabel}`}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: loading }}
+            disabled={loading}
+            onPress={() => onSubmit("underground")}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              {
+                backgroundColor: palette.surface,
+                borderColor: palette.border,
+                opacity: loading ? 0.5 : 1,
+              },
+              pressed && styles.pressed,
+            ]}
+          >
+            <FontAwesome
+              accessible={false}
+              name="compass"
+              size={15}
+              color={palette.text}
+            />
+            <Text style={[styles.secondaryButtonText, { color: palette.text }]}>
+              Underground
+            </Text>
+          </Pressable>
+        ) : null}
 
         <Pressable
           accessibilityRole="button"

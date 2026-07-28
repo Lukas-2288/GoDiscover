@@ -1,8 +1,15 @@
 import { clearRequestCache } from "../requestCache";
-import { randomMovies, getSimilarMovies } from "../tmdb";
-import { randomBooks, filterBooks } from "../openlibrary";
-import { randomAlbums, searchAlbums, getSimilarAlbums } from "../discogs";
+import { freshMovies, randomMovies, getSimilarMovies } from "../tmdb";
+import { freshBooks, randomBooks, filterBooks } from "../openlibrary";
+import {
+  freshAlbums,
+  freshArtists,
+  randomAlbums,
+  searchAlbums,
+  getSimilarAlbums,
+} from "../discogs";
 import { hasLastfmKey, similarArtistNames } from "../lastfm";
+import { undergroundArtists } from "../underground";
 import type { ResultItem } from "../../../types/content";
 
 /**
@@ -152,6 +159,81 @@ live("whether Last.fm is answering at all", () => {
     // A key that is set but answers nothing for a well-known artist is a bad
     // key, not a quiet one.
     expect(neighbours.length).toBeGreaterThan(0);
+  });
+});
+
+live("whether What's New is actually new", () => {
+  // Every provider expresses "new" differently — a date window, a sort, a year
+  // filter — so the only honest check is to ask each one and look at the years
+  // that come back. A fixture would just be repeating the query back.
+  it.each([
+    ["movies", () => freshMovies(), "subtitle"],
+    ["books", () => freshBooks(), "meta"],
+    ["albums", () => freshAlbums(), "meta"],
+  ] as const)("returns recent %s", async (label, fetch, field) => {
+    const items = await fetch();
+    const years = yearsOf(items, field);
+    // eslint-disable-next-line no-console
+    console.log(
+      `\nWhat's New — ${label}: ${items.length} results${
+        years.length ? `, years ${Math.min(...years)}–${Math.max(...years)}` : ""
+      }\n  ${items.slice(0, 5).map((item) => item.title).join("\n  ")}`
+    );
+
+    expect(items.length).toBeGreaterThan(0);
+    if (years.length > 0) {
+      // Catalogues lag, so last year counts as new; anything older does not.
+      expect(Math.min(...years)).toBeGreaterThanOrEqual(
+        new Date().getFullYear() - 1
+      );
+    }
+  });
+
+  it("finds artists behind the new releases", async () => {
+    const artists = await freshArtists();
+    // eslint-disable-next-line no-console
+    console.log(
+      `\nWhat's New — artists: ${artists.map((a) => a.title).join(", ") || "(nothing)"}`
+    );
+    expect(artists.length).toBeGreaterThan(0);
+    // The fake-artist fix: every card is a real Discogs record, never a name
+    // scraped out of a release title.
+    for (const artist of artists) {
+      expect(artist.id.startsWith("name:")).toBe(false);
+    }
+  });
+});
+
+live("whether Underground finds anyone", () => {
+  // This is the slowest thing in the app by construction: no Last.fm endpoint
+  // returns listener counts in a listing, so each candidate costs its own
+  // request. The wall-clock assertion is the point of the test — it shares the
+  // 20s budget every discovery request gets.
+  it("returns artists inside the listener band, within the request budget", async () => {
+    if (!hasLastfmKey()) {
+      // eslint-disable-next-line no-console
+      console.log("\nUnderground — no Last.fm key; skipping.");
+      return;
+    }
+    const startedAt = Date.now();
+    const artists = await undergroundArtists({ tag: "indie" });
+    const elapsedMs = Date.now() - startedAt;
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `\nUnderground — ${artists.length} artists in ${(elapsedMs / 1000).toFixed(1)}s\n  ${
+        artists.map((a) => `${a.title} (${a.meta})`).join("\n  ") || "(nothing)"
+      }`
+    );
+
+    expect(artists.length).toBeGreaterThan(0);
+    // Well inside the 20s discovery timeout, with room for a slow network.
+    expect(elapsedMs).toBeLessThan(15_000);
+    for (const artist of artists) {
+      const listeners = Number.parseInt(artist.meta.replace(/[^\d.]/g, ""), 10);
+      expect(Number.isFinite(listeners)).toBe(true);
+      expect(artist.id.startsWith("name:")).toBe(false);
+    }
   });
 });
 

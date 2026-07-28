@@ -1,6 +1,7 @@
 import {
   decadeToYearRange,
   filterMovies,
+  freshMovies,
   getSimilarMovies,
   randomMovies,
   searchMovies,
@@ -8,6 +9,7 @@ import {
 } from "../api/tmdb";
 import {
   filterBooks,
+  freshBooks,
   getSimilarBooks,
   OL_SUBJECTS,
   randomBooks,
@@ -16,6 +18,8 @@ import {
 import {
   filterAlbums,
   filterArtists,
+  freshAlbums,
+  freshArtists,
   getSimilarAlbums,
   getSimilarArtists,
   randomAlbums,
@@ -24,6 +28,7 @@ import {
   searchArtists,
   SPOTIFY_GENRE_MAP,
 } from "../api/discogs";
+import { undergroundAlbums, undergroundArtists } from "../api/underground";
 import type { ContentCategory, ResultItem } from "../../types/content";
 import { loadNextSimilar } from "./similarTiers";
 import type { DiscoveryLoadContext, DiscoveryLoadInput } from "./types";
@@ -40,6 +45,17 @@ export type DiscoveryProvider = {
     item: ResultItem,
     context?: DiscoveryLoadContext
   ): Promise<ResultItem[]>;
+  /**
+   * Recent releases, in whatever sense the provider is actually good at.
+   * Optional because not every catalogue has a usable notion of new.
+   */
+  fresh?(context?: DiscoveryLoadContext): Promise<ResultItem[]>;
+  /**
+   * Artists inside a listener band — known enough to be real, obscure enough
+   * to be a find. Optional and music-only: Last.fm is the only source of
+   * listener counts here, and it has nothing to say about films or books.
+   */
+  underground?(context?: DiscoveryLoadContext): Promise<ResultItem[]>;
   mapFilter?(
     filters: readonly string[],
     context: MapProviderContext
@@ -104,6 +120,13 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
       });
     },
     similar: (item) => getSimilarMovies(item.id),
+    fresh: (context) =>
+      freshMovies({
+        page: context?.page,
+        withoutGenres: context?.dampedTraits
+          ? [...context.dampedTraits]
+          : undefined,
+      }),
     mapFilter: (filters, context) => {
       const range = yearRange(filters);
       const genreIds = filters
@@ -140,6 +163,7 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
       });
     },
     similar: (item) => getSimilarBooks(item.id),
+    fresh: (context) => freshBooks({ page: context?.page }),
     mapFilter: (filters) => {
       const range = yearRange(filters);
       const subjects = filters
@@ -170,6 +194,8 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
       });
     },
     similar: (item) => getSimilarArtists(item.id),
+    fresh: (context) => freshArtists({ page: context?.page }),
+    underground: (context) => undergroundArtists({ page: context?.page }),
     mapFilter: (filters, context) => {
       const range = yearRange(filters);
       const genres = filters
@@ -201,6 +227,8 @@ export const defaultDiscoveryProviders: DiscoveryProviderRegistry = {
       });
     },
     similar: (item) => getSimilarAlbums(item.id),
+    fresh: (context) => freshAlbums({ page: context?.page }),
+    underground: (context) => undergroundAlbums({ page: context?.page }),
     mapFilter: (filters, context) => {
       const range = yearRange(filters);
       const genres = filters
@@ -278,53 +306,102 @@ export async function loadDiscovery(
   context: DiscoveryLoadContext = {}
 ): Promise<ResultItem[]> {
   const provider = providers[input.category];
-  if (input.mode === "search") {
-    if (!input.query.trim()) throw new Error("Search requires a query");
-    return applyDiscoveryContext(await provider.search(input.query.trim()), context, {
-      dampTraits: false,
-    });
-  }
-  if (input.mode === "filter") {
-    return withDampingFallback(context, (used) =>
-      provider.filter([...input.filters], used)
-    );
-  }
-  if (input.mode === "randomize") {
-    return withDampingFallback(context, (used) => provider.random(used));
-  }
-  if (!("seed" in input)) throw new Error("Similar requires a source item");
+  // A switch rather than an if-chain so the compiler, not a confused user,
+  // catches a mode nobody routed: the chain's fallthrough used to land an
+  // unhandled mode in the Similar branch and throw "Similar requires a source
+  // item", which describes neither the cause nor the fix.
+  switch (input.mode) {
+    case "search": {
+      if (!input.query.trim()) throw new Error("Search requires a query");
+      return applyDiscoveryContext(await provider.search(input.query.trim()), context, {
+        dampTraits: false,
+      });
+    }
+    case "filter":
+      return withDampingFallback(context, (used) =>
+        provider.filter([...input.filters], used)
+      );
+    case "randomize":
+      return withDampingFallback(context, (used) => provider.random(used));
+    case "fresh": {
+      if (!provider.fresh) throw new Error(freshUnsupported(input.category));
+      const fresh = provider.fresh;
+      return withDampingFallback(context, (used) => fresh(used));
+    }
+    case "underground": {
+      if (!provider.underground) {
+        throw new Error(undergroundUnsupported(input.category));
+      }
+      // Deliberately no damping fallback. The re-fetch that fallback performs
+      // is the expensive one here — every candidate costs a listener lookup —
+      // and `applyDiscoveryContext` already yields damping rather than
+      // returning an empty deck.
+      return applyDiscoveryContext(
+        await provider.underground(context),
+        context,
+        { dampTraits: true }
+      );
+    }
+    case "similar": {
+      // The type says `seed` is present; this is the runtime floor for callers
+      // that built the input dynamically. Similar is the one mode that cannot
+      // fall back to something sensible without it.
+      if (!input.seed) throw new Error("Similar requires a source item");
 
-  // Walk the similarity ladder rather than re-asking for page 1 every time,
-  // which is what made Similar repeat itself.
-  const seen = new Set<string>([
-    ...(context.presentIds ?? []),
-    ...(context.rejectedIds ?? []),
-  ]);
-  const { items, tier, exhausted } = await loadNextSimilar(
-    {
-      category: input.category,
-      seed: input.seed,
-      tier: context.similarTier ?? "close",
-      page: context.page ?? 1,
-    },
-    {
-      provider,
-      wander: (page) => provider.random({ page }),
-    },
-    seen
-  );
-  context.onSimilarTier?.(tier, exhausted);
-  // Similar is already scoped by the seed the user chose, so damping its genre
-  // would gut the result. Rejected and present items are still removed.
-  return applyDiscoveryContext(items, context, { dampTraits: false });
+      // Walk the similarity ladder rather than re-asking for page 1 every time,
+      // which is what made Similar repeat itself.
+      const seen = new Set<string>([
+        ...(context.presentIds ?? []),
+        ...(context.rejectedIds ?? []),
+      ]);
+      const { items, tier, exhausted } = await loadNextSimilar(
+        {
+          category: input.category,
+          seed: input.seed,
+          tier: context.similarTier ?? "close",
+          page: context.page ?? 1,
+        },
+        {
+          provider,
+          wander: (page) => provider.random({ page }),
+        },
+        seen
+      );
+      context.onSimilarTier?.(tier, exhausted);
+      // Similar is already scoped by the seed the user chose, so damping its
+      // genre would gut the result. Rejected and present items are still
+      // removed.
+      return applyDiscoveryContext(items, context, { dampTraits: false });
+    }
+    default: {
+      const unreached: never = input;
+      throw new Error(
+        `Unroutable discovery mode: ${JSON.stringify(unreached)}`
+      );
+    }
+  }
 }
 
+const CATEGORY_LABEL: Record<ContentCategory, string> = {
+  movies: "movies",
+  books: "books",
+  artists: "artists",
+  albums: "albums",
+};
+
 export function toDiscoveryError(category: ContentCategory): string {
-  const label: Record<ContentCategory, string> = {
-    movies: "movies",
-    books: "books",
-    artists: "artists",
-    albums: "albums",
-  };
-  return `Couldn't load ${label[category]}. Check your connection and try again.`;
+  return `Couldn't load ${CATEGORY_LABEL[category]}. Check your connection and try again.`;
+}
+
+/**
+ * Both of these describe a wiring mistake, not something a user did. The UI
+ * does not offer a mode its category cannot serve, so reaching either means a
+ * provider is missing a method it was routed to.
+ */
+function freshUnsupported(category: ContentCategory): string {
+  return `No source of new ${CATEGORY_LABEL[category]} is configured`;
+}
+
+function undergroundUnsupported(category: ContentCategory): string {
+  return `Underground is not available for ${CATEGORY_LABEL[category]}`;
 }

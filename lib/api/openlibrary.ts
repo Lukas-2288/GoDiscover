@@ -195,6 +195,41 @@ export async function filterBooks(params: BookFilterParams): Promise<ResultItem[
   return docs.slice(0, 5).map(toResultItem);
 }
 
+export type FreshBookParams = {
+  page?: number;
+  /** Injectable so a test can pin the window without mocking the clock. */
+  now?: Date;
+};
+
+const FRESH_PAGE_SIZE = 20;
+
+/**
+ * Recently published books.
+ *
+ * `sort=new` alone is not enough and is quietly misleading: it orders by when
+ * the *record* was created, so it happily returns a 1946 novel catalogued last
+ * Tuesday. Pairing it with a publication-year range is what makes the answer
+ * mean "new book" rather than "new database row".
+ */
+export async function freshBooks(
+  params: FreshBookParams = {}
+): Promise<ResultItem[]> {
+  const year = (params.now ?? new Date()).getFullYear();
+  // Open Library's publication years are patchy and often lag, so last year
+  // stays in scope rather than leaving January with an empty shelf.
+  const data = await ol<OLSearchResponse>('/search.json', {
+    q: `first_publish_year:[${year - 1} TO ${year}]`,
+    limit: FRESH_PAGE_SIZE,
+    offset: params.page ? (params.page - 1) * FRESH_PAGE_SIZE : 0,
+    sort: 'new',
+    fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
+  });
+  // A missing cover is the existing stand-in for a thin record, and new
+  // entries are the thinnest of all.
+  const withCovers = data.docs.filter((d) => d.cover_i);
+  return withCovers.slice(0, 5).map(toResultItem);
+}
+
 export async function getBookDetail(id: string, fallback?: { title: string; imageUrl?: string }): Promise<BookDetail> {
   const work = await ol<OLWork>(`/works/${id}.json`);
   const authorKeys = ((work as any).authors ?? [])

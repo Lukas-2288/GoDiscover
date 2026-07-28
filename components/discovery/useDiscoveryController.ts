@@ -172,6 +172,9 @@ function createRequestInput(
       filters: Object.freeze([...session.selectedFilters]),
     });
   }
+  if (mode === "fresh" || mode === "underground") {
+    return Object.freeze({ category, mode });
+  }
   return Object.freeze({ category, mode: "randomize" });
 }
 
@@ -196,6 +199,13 @@ function copyRequestInput(input: DiscoveryLoadInput): DiscoveryLoadInput {
       mode: "similar",
       seed: Object.freeze(copyItem(input.seed)),
     });
+  }
+  // These two carry no payload, but they still need naming explicitly: every
+  // request and every top-up replay passes through here, so a mode that falls
+  // to the line below is silently rewritten to randomize — the deck would load
+  // correctly once and then refill with something else entirely.
+  if (input.mode === "fresh" || input.mode === "underground") {
+    return Object.freeze({ category: input.category, mode: input.mode });
   }
   return Object.freeze({ category: input.category, mode: "randomize" });
 }

@@ -45,7 +45,8 @@ export function stripDiscogsSuffix(name: string): string {
 
 async function lastfm<T>(
   method: string,
-  params: Record<string, string | number>
+  params: Record<string, string | number>,
+  options: { ttlMs?: number } = {}
 ): Promise<T | null> {
   const key = apiKey();
   if (!key) return null;
@@ -59,11 +60,90 @@ async function lastfm<T>(
   }).toString();
   // The key is in the query string, so keep it out of the cache key.
   const cacheKey = `lastfm:${method}:${JSON.stringify(params)}`;
-  return cachedRequest(cacheKey, async () => {
-    const res = await fetch(`${API_BASE}?${qs}`);
-    if (!res.ok) throw new Error(`Last.fm ${res.status}`);
-    return res.json() as Promise<T>;
-  });
+  return cachedRequest(
+    cacheKey,
+    async () => {
+      const res = await fetch(`${API_BASE}?${qs}`);
+      if (!res.ok) throw new Error(`Last.fm ${res.status}`);
+      return res.json() as Promise<T>;
+    },
+    options.ttlMs === undefined ? undefined : { ttlMs: options.ttlMs }
+  );
+}
+
+/**
+ * Listener counts move over months, not minutes, and Underground pays for
+ * every one of them individually — so they are worth remembering far longer
+ * than the default.
+ */
+const LISTENER_TTL_MS = 24 * 60 * 60 * 1000;
+
+type ArtistInfoResponse = {
+  artist?: { stats?: { listeners?: string; playcount?: string } };
+  error?: number;
+  message?: string;
+};
+
+/**
+ * How many distinct people have listened to this artist, or null when the
+ * answer is unavailable for any reason.
+ *
+ * Null and zero mean different things and the caller has to tell them apart:
+ * zero is a real artist nobody plays, null is "Last.fm did not say", and
+ * treating the second as the first would silently drop artists for being
+ * unpopular when the request simply failed.
+ */
+export async function artistListeners(artist: string): Promise<number | null> {
+  const query = stripDiscogsSuffix(artist);
+  if (!query) return null;
+  let data: ArtistInfoResponse | null;
+  try {
+    data = await lastfm<ArtistInfoResponse>(
+      'artist.getinfo',
+      { artist: query, autocorrect: 1 },
+      { ttlMs: LISTENER_TTL_MS }
+    );
+  } catch {
+    return null;
+  }
+  if (!data || data.error) return null;
+  const listeners = Number.parseInt(data.artist?.stats?.listeners ?? '', 10);
+  return Number.isFinite(listeners) ? listeners : null;
+}
+
+type TagArtistsResponse = {
+  topartists?: { artist?: { name?: string }[] };
+  error?: number;
+  message?: string;
+};
+
+/**
+ * Artists carrying a tag, most-tagged first.
+ *
+ * Note what this does *not* return: listener counts. No Last.fm listing
+ * endpoint includes them, which is why a listener band cannot be queried and
+ * has to be checked an artist at a time.
+ */
+export async function topArtistsByTag(
+  tag: string,
+  { limit = 50, page = 1 }: { limit?: number; page?: number } = {}
+): Promise<string[]> {
+  if (!tag.trim()) return [];
+  let data: TagArtistsResponse | null;
+  try {
+    data = await lastfm<TagArtistsResponse>('tag.gettopartists', {
+      tag: tag.trim(),
+      limit,
+      page,
+    });
+  } catch {
+    return [];
+  }
+  if (!data || data.error) return [];
+  const names = (data.topartists?.artist ?? [])
+    .map((entry) => entry.name?.trim())
+    .filter((name): name is string => Boolean(name));
+  return [...new Set(names)];
 }
 
 /**

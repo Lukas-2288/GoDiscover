@@ -1,6 +1,11 @@
 import type { ContentCategory, ResultItem } from "../../types/content";
 
-export type DiscoveryActionMode = "search" | "filter" | "randomize";
+export type DiscoveryActionMode =
+  | "search"
+  | "filter"
+  | "randomize"
+  | "fresh"
+  | "underground";
 export type DiscoveryMode = DiscoveryActionMode | "similar";
 
 export type DiscoveryRequestIdentity = {
@@ -12,6 +17,11 @@ export type DiscoveryLoadInput =
   | { category: ContentCategory; mode: "randomize" }
   | { category: ContentCategory; mode: "search"; query: string }
   | { category: ContentCategory; mode: "filter"; filters: readonly string[] }
+  // Both carry no payload of their own: what "new" and "underground" mean is
+  // fixed per provider, so the deck's own page cursor is the only variable.
+  // That is also what lets a top-up replay `retryInput` unchanged.
+  | { category: ContentCategory; mode: "fresh" }
+  | { category: ContentCategory; mode: "underground" }
   | { category: ContentCategory; mode: "similar"; seed: ResultItem };
 
 export type SimilarContext = {

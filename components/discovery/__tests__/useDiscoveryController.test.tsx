@@ -1035,6 +1035,45 @@ it("tops up in the background before the deck runs out", async () => {
   expect(result.current.deckExhausted).toBe(false);
 });
 
+// Every request and every background refill is rebuilt through
+// `copyRequestInput`, which falls back to randomize for any mode it does not
+// name. A mode missing from that list loads correctly once and then quietly
+// refills the deck with unfiltered results — the deck keeps working, so
+// nothing looks broken, it just stops being the mode the user asked for.
+it.each(["fresh", "underground"] as const)(
+  "keeps refilling a %s deck with the same mode, not randomize",
+  async (mode) => {
+    const load = jest
+      .fn<Promise<ResultItem[]>, [DiscoveryLoadInput, unknown]>()
+      .mockResolvedValueOnce([movie, secondMovie])
+      .mockResolvedValue([{ id: "m3", title: "Third", subtitle: "", meta: "" }]);
+    const { result } = renderHook(() =>
+      useDiscoveryController({
+        dependencies: {
+          load,
+          addSaved: jest.fn(async () => []),
+          removeSaved: jest.fn(async () => []),
+        },
+      })
+    );
+
+    act(() => result.current.selectCategory("artists"));
+    await act(async () => {
+      await result.current.submit(mode);
+    });
+
+    await waitFor(() => expect(load.mock.calls.length).toBeGreaterThan(1));
+    for (const [input] of load.mock.calls) {
+      expect(input.mode).toBe(mode);
+    }
+    // And the refill still advances the page, or it would refetch page one.
+    expect(load).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode }),
+      expect.objectContaining({ page: 2 })
+    );
+  }
+);
+
 it("marks the deck exhausted only once a top-up returns nothing new", async () => {
   const load = jest
     .fn<Promise<ResultItem[]>, [DiscoveryLoadInput, unknown]>()

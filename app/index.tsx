@@ -47,6 +47,7 @@ import { signInWithGoogle } from "../lib/auth/oauth";
 import { Palette, ThemeMode, setThemeMode } from "../lib/theme";
 import { useAppTheme } from "../components/useAppTheme";
 import { getCategoryTheme } from "../lib/discovery/categoryThemes";
+import { emptyStateAction } from "../lib/discovery/emptyState";
 import { ArchiveHero, SectionHeading } from "../components/discovery/ArchiveHero";
 import { CategoryPicker } from "../components/discovery/CategoryPicker";
 // @ts-expect-error Expo resolves the platform-specific .native/.web module.
@@ -885,26 +886,30 @@ export default function HomeScreen() {
             />
           ) : null}
 
-          {session?.status === "empty" && !activeItem ? (
-            <DiscoveryStatusCard
-              kind="empty"
-              label={`No ${selected} found. Try another approach.`}
-              actionLabel={
-                session.retryInput?.mode === "search" ||
-                session.retryInput?.mode === "filter"
-                  ? "Adjust search or filters"
-                  : "Shuffle again"
-              }
-              onAction={() => {
-                const mode = session.retryInput?.mode;
-                if (mode === "search" || mode === "filter") {
-                  discoveryController.setAction(mode);
-                  return;
-                }
-                void discoveryController.submit("randomize");
-              }}
-              palette={palette}
-            />
+          {session?.status === "empty" && !activeItem && selected ? (
+            (() => {
+              const empty = emptyStateAction(
+                session.retryInput?.mode,
+                selected
+              );
+              return (
+                <DiscoveryStatusCard
+                  kind="empty"
+                  label={empty.message}
+                  actionLabel={empty.label}
+                  onAction={() => {
+                    if (empty.kind === "openPanel") {
+                      discoveryController.setAction(empty.mode);
+                      return;
+                    }
+                    void discoveryController.submit(
+                      empty.kind === "retryMode" ? empty.mode : "randomize"
+                    );
+                  }}
+                  palette={palette}
+                />
+              );
+            })()
           ) : null}
 
           {selected && session && session.deck.queue.length > 0 ? (

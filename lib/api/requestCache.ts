@@ -24,17 +24,29 @@ type Entry = {
 /** Provider metadata is effectively static; minutes of staleness is invisible. */
 export const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
-/** Bounded so a long session cannot grow the cache without limit. */
-export const MAX_ENTRIES = 120;
+/**
+ * Bounded so a long session cannot grow the cache without limit.
+ *
+ * Sized for the browse modes that fan out: one Underground deck can look up
+ * two dozen artists' listener counts, and at the old ceiling of 120 those
+ * entries evicted each other within a couple of refills, which defeats the
+ * point of caching the expensive call.
+ */
+export const MAX_ENTRIES = 400;
 
 const entries = new Map<string, Entry>();
 const inFlight = new Map<string, Promise<unknown>>();
 
 function evictIfNeeded(): void {
-  if (entries.size <= MAX_ENTRIES) return;
-  // Map preserves insertion order, so the oldest key is the first.
-  const oldest = entries.keys().next();
-  if (!oldest.done) entries.delete(oldest.value);
+  // A loop, not a single `if`: this is only ever called after one insert
+  // today, so one eviction happens to suffice, but that is a property of the
+  // caller rather than of this function.
+  while (entries.size > MAX_ENTRIES) {
+    // Map preserves insertion order, so the oldest key is the first.
+    const oldest = entries.keys().next();
+    if (oldest.done) return;
+    entries.delete(oldest.value);
+  }
 }
 
 export function readCachedRequest<T>(key: string, now = Date.now()): T | undefined {
