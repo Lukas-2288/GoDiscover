@@ -2,6 +2,7 @@ import { clearRequestCache } from "../requestCache";
 import { randomMovies, getSimilarMovies } from "../tmdb";
 import { randomBooks, filterBooks } from "../openlibrary";
 import { randomAlbums, searchAlbums, getSimilarAlbums } from "../discogs";
+import { hasLastfmKey, similarArtistNames } from "../lastfm";
 import type { ResultItem } from "../../../types/content";
 
 /**
@@ -123,6 +124,34 @@ live("what a refill actually fetches", () => {
     );
     // Page 2 must not repeat page 1. That repetition *was* the bug.
     expect(distinct.size).toBeGreaterThan(perPage[0].length);
+  });
+});
+
+live("whether Last.fm is answering at all", () => {
+  // Last.fm is deliberately silent on failure: no key, a typo'd key, a revoked
+  // key and a network error all return an empty list so the Discogs path can
+  // run. That is right for the app and useless for setup, because it makes a
+  // broken key look exactly like a missing one. This says which you have.
+  it("returns neighbours for a modern artist when a key is configured", async () => {
+    if (!hasLastfmKey()) {
+      // eslint-disable-next-line no-console
+      console.log(
+        "\nLast.fm — no EXPO_PUBLIC_LASTFM_API_KEY set." +
+          "\n  Music similarity is running on Discogs tags alone." +
+          "\n  Get a free key at https://www.last.fm/api/account/create"
+      );
+      return;
+    }
+    const neighbours = await similarArtistNames("Chappell Roan", 8);
+    // eslint-disable-next-line no-console
+    console.log(
+      `\nLast.fm — key configured; Chappell Roan → ${
+        neighbours.join(", ") || "(nothing)"
+      }`
+    );
+    // A key that is set but answers nothing for a well-known artist is a bad
+    // key, not a quiet one.
+    expect(neighbours.length).toBeGreaterThan(0);
   });
 });
 
