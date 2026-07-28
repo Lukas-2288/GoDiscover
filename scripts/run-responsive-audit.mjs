@@ -140,8 +140,28 @@ try {
 
   let commandId = 0;
   const pending = new Map();
+  // Kept so a failure can say *why* the page is empty. Without this the only
+  // symptom of the app throwing at import time is "could not reach the
+  // Archive tab", which reads like a layout bug and is not one.
+  const pageErrors = [];
   socket.addEventListener("message", ({ data }) => {
     const message = JSON.parse(data);
+    if (message.method === "Runtime.exceptionThrown") {
+      const details = message.params.exceptionDetails;
+      pageErrors.push(details.exception?.description ?? details.text);
+      return;
+    }
+    if (
+      message.method === "Runtime.consoleAPICalled" &&
+      message.params.type === "error"
+    ) {
+      pageErrors.push(
+        (message.params.args ?? [])
+          .map((arg) => arg.value ?? arg.description ?? arg.type)
+          .join(" ")
+      );
+      return;
+    }
     if (!message.id) return;
     const request = pending.get(message.id);
     pending.delete(message.id);
@@ -193,7 +213,10 @@ try {
 
     for (const section of SECTIONS) {
       if (!(await clickTab(send, evaluate, section.tab))) {
-        throw new Error(`Could not reach the ${section.tab} tab`);
+        throw new Error(
+          `Could not reach the ${section.tab} tab` +
+            (await describeEmptyPage(evaluate, pageErrors))
+        );
       }
       for (const step of section.enter ?? []) {
         if (!(await clickLabel(send, evaluate, step))) {
@@ -522,6 +545,38 @@ function report(rows, failures) {
 // this module has evaluated.
 function clickTab(send, evaluate, label) {
   return clickMatching(send, evaluate, "[role=tab]", label);
+}
+
+/**
+ * A missing tab has two very different causes: the app rendered and the tab is
+ * off-screen (a real finding), or the app never rendered at all (not a layout
+ * problem). Only the second one leaves the page with no interactive elements,
+ * and the usual reason is `lib/supabase.ts` throwing at import time because
+ * EXPO_PUBLIC_SUPABASE_URL and _ANON_KEY are absent — this audit needs the same
+ * .env the app does.
+ */
+async function describeEmptyPage(evaluate, pageErrors) {
+  let mounted = true;
+  try {
+    mounted = await evaluate(
+      `document.querySelectorAll('[role=tab],[role=button]').length > 0`
+    );
+  } catch {
+    // Falling back to the generic message is better than masking the original
+    // failure with one from the diagnostic itself.
+    return "";
+  }
+  if (mounted) return "";
+  const [firstError] = pageErrors;
+  return (
+    "\n\nThe page rendered no interactive elements at all, so the app did not " +
+    "mount — this is not a layout failure." +
+    (firstError ? `\nFirst error from the page:\n  ${firstError.split("\n")[0]}` : "") +
+    "\n\nIf that mentions Supabase env vars, this audit needs a .env: the web " +
+    "bundle inlines EXPO_PUBLIC_* at build time, so export with the env in " +
+    "place.\nMetro caches transforms, so re-export with --clear after changing " +
+    ".env or you will keep testing the old values."
+  );
 }
 
 function clickLabel(send, evaluate, label) {

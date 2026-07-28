@@ -178,8 +178,12 @@ same build on a throwaway URL instead, for checking something without touching
 what other people have open. The first deploy prompts once for the subdomain.
 
 Both re-export first, because `eas deploy` uploads whatever is already in `dist/`
-rather than rebuilding. Read the note on `EXPO_PUBLIC_` variables below before
-pointing anyone else at the URL.
+rather than rebuilding, and both pass `--clear`: Metro caches transforms, and
+`EXPO_PUBLIC_*` values are inlined at transform time, so a cached bundle can
+carry the *previous* `.env` and publish it. That costs about half a minute per
+deploy and is worth it — the same trap is why `npx expo start --clear` is the
+fix when a key change appears to have no effect. Read the note on
+`EXPO_PUBLIC_` variables below before pointing anyone else at the URL.
 
 Worth knowing what the deployed site does and does not cover: web renders
 `WebDiscoveryStage` (`components/web/WebHomeScreen.tsx`), not the native
