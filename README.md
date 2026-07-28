@@ -120,7 +120,8 @@ Single-page architecture (no bottom tabs). The category theme changes, but the d
 | Backend & Auth | Supabase (PostgreSQL + Row-Level Security)                             |
 | Movies API     | [TMDB](https://www.themoviedb.org/documentation/api)                   |
 | Books API      | [Open Library](https://openlibrary.org/developers/api)                 |
-| Music API      | [Spotify Web API](https://developer.spotify.com/documentation/web-api) |
+| Music API      | [Discogs](https://www.discogs.com/developers)                          |
+| Music similarity | [Last.fm](https://www.last.fm/api) (optional)                        |
 
 ---
 
@@ -131,7 +132,7 @@ Single-page architecture (no bottom tabs). The category theme changes, but the d
 - Node.js 18+
 - Expo CLI (`npm install -g expo-cli`)
 - A [Supabase](https://supabase.com) account (free tier works)
-- API keys for TMDB and Spotify
+- API keys for TMDB and Discogs (see Environment Variables below)
 
 ### Installation
 
@@ -159,21 +160,56 @@ npx expo start --android
 npx expo start --web
 ```
 
+### Deploying the web build
+
+The web target is deployed to [EAS Hosting](https://docs.expo.dev/eas/hosting/introduction/),
+which has a free tier for any Expo account. `app.json` is already configured for
+it (`web.output: "static"`).
+
+```bash
+npx eas-cli@latest login   # one-time
+npx eas-cli@latest init    # one-time; writes extra.eas.projectId into app.json
+npm run deploy:web         # exports to dist/ and uploads, prints the live URL
+```
+
+`deploy:web` re-exports every time, because `eas deploy` uploads whatever is
+already in `dist/` rather than rebuilding. Read the note on `EXPO_PUBLIC_`
+variables below before pointing anyone else at the URL.
+
+Worth knowing what the deployed site does and does not cover: web renders
+`WebDiscoveryStage` (`components/web/WebHomeScreen.tsx`), not the native
+`SwipeDeck`. Gesture behaviour on the deck is a native-only code path and has to
+be checked in Expo Go or a development build.
+
 ---
 
 ## Environment Variables
 
-Create a `.env` file in the root of the project:
+Create a `.env` file in the root of the project (`cp .env.example .env`):
 
 ```env
+EXPO_PUBLIC_TMDB_API_KEY=your_tmdb_api_key
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-EXPO_PUBLIC_TMDB_API_KEY=your_tmdb_api_key
-EXPO_PUBLIC_SPOTIFY_CLIENT_ID=your_spotify_client_id
-EXPO_PUBLIC_SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+EXPO_PUBLIC_DISCOGS_TOKEN=your_discogs_personal_access_token
+EXPO_PUBLIC_LASTFM_API_KEY=optional_lastfm_api_key_for_better_music_similarity
 ```
 
+Last.fm is optional. Without it, music similarity falls back to Discogs' genre and
+style tags alone — which is how a 2025 country-pop single once returned a 1975
+trucker album. A [free key](https://www.last.fm/api/account/create) enables
+`artist.getSimilar`, which is built from listening data rather than tags.
+
 > Never commit your `.env` file. It's already in `.gitignore`.
+
+**These values are not secrets once the app ships.** Anything prefixed
+`EXPO_PUBLIC_` is inlined into the JavaScript bundle at build time, so it is
+readable by anyone with the app — trivially so on the web, where it is one
+view-source away. The Supabase anon key is designed for this (Row-Level Security
+is what protects the data) and the TMDB and Last.fm keys are read-only and free.
+The Discogs token is a **personal access token tied to your account**: fine for
+local development, worth rotating or swapping for a throwaway account's token
+before sharing a deployed build widely.
 
 ---
 
