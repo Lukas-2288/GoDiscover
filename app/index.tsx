@@ -1,6 +1,7 @@
 import AntDesign from "@expo/vector-icons/AntDesign";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import React, {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -386,14 +387,14 @@ export default function HomeScreen() {
     }, 0);
   };
 
-  const openDetail = (selection: DetailSelection) => {
+  const openDetail = useCallback((selection: DetailSelection) => {
     invalidateDetailFocusRestoration();
     detailSavedMutationSequenceRef.current += 1;
     setDetailSavedMutationError(null);
     detailSelectionRef.current = selection;
     setDetailRetryKey(0);
     setDetailSelection(selection);
-  };
+  }, []);
 
   const shareDetail = async (category: ContentCategory, item: ResultItem) => {
     const kind =
@@ -491,42 +492,61 @@ export default function HomeScreen() {
    * relationship is what the atlas is made of. The web recorded it and native
    * did not, so anything saved on the phone arrived on the map unconnected.
    */
-  const commitFromDeck = async (
-    item: ResultItem,
-    decision: "save" | "skip"
-  ) => {
-    const category = selected;
-    const seed = trailSeed.current;
-    const ownerId = authSession?.user.id ?? null;
-    const result = await discoveryController.commit(item, decision);
-    if (
-      decision !== "save" ||
-      !result.confirmed ||
-      result.decision !== "save" ||
-      !category ||
-      !seed ||
-      // A work is not a trail from itself.
-      (seed.category === category && seed.id === item.id)
-    ) {
-      return;
-    }
-    const saved = result.items.find(
-      (entry) => entry.category === category && entry.id === item.id
-    );
-    if (!saved) return;
-    await recordMapTrailEvent(
-      {
-        source: seed,
-        target: { category, id: item.id },
-        occurredAt: Date.now(),
-      },
-      result.items,
-      ownerId ?? undefined
-    );
-    if (ownerId) await syncDiscoveryTrailEvents(ownerId);
-    const snapshot = await loadMapSnapshot(result.items, ownerId ?? undefined);
-    setMapSnapshot(snapshot);
-  };
+  const commitFromDeck = useCallback(
+    async (item: ResultItem, decision: "save" | "skip") => {
+      const category = selected;
+      const seed = trailSeed.current;
+      const ownerId = authSession?.user.id ?? null;
+      const result = await discoveryController.commit(item, decision);
+      if (
+        decision !== "save" ||
+        !result.confirmed ||
+        result.decision !== "save" ||
+        !category ||
+        !seed ||
+        // A work is not a trail from itself.
+        (seed.category === category && seed.id === item.id)
+      ) {
+        return;
+      }
+      const saved = result.items.find(
+        (entry) => entry.category === category && entry.id === item.id
+      );
+      if (!saved) return;
+      await recordMapTrailEvent(
+        {
+          source: seed,
+          target: { category, id: item.id },
+          occurredAt: Date.now(),
+        },
+        result.items,
+        ownerId ?? undefined
+      );
+      if (ownerId) await syncDiscoveryTrailEvents(ownerId);
+      const snapshot = await loadMapSnapshot(result.items, ownerId ?? undefined);
+      setMapSnapshot(snapshot);
+    },
+    [selected, authSession?.user.id, discoveryController.commit]
+  );
+
+  // Stable across renders so SwipeDeck's internal pan responder never has to
+  // rebuild mid-gesture on account of these two changing identity.
+  const handleDeckOpenDetail = useCallback(
+    (item: ResultItem) => {
+      if (!selected) return;
+      openDetail({ category: selected, item, origin: "deck" });
+    },
+    [selected, openDetail]
+  );
+
+  const handleDeckSimilar = useCallback(
+    (item: ResultItem) => {
+      if (!selected) return;
+      trailSeed.current = { category: selected, id: item.id };
+      void discoveryController.similar(item);
+    },
+    [selected, discoveryController.similar]
+  );
 
   const openAtlasNode = (node: MapNode) => {
     setAtlasOpen(false);
@@ -894,16 +914,17 @@ export default function HomeScreen() {
               items={session.deck.queue}
               palette={palette}
               reducedMotion={reducedMotion}
-              disabled={session.status === "loading"}
-              onCommit={(item, decision) => void commitFromDeck(item, decision)}
+              // This deck is only ever mounted with a non-empty queue (see the
+              // condition above) — there's no remaining case where an
+              // already-loaded, on-screen deck should stop responding just
+              // because a new explicit request (Similar/Retry/Search) is
+              // loading in the background. That request replaces the queue
+              // cleanly on arrival regardless of what the user did meanwhile.
+              disabled={false}
+              onCommit={commitFromDeck}
               onSwipeActiveChange={setSwiping}
-              onOpenDetail={(item) =>
-                openDetail({ category: selected, item, origin: "deck" })
-              }
-              onSimilar={(item) => {
-                trailSeed.current = { category: selected, id: item.id };
-                void discoveryController.similar(item);
-              }}
+              onOpenDetail={handleDeckOpenDetail}
+              onSimilar={handleDeckSimilar}
             />
           ) : null}
 

@@ -49,6 +49,12 @@ export type SwipeDeckProps = {
   onSwipeActiveChange?(active: boolean): void;
 };
 
+type ExitingCard = {
+  item: ResultItem;
+  decision: CardDecision;
+  pan: Animated.ValueXY;
+};
+
 export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function SwipeDeck(
   {
     category,
@@ -70,15 +76,24 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
   const theme = getCategoryTheme(category);
   const pan = useRef(new Animated.ValueXY()).current;
   const activeCardRef = useRef<DiscoveryCardHandle>(null);
-  const commitLocked = useRef(false);
   const swipeActive = useRef(false);
   // The deck takes the height of the card actually on top. Without this the
   // absolutely-positioned cards behind it — which can be taller, because a
   // longer title wraps to more lines — grew past the deck and painted over
   // the action row, reading as two cards stacked on screen at once.
   const [activeCardHeight, setActiveCardHeight] = useState<number | null>(null);
-  const [committing, setCommitting] = useState(false);
+  const [exitingCard, setExitingCard] = useState<ExitingCard | null>(null);
   const motion = getMotionSpec(reducedMotion);
+
+  // Guards against a second decision on the *same* card before the parent has
+  // re-rendered with it removed. Cleared here, during render rather than in an
+  // effect, so the very render that reflects a new `activeItem` also clears
+  // the lock for it — no extra tick where a fast re-swipe of the new card
+  // could be spuriously blocked.
+  const lockedItemId = useRef<string | null>(null);
+  if (lockedItemId.current !== null && activeItem?.id !== lockedItemId.current) {
+    lockedItemId.current = null;
+  }
 
   useImperativeHandle(
     forwardedRef,
@@ -104,33 +119,44 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
     }).start();
   }, [motion.resetDurationMs, pan, reducedMotion]);
 
+  /**
+   * Dismissal and the fly-off animation are deliberately independent: the item
+   * leaves the queue the instant a decision is made, and the animation is a
+   * purely cosmetic overlay layered on top. Coupling them — waiting for the
+   * exit animation to finish before calling `onCommit` — was the whole bug:
+   * it left the *next* card's gesture claim gated on the *previous* card's
+   * exit timing (see the capture-phase claim in `panResponder` below), so a
+   * fast second swipe could lose the gesture to the enclosing ScrollView and
+   * go dead until an unrelated re-render freed it.
+   */
   const requestCommit = useCallback(
-    (decision: CardDecision, source: "gesture" | "button") => {
-      if (!activeItem || disabled || commitLocked.current) return;
+    (
+      decision: CardDecision,
+      source: "gesture" | "button",
+      origin: { x: number; y: number } = { x: 0, y: 0 }
+    ) => {
+      if (!activeItem || disabled || lockedItemId.current === activeItem.id) return;
 
-      commitLocked.current = true;
-      setCommitting(true);
+      lockedItemId.current = activeItem.id;
       const item = activeItem;
+      onCommit(item, decision, source);
+      // The slot this card occupied is about to show whatever comes next;
+      // that card should start at rest, not mid-drag.
+      pan.setValue({ x: 0, y: 0 });
 
-      const finish = ({ finished }: { finished: boolean }) => {
-        pan.setValue({ x: 0, y: 0 });
-        commitLocked.current = false;
-        setCommitting(false);
-        if (finished) onCommit(item, decision, source);
-      };
+      if (reducedMotion) return;
 
-      if (reducedMotion) {
-        finish({ finished: true });
-        return;
-      }
-
+      const exitPan = new Animated.ValueXY(origin);
+      setExitingCard({ item, decision, pan: exitPan });
       const direction = decision === "save" ? 1 : -1;
-      Animated.timing(pan.x, {
+      Animated.timing(exitPan.x, {
         duration: motion.commitDurationMs,
         easing: undefined,
         toValue: direction * (deckWidth + 80),
         useNativeDriver: true,
-      }).start(finish);
+      }).start(() => {
+        setExitingCard((current) => (current?.pan === exitPan ? null : current));
+      });
     },
     [activeItem, deckWidth, disabled, motion.commitDurationMs, onCommit, pan, reducedMotion]
   );
@@ -144,12 +170,21 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
     [onSwipeActiveChange]
   );
 
+  // Everything the responder's callbacks need, mirrored into a ref so
+  // `panResponder` below can carry an empty dependency list. `PanResponder`
+  // allocates its own private gesture-tracking state per `create()` call —
+  // swapping a freshly created responder onto the view mid-drag (which
+  // happened whenever any prop or callback here changed identity, including
+  // from a background refetch with nothing to do with this gesture) handed
+  // the touch to a responder that was never granted for it, and the drag
+  // stopped following the finger.
+  const latestRef = useRef({ disabled, deckWidth, requestCommit, resetPan, setSwipeActive });
+  latestRef.current = { disabled, deckWidth, requestCommit, resetPan, setSwipeActive };
+
   const panResponder = useMemo(
     () => {
       const claim = (_event: GestureResponderEvent, gesture: PanResponderGestureState) =>
-        !disabled &&
-        !commitLocked.current &&
-        shouldClaimSwipe(gesture.dx, gesture.dy);
+        !latestRef.current.disabled && shouldClaimSwipe(gesture.dx, gesture.dy);
 
       return PanResponder.create({
         // Claim on the *capture* phase. On the bubble phase the enclosing
@@ -157,55 +192,66 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
         // swipe only worked if you happened to move almost perfectly sideways.
         onMoveShouldSetPanResponderCapture: claim,
         onMoveShouldSetPanResponder: claim,
-        onPanResponderGrant: () => setSwipeActive(true),
+        onPanResponderGrant: () => latestRef.current.setSwipeActive(true),
         onPanResponderMove: (_event, gesture) => {
-          if (!commitLocked.current) {
-            pan.setValue({ x: gesture.dx, y: gesture.dy });
-          }
+          pan.setValue({ x: gesture.dx, y: gesture.dy });
         },
         onPanResponderRelease: (_event, gesture) => {
-          setSwipeActive(false);
+          latestRef.current.setSwipeActive(false);
           const decision = resolveSwipeDecision({
             translationX: gesture.dx,
             velocityX: gesture.vx,
-            cardWidth: deckWidth,
+            cardWidth: latestRef.current.deckWidth,
           });
 
           if (decision) {
-            requestCommit(decision, "gesture");
+            latestRef.current.requestCommit(decision, "gesture", {
+              x: gesture.dx,
+              y: gesture.dy,
+            });
           } else {
-            resetPan();
+            latestRef.current.resetPan();
           }
         },
         onPanResponderTerminate: () => {
-          setSwipeActive(false);
-          resetPan();
+          latestRef.current.setSwipeActive(false);
+          latestRef.current.resetPan();
         },
-        // The whole bug: agreeing to this let the ScrollView take the swipe
-        // away part-way through, so the card stopped following the finger.
-        // Once a swipe has started it belongs to the card until it ends.
+        // The whole bug this once fixed: agreeing to this let the ScrollView
+        // take the swipe away part-way through, so the card stopped following
+        // the finger. Once a swipe has started it belongs to the card until
+        // it ends.
         onPanResponderTerminationRequest: () => false,
       });
     },
-    [deckWidth, disabled, pan, requestCommit, resetPan, setSwipeActive]
+    // `pan` is a ref value, stable for the component's whole lifetime — this
+    // runs once per mount, not once per render.
+    [pan]
+  );
+
+  const interpolateTilt = useCallback(
+    (x: Animated.Value) => ({
+      rotate: x.interpolate({
+        inputRange: [-deckWidth, 0, deckWidth],
+        outputRange: [
+          `${-motion.rotateDegrees}deg`,
+          "0deg",
+          `${motion.rotateDegrees}deg`,
+        ],
+        extrapolate: "clamp",
+      }),
+      scale: x.interpolate({
+        inputRange: [-deckWidth, 0, deckWidth],
+        outputRange: [1 + motion.scaleDelta, 1, 1 + motion.scaleDelta],
+        extrapolate: "clamp",
+      }),
+    }),
+    [deckWidth, motion.rotateDegrees, motion.scaleDelta]
   );
 
   if (!activeItem) return null;
 
-  const rotate = pan.x.interpolate({
-    inputRange: [-deckWidth, 0, deckWidth],
-    outputRange: [
-      `${-motion.rotateDegrees}deg`,
-      "0deg",
-      `${motion.rotateDegrees}deg`,
-    ],
-    extrapolate: "clamp",
-  });
-  const scale = pan.x.interpolate({
-    inputRange: [-deckWidth, 0, deckWidth],
-    outputRange: [1 + motion.scaleDelta, 1, 1 + motion.scaleDelta],
-    extrapolate: "clamp",
-  });
+  const { rotate, scale } = interpolateTilt(pan.x);
   const saveCueOpacity = pan.x.interpolate({
     inputRange: [0, Math.max(deckWidth * 0.2, 1)],
     outputRange: [0, 1],
@@ -216,7 +262,7 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
     outputRange: [1, 0],
     extrapolate: "clamp",
   });
-  const interactionsDisabled = disabled || committing;
+  const exitingTilt = exitingCard ? interpolateTilt(exitingCard.pan.x) : null;
 
   return (
     <View style={styles.layout}>
@@ -228,6 +274,62 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
         ]}
         testID="swipe-deck"
       >
+        {exitingCard && exitingTilt ? (
+          <Animated.View
+            accessible={false}
+            accessibilityElementsHidden
+            aria-hidden
+            importantForAccessibility="no-hide-descendants"
+            pointerEvents="none"
+            style={[
+              styles.exitingLayer,
+              {
+                transform: [
+                  { translateX: exitingCard.pan.x },
+                  { translateY: exitingCard.pan.y },
+                  { rotate: exitingTilt.rotate },
+                  { scale: exitingTilt.scale },
+                ],
+              },
+            ]}
+            testID="exiting-swipe-card"
+          >
+            <DiscoveryCard
+              category={category}
+              item={exitingCard.item}
+              palette={palette}
+              active={false}
+              swipeCue={null}
+              onPress={() => {}}
+            />
+            <Animated.View
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              pointerEvents="none"
+              style={[
+                styles.cue,
+                exitingCard.decision === "save" ? styles.saveCue : styles.skipCue,
+                {
+                  borderColor:
+                    exitingCard.decision === "save" ? palette.success : palette.danger,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.cueText,
+                  {
+                    color:
+                      exitingCard.decision === "save" ? palette.success : palette.danger,
+                  },
+                ]}
+              >
+                {exitingCard.decision === "save" ? "SAVE" : "NOT FOR ME"}
+              </Text>
+            </Animated.View>
+          </Animated.View>
+        ) : null}
+
         <View
           accessibilityElementsHidden={false}
           style={[styles.cardLayer, styles.activeLayer]}
@@ -263,10 +365,10 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
               category={category}
               item={activeItem}
               palette={palette}
-              active={!interactionsDisabled}
+              active={!disabled}
               swipeCue={null}
               onPress={() => {
-                if (!commitLocked.current && !disabled) onOpenDetail(activeItem);
+                if (!disabled) onOpenDetail(activeItem);
               }}
             />
 
@@ -332,14 +434,14 @@ export const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(function Sw
       </View>
 
       <DiscoveryActions
-        disabled={interactionsDisabled}
+        disabled={disabled}
         palette={palette}
         accent={theme.accent}
         onAccent={theme.onAccent}
         onSave={() => requestCommit("save", "button")}
         onSkip={() => requestCommit("skip", "button")}
         onSimilar={() => {
-          if (!commitLocked.current && !disabled) onSimilar(activeItem);
+          if (!disabled) onSimilar(activeItem);
         }}
       />
     </View>
@@ -374,6 +476,15 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "absolute",
     width: "100%",
+  },
+  exitingLayer: {
+    left: 0,
+    // Above the active layer (zIndex 3): the departing card stays on top of
+    // the card revealed underneath it while it flies off.
+    position: "absolute",
+    top: 0,
+    width: "100%",
+    zIndex: 4,
   },
   cue: {
     backgroundColor: "rgba(0,0,0,0.72)",

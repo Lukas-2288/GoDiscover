@@ -102,39 +102,72 @@ it("focuses the active card through its imperative handle", () => {
   expect(activeCardFocus).toHaveBeenCalledTimes(1);
 });
 
-it("guards against two decisions before the exit animation completes", () => {
-  const completions: Animated.EndCallback[] = [];
-  jest.spyOn(Animated, "timing").mockImplementation(
-    (() => ({
-      start: (callback?: Animated.EndCallback) => {
-        if (callback) completions.push(callback);
-      },
-      stop: jest.fn(),
-      reset: jest.fn(),
-    })) as typeof Animated.timing
-  );
+it("guards against two decisions on the same card before the parent advances the queue", () => {
+  const setValue = jest.spyOn(Animated.ValueXY.prototype, "setValue");
   const onCommit = jest.fn();
-  renderDeck({ onCommit });
+  renderDeck({ reducedMotion: true, onCommit });
 
   const save = screen.getByRole("button", { name: "Save" });
   fireEvent.press(save);
-  fireEvent.press(save);
 
-  expect(completions).toHaveLength(1);
-  expect(onCommit).not.toHaveBeenCalled();
-  act(() => completions[0]?.({ finished: true }));
   expect(onCommit).toHaveBeenCalledTimes(1);
   expect(onCommit).toHaveBeenCalledWith(movie, "save", "button");
+  // The slot this card occupied resets immediately — the next card, whatever
+  // it turns out to be, starts at rest rather than mid-drag.
+  expect(setValue).toHaveBeenCalledWith({ x: 0, y: 0 });
+
+  fireEvent.press(save);
+  expect(onCommit).toHaveBeenCalledTimes(1);
 });
 
-it("does not commit an interrupted exit and unlocks for a retry", () => {
-  const completions: Animated.EndCallback[] = [];
-  const resetPan = jest.spyOn(Animated.ValueXY.prototype, "setValue");
+it("accepts a fresh decision once the deck has moved on to a new card", () => {
+  const onCommit = jest.fn();
+  const { rerender } = render(
+    <SwipeDeck
+      category="movies"
+      items={[movie]}
+      palette={darkPalette}
+      reducedMotion
+      onCommit={onCommit}
+      onOpenDetail={jest.fn()}
+      onSimilar={jest.fn()}
+    />
+  );
+
+  fireEvent.press(screen.getByRole("button", { name: "Save" }));
+  expect(onCommit).toHaveBeenCalledTimes(1);
+
+  const nextMovie = { ...movie, id: "movie-2", title: "Past Lives" };
+  rerender(
+    <SwipeDeck
+      category="movies"
+      items={[nextMovie]}
+      palette={darkPalette}
+      reducedMotion
+      onCommit={onCommit}
+      onOpenDetail={jest.fn()}
+      onSimilar={jest.fn()}
+    />
+  );
+
+  fireEvent.press(screen.getByRole("button", { name: "Save" }));
+  expect(onCommit).toHaveBeenCalledTimes(2);
+  expect(onCommit).toHaveBeenLastCalledWith(nextMovie, "save", "button");
+});
+
+it("claims the next card's gesture while the previous card's exit animation is still playing", () => {
+  let responderConfig: Parameters<typeof PanResponder.create>[0] | undefined;
+  jest.spyOn(PanResponder, "create").mockImplementation((config) => {
+    responderConfig = config;
+    return { panHandlers: {} } as ReturnType<typeof PanResponder.create>;
+  });
+  // Captured but never invoked — simulates the exit animation still in
+  // flight when the next gesture starts. The old design gated the gesture
+  // claim on this animation finishing; the fix does not, because dismissal
+  // already happened synchronously on press, before this animation began.
   jest.spyOn(Animated, "timing").mockImplementation(
     (() => ({
-      start: (callback?: Animated.EndCallback) => {
-        if (callback) completions.push(callback);
-      },
+      start: () => {},
       stop: jest.fn(),
       reset: jest.fn(),
     })) as typeof Animated.timing
@@ -142,15 +175,52 @@ it("does not commit an interrupted exit and unlocks for a retry", () => {
   const onCommit = jest.fn();
   renderDeck({ onCommit });
 
-  const save = screen.getByRole("button", { name: "Save" });
-  fireEvent.press(save);
-  act(() => completions[0]?.({ finished: false }));
+  fireEvent.press(screen.getByRole("button", { name: "Save" }));
+  expect(onCommit).toHaveBeenCalledTimes(1);
 
-  expect(onCommit).not.toHaveBeenCalled();
-  expect(resetPan).toHaveBeenCalledWith({ x: 0, y: 0 });
+  expect(
+    responderConfig?.onMoveShouldSetPanResponderCapture?.(
+      {} as never,
+      { dx: 12, dy: 2 } as never
+    )
+  ).toBe(true);
+});
 
-  fireEvent.press(save);
-  expect(completions).toHaveLength(2);
+it("creates the pan responder once per mount, not once per render", () => {
+  const create = jest
+    .spyOn(PanResponder, "create")
+    .mockImplementation(() => ({ panHandlers: {} }) as ReturnType<typeof PanResponder.create>);
+  const baseProps = {
+    category: "movies" as const,
+    items: [movie],
+    palette: darkPalette,
+    reducedMotion: false,
+  };
+  const { rerender } = render(
+    <SwipeDeck
+      {...baseProps}
+      onCommit={jest.fn()}
+      onOpenDetail={jest.fn()}
+      onSimilar={jest.fn()}
+    />
+  );
+  expect(create).toHaveBeenCalledTimes(1);
+
+  // Fresh inline callbacks on every render, exactly like an unmemoized parent
+  // — this is what used to force PanResponder.create() to run again and hand
+  // an in-progress touch to a responder that had never been granted it.
+  for (let i = 0; i < 4; i += 1) {
+    rerender(
+      <SwipeDeck
+        {...baseProps}
+        onCommit={jest.fn()}
+        onOpenDetail={jest.fn()}
+        onSimilar={jest.fn()}
+      />
+    );
+  }
+
+  expect(create).toHaveBeenCalledTimes(1);
 });
 
 it("uses horizontal intent and maps a swipe through the guarded gesture path", () => {

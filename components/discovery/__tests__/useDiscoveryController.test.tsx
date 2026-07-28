@@ -909,6 +909,36 @@ it("reports request failures with safe UI copy and metadata-only diagnostics", a
   expect(JSON.stringify(warn.mock.calls)).not.toContain("token");
 });
 
+// A request with no timeout could hang forever on a dead connection, and
+// `SwipeDeck`'s `disabled` prop used to be wired straight to `status`, so a
+// hung request meant a permanently frozen deck with no way out.
+it("fails a request that never resolves instead of leaving the deck loading forever", async () => {
+  jest.useFakeTimers();
+  const load = jest.fn(() => new Promise<ResultItem[]>(() => {}));
+  const { result } = renderHook(() =>
+    useDiscoveryController({
+      dependencies: {
+        load,
+        addSaved: jest.fn(async () => []),
+        removeSaved: jest.fn(async () => []),
+      },
+    })
+  );
+
+  act(() => result.current.selectCategory("movies"));
+  let pending!: Promise<void>;
+  act(() => {
+    pending = result.current.submit("randomize");
+  });
+  expect(result.current.session?.status).toBe("loading");
+
+  act(() => jest.advanceTimersByTime(20_000));
+  await act(async () => pending);
+
+  expect(result.current.session?.status).toBe("error");
+  expect(result.current.session?.requestError).toBeTruthy();
+});
+
 // An Undo offered while one account was signed in must not act after the user
 // switches accounts: both accounts can hold the same item id, so the removal
 // would delete the new account's copy of something they never undid.

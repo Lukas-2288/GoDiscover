@@ -111,6 +111,10 @@ const DEFAULT_DEPENDENCIES: DiscoveryControllerDependencies = {
 const SAVE_ERROR = "Couldn't save that one. It's back in your deck.";
 const UNDO_ERROR = "Couldn't undo that save. Try again.";
 const UNDO_WINDOW_MS = 4_500;
+// Long enough to cover loadNextSimilar's sequential tier-widening chain
+// (lib/discovery/similarTiers.ts), short enough that a dead connection still
+// resolves to a retryable error instead of leaving the deck loading forever.
+const DISCOVERY_REQUEST_TIMEOUT_MS = 20_000;
 
 type UndoTimer = {
   operationId: number;
@@ -119,6 +123,34 @@ type UndoTimer = {
 
 function copyItem(item: ResultItem): ResultItem {
   return { ...item };
+}
+
+/**
+ * None of the four provider fetches thread an AbortController, so a hung
+ * request can't be cancelled — only raced. That's enough: every caller here
+ * already discards a response that arrives after something newer superseded
+ * it (`requestTrackerRef.current.isCurrent`), so the abandoned promise
+ * resolving late and doing nothing is the existing, safe behavior. This just
+ * stops "late" from being "never."
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error("Discovery request timed out");
+      error.name = "DiscoveryRequestTimeoutError";
+      reject(error);
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function createRequestInput(
@@ -341,10 +373,13 @@ export function useDiscoveryController(
       dispatch({ type: "requestStarted", request, input });
 
       try {
-        const items = await dependenciesRef.current.load(
-          input,
-          // A fresh request replaces the deck, so nothing is "present" yet.
-          { ...buildLoadContext(input.category), presentIds: undefined }
+        const items = await withTimeout(
+          dependenciesRef.current.load(
+            input,
+            // A fresh request replaces the deck, so nothing is "present" yet.
+            { ...buildLoadContext(input.category), presentIds: undefined }
+          ),
+          DISCOVERY_REQUEST_TIMEOUT_MS
         );
         if (!mountedRef.current || !requestTrackerRef.current.isCurrent(request)) {
           return;
@@ -407,9 +442,12 @@ export function useDiscoveryController(
       const cursor = deck.cursor;
       dispatch({ type: "topUpStarted", category });
       try {
-        const items = await dependenciesRef.current.load(
-          copyRequestInput(retryInput),
-          buildLoadContext(category, cursor)
+        const items = await withTimeout(
+          dependenciesRef.current.load(
+            copyRequestInput(retryInput),
+            buildLoadContext(category, cursor)
+          ),
+          DISCOVERY_REQUEST_TIMEOUT_MS
         );
         if (!mountedRef.current) return;
         // A category switch or a new explicit request supersedes this.
@@ -708,12 +746,15 @@ export function useDiscoveryController(
       const request = requestTrackerRef.current.start(category);
       dispatch({ type: "requestStarted", request, input });
       try {
-        const items = await dependenciesRef.current.load(
-          input,
-          contextForSaveIntent(item, intent, {
-            ...buildLoadContext(category),
-            presentIds: undefined,
-          })
+        const items = await withTimeout(
+          dependenciesRef.current.load(
+            input,
+            contextForSaveIntent(item, intent, {
+              ...buildLoadContext(category),
+              presentIds: undefined,
+            })
+          ),
+          DISCOVERY_REQUEST_TIMEOUT_MS
         );
         if (!mountedRef.current || !requestTrackerRef.current.isCurrent(request)) {
           return;
