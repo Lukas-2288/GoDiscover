@@ -23,7 +23,7 @@ is to produce a visibly bad recommendation.
 | Acceptance | The built app works in a real browser | No | `scripts/run-responsive-audit.mjs` |
 | Live probe | The real providers behave | **Yes** | `liveProviders.test.ts` (`LIVE_API_PROBE=1`) |
 
-Current state: **412 passing, 12 skipped, 0 failing.**
+Current state: **431 passing, 12 skipped, 0 failing.**
 
 ### Recording fixtures
 
@@ -89,24 +89,40 @@ already uses exact matching for traits.
 *Dune: Part Two* share a genre with it, so no post-filter is warranted; the
 behaviour is now pinned rather than assumed (`tmdb.test.ts`, 8 tests).
 
+**Filters are now proven to be honoured** (`filterHonouring.test.ts`, 19 tests,
+plus the first tests `filterSelection.ts` has ever had). The live probe only
+ever proved a filtered deck *paged*; two real defects sat in the gap, both on
+the music path and both invisible from the UI:
+
+- **Only the first genre counted.** `resolveGenreStyle` returned on the first
+  label it recognised, so Jazz + Metal + Reggae searched Jazz alone while all
+  three chips stayed lit. Discogs' search takes one `genre` and has no OR, so
+  honouring a multi-select means several requests — it was making one. Now it
+  fans out, capped at three, and interleaves the results so one genre cannot
+  fill the deck.
+- **The era was silently abandoned.** `filterAlbums` retried *without* the year
+  when a page came back empty, so a request for the 80s could answer with 2015
+  records and say nothing — the same silent widening that once answered a 2025
+  single with a 1975 album. It now retries page one of the same era instead:
+  fewer results, still the right decade. `filterArtists` never had this bug,
+  which is how the inconsistency surfaced.
+
+Both fixes were mutation-tested: reverting either makes the new tests fail.
+
 ### The gaps, worst first
 
-1. **Filters are not proven to be honoured.** The live probe checks a filtered
-   book deck *pages*; nothing checks every returned item is actually horror and
-   actually from the 2020s. `lib/discovery/filterSelection.ts` has no test file.
-   → *Add*: every item in a filtered deck satisfies every active filter.
-2. **Diversity within a deck is unmeasured.** Ten books by one author, or ten
+1. **Diversity within a deck is unmeasured.** Ten books by one author, or ten
    albums from one year, would pass every test here. Standard beyond-accuracy
    evaluation treats diversity, novelty and coverage as separate axes from
    accuracy precisely because accuracy alone does not predict satisfaction.
    → *Add*: a deck of ten has at least N distinct authors/artists/years. The
    recorded science-fiction search shows the shape of it — ten results, but
    Douglas Adams twice and Andy Weir twice.
-3. **Cross-top-up duplicates.** The reducer dedupes by id, and `presentIds`
+2. **Cross-top-up duplicates.** The reducer dedupes by id, and `presentIds`
    keeps a top-up from repeating. Neither catches the same work arriving twice
    under different provider ids — a real Discogs and Open Library failure mode.
    → *Add*: near-duplicate detection on title + creator.
-4. **Untested modules**: `lib/storage/recents.ts`, `lib/discovery/emptyState.ts`
+3. **Untested modules**: `lib/storage/recents.ts`, `lib/discovery/emptyState.ts`
    (partly covered via `browseModes.test.ts`).
 
 ---

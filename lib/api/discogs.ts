@@ -151,12 +151,66 @@ function stableResultOrder(
   );
 }
 
-function resolveGenreStyle(labels: string[]): { genre?: string; style?: string } {
-  for (const l of labels) {
-    const m = DISCOGS_GENRE_MAP[l];
-    if (m) return m;
+/**
+ * How many selected genres a music search will actually honour.
+ *
+ * Discogs' search takes one `genre` and one `style` and has no OR, so a
+ * multi-genre selection has to become several requests. Three is where the
+ * fan-out stops earning its cost.
+ */
+export const MAX_MUSIC_GENRE_QUERIES = 3;
+
+/**
+ * One Discogs genre/style pair per selected label.
+ *
+ * `resolveGenreStyle` returns on the *first* label it recognises, which meant
+ * choosing Jazz, Metal and Reggae searched Jazz alone while all three chips sat
+ * lit on screen. Two of the three did nothing, and nothing said so.
+ */
+export function resolveGenreStyles(
+  labels: readonly string[]
+): { genre?: string; style?: string }[] {
+  const seen = new Set<string>();
+  const resolved: { genre?: string; style?: string }[] = [];
+  for (const label of labels) {
+    const match = DISCOGS_GENRE_MAP[label];
+    if (!match) continue;
+    // Metal and Indie both map onto genre Rock with different styles, so the
+    // pair is the identity, not the genre.
+    const key = `${match.genre ?? ''}|${match.style ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolved.push(match);
+    if (resolved.length === MAX_MUSIC_GENRE_QUERIES) break;
   }
-  return {};
+  return resolved;
+}
+
+/**
+ * Interleaves the per-genre result lists rather than concatenating them.
+ *
+ * Concatenation would fill a five-card deck from the first genre alone, which
+ * looks identical to the bug this replaces.
+ */
+function interleave<T>(lists: readonly T[][]): T[] {
+  const out: T[] = [];
+  const longest = Math.max(0, ...lists.map((list) => list.length));
+  for (let index = 0; index < longest; index += 1) {
+    for (const list of lists) {
+      if (index < list.length) out.push(list[index]);
+    }
+  }
+  return out;
+}
+
+function dedupeById(items: readonly SearchReleaseItem[]): SearchReleaseItem[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = String(item.id);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function buildYear(params: MusicFilterParams): string | undefined {
@@ -348,28 +402,47 @@ export async function randomArtists(
   return artists.slice(0, 5);
 }
 
-export async function filterAlbums(params: MusicFilterParams): Promise<ResultItem[]> {
-  const { genre, style } = resolveGenreStyle(params.genres ?? []);
+/**
+ * Master releases matching every selected genre and the chosen era.
+ *
+ * The era is never dropped. This used to retry without the `year` when a page
+ * came back empty, so asking for the 80s could hand back 2015 records with
+ * nothing to say it had given up — the same silent-widening failure that made
+ * a 2025 single return a 1975 album. Retrying page one of the *same* era is
+ * the honest version: fewer results, still the right decade.
+ */
+async function filteredMasters(
+  params: MusicFilterParams,
+  perPage: number
+): Promise<SearchReleaseItem[]> {
   const year = buildYear(params);
   const page = params.page ?? Math.floor(Math.random() * 3) + 1;
-  const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
-    type: 'master',
-    genre,
-    style,
-    year,
-    per_page: 20,
-    page,
-  });
-  let items = data.results ?? [];
-  if (items.length === 0 && year) {
-    const fallback = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
-      type: 'master',
-      genre,
-      style,
-      per_page: 20,
-    });
-    items = fallback.results ?? [];
-  }
+  const genreQueries = resolveGenreStyles(params.genres ?? []);
+  // No recognised genre still means "any genre in this era".
+  const queries = genreQueries.length > 0 ? genreQueries : [{}];
+
+  const lists = await Promise.all(
+    queries.map(async ({ genre, style }) => {
+      const base = { type: 'master' as const, genre, style, year, per_page: perPage };
+      const data = await discogs<SearchResponse<SearchReleaseItem>>(
+        '/database/search',
+        { ...base, page }
+      );
+      if (data.results?.length) return data.results;
+      // A deep page inside a narrow slice is often empty; page one rarely is.
+      if (page === 1) return [];
+      const first = await discogs<SearchResponse<SearchReleaseItem>>(
+        '/database/search',
+        base
+      );
+      return first.results ?? [];
+    })
+  );
+  return dedupeById(interleave(lists));
+}
+
+export async function filterAlbums(params: MusicFilterParams): Promise<ResultItem[]> {
+  const items = await filteredMasters(params, 20);
   return [...items]
     .sort(params.deterministic ? stableResultOrder : () => Math.random() - 0.5)
     .slice(0, 5)
@@ -377,20 +450,10 @@ export async function filterAlbums(params: MusicFilterParams): Promise<ResultIte
 }
 
 export async function filterArtists(params: MusicFilterParams): Promise<ResultItem[]> {
-  const { genre, style } = resolveGenreStyle(params.genres ?? []);
-  const year = buildYear(params);
-  const page = params.page ?? Math.floor(Math.random() * 3) + 1;
-  const data = await discogs<SearchResponse<SearchReleaseItem>>('/database/search', {
-    type: 'master',
-    genre,
-    style,
-    year,
-    per_page: 50,
-    page,
-  });
+  const results = await filteredMasters(params, 50);
   const artistSource = params.deterministic
-    ? [...(data.results ?? [])].sort(stableResultOrder)
-    : data.results ?? [];
+    ? [...results].sort(stableResultOrder)
+    : results;
   const candidates = artistNameCandidates(
     artistSource,
     5 * ARTIST_CANDIDATE_MULTIPLIER
