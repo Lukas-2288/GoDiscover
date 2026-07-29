@@ -23,7 +23,7 @@ is to produce a visibly bad recommendation.
 | Acceptance | The built app works in a real browser | No | `scripts/run-responsive-audit.mjs` |
 | Live probe | The real providers behave | **Yes** | `liveProviders.test.ts` (`LIVE_API_PROBE=1`) |
 
-Current state: **384 passing, 12 skipped, 0 failing.**
+Current state: **412 passing, 12 skipped, 0 failing.**
 
 ### Recording fixtures
 
@@ -65,32 +65,48 @@ visibly broke — Chappell Roan's 2025 single returned a 1975 trucker album.
 - **Era spread of randomise** — equal weight per decade from a per-category
   floor, so no era is quietly favoured (`discogsEra.test.ts`).
 
+### Closed, and what the fixtures showed
+
+**Books now guarantee subject overlap** (`openlibrary.test.ts`, 20 tests). Two
+real defects, both found by recording what Open Library actually returns:
+
+- **The query led with "Fiction".** `getSimilarBooks` took the first three
+  subjects the API listed, and for Kindred that opens with `Fiction` — so it
+  asked for every novel ever catalogued. Broad subjects are now skipped, and
+  Kindred searches `slaves`, `african american women`, `slaveholders` instead.
+- **`subject:` matching is fuzzy.** A search for science fiction genuinely
+  returns *The Two Towers*, whose record carries no such subject. Results are
+  now verified against the subjects actually searched for, falling back to the
+  raw results rather than to an empty deck.
+
+Subject comparison had to survive free-text cataloguing — the same idea is
+filed as `Science fiction`, `science-fiction` and `Science fiction, American`
+across three records — without letting a broad term like `Fiction` swallow
+everything. That tension is the whole difficulty, and it is why the repo
+already uses exact matching for traits.
+
+**Films were already fine.** All twenty of TMDB's recorded suggestions for
+*Dune: Part Two* share a genre with it, so no post-filter is warranted; the
+behaviour is now pinned rather than assumed (`tmdb.test.ts`, 8 tests).
+
 ### The gaps, worst first
 
-1. **Books guarantee nothing.** `getSimilarBooks` (`lib/api/openlibrary.ts`)
-   has no unit test, no era test, no subject-overlap test and no live probe.
-   There is no `openlibrary.test.ts` at all. This is precisely the path the
-   question was about.
-   → *Add*: every result shares at least one subject with the seed; the seed is
-   never returned; results are not all by one author.
-2. **Films guarantee nothing.** `getSimilarMovies` is in the same position —
-   no offline test, and the live probe only checks the era spread, not that a
-   result shares a genre with its seed.
-   → *Add*: genre overlap with the seed; the seed is never returned.
-3. **Filters are not proven to be honoured.** The live probe checks a filtered
+1. **Filters are not proven to be honoured.** The live probe checks a filtered
    book deck *pages*; nothing checks every returned item is actually horror and
    actually from the 2020s. `lib/discovery/filterSelection.ts` has no test file.
    → *Add*: every item in a filtered deck satisfies every active filter.
-4. **Diversity within a deck is unmeasured.** Ten books by one author, or ten
+2. **Diversity within a deck is unmeasured.** Ten books by one author, or ten
    albums from one year, would pass every test here. Standard beyond-accuracy
    evaluation treats diversity, novelty and coverage as separate axes from
    accuracy precisely because accuracy alone does not predict satisfaction.
-   → *Add*: a deck of ten has at least N distinct authors/artists/years.
-5. **Cross-top-up duplicates.** The reducer dedupes by id, and `presentIds`
+   → *Add*: a deck of ten has at least N distinct authors/artists/years. The
+   recorded science-fiction search shows the shape of it — ten results, but
+   Douglas Adams twice and Andy Weir twice.
+3. **Cross-top-up duplicates.** The reducer dedupes by id, and `presentIds`
    keeps a top-up from repeating. Neither catches the same work arriving twice
    under different provider ids — a real Discogs and Open Library failure mode.
    → *Add*: near-duplicate detection on title + creator.
-6. **Untested modules**: `lib/storage/recents.ts`, `lib/discovery/emptyState.ts`
+4. **Untested modules**: `lib/storage/recents.ts`, `lib/discovery/emptyState.ts`
    (partly covered via `browseModes.test.ts`).
 
 ---

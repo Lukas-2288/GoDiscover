@@ -257,25 +257,106 @@ export async function getBookDetail(id: string, fallback?: { title: string; imag
   };
 }
 
+/**
+ * Whether two works have a subject in common, loosely enough to survive Open
+ * Library's free-text cataloguing.
+ *
+ * Subjects there are not a controlled vocabulary: the same idea is filed as
+ * "Science fiction", "Science fiction, American", "science-fiction" and
+ * "Fiction, science fiction, general" across different records. An exact match
+ * would call most genuine pairs unrelated, so containment either way is the
+ * usable test.
+ */
+export function sharesSubject(
+  seedSubjects: readonly string[],
+  candidateSubjects: readonly string[] = []
+): boolean {
+  const seeds = usableSubjects(seedSubjects);
+  if (seeds.length === 0) return false;
+  const candidates = usableSubjects(candidateSubjects);
+  // Containment only in the direction that widens a *specific* subject:
+  // "science fiction" should match "science fiction, american". Allowing the
+  // reverse would let a seed's broad subject swallow a candidate's precise
+  // one, which is how everything ends up related to everything.
+  return candidates.some((candidate) =>
+    seeds.some((seed) => candidate === seed || candidate.startsWith(`${seed},`))
+  );
+}
+
+/**
+ * Subjects carried by so much of the catalogue that sharing one is no evidence
+ * of anything.
+ *
+ * "Fiction" is the load-bearing case. Kindred lists it, and containment would
+ * find it inside "Science fiction", "Historical fiction" and "Juvenile
+ * fiction" — which is every novel, making the check vacuous. The same trap is
+ * already documented above for traits, where exact matching is used for
+ * exactly this reason.
+ */
+const OVERBROAD_SUBJECTS = new Set([
+  'fiction',
+  'nonfiction',
+  'non-fiction',
+  'literature',
+  'general',
+  'english',
+  'american',
+  'british',
+  'classic',
+  'classics',
+  'novel',
+  'novels',
+  'reading',
+  'books',
+  'juvenile',
+  'adult',
+  'new york times bestseller',
+]);
+
+function usableSubjects(subjects: readonly string[] = []): string[] {
+  return subjects
+    .map((subject) =>
+      subject
+        .trim()
+        .toLowerCase()
+        // The same subject is filed both ways — "science fiction" on Kindred,
+        // "science-fiction" on Project Hail Mary — and they are the same thing.
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ')
+    )
+    // Short tokens like "War" or "Art" match far too much to mean anything.
+    .filter(
+      (subject) => subject.length > 4 && !OVERBROAD_SUBJECTS.has(subject)
+    );
+}
+
 export async function getSimilarBooks(id: string): Promise<ResultItem[]> {
   const work = await ol<OLWork>(`/works/${id}.json`);
-  const subjects = (work.subjects ?? [])
-    .filter((s) => s.length < 30 && !s.includes(',') && !/^\d/.test(s))
+  // Only subjects specific enough to be worth searching for. Kindred's list
+  // opens with "Fiction", and a `subject:"fiction"` search returns the
+  // catalogue — which is how a book recommendation stopped resembling its
+  // seed.
+  const subjects = usableSubjects(work.subjects)
+    .filter((s) => s.length < 30 && !s.includes(','))
     .slice(0, 3);
   if (subjects.length === 0) return [];
-  const subjectQuery = subjects
-    .map((s) => `subject:"${s.toLowerCase()}"`)
-    .join(' OR ');
+  const subjectQuery = subjects.map((s) => `subject:"${s}"`).join(' OR ');
   const data = await ol<OLSearchResponse>('/search.json', {
     q: `(${subjectQuery})`,
     limit: 20,
     sort: 'rating',
     fields: 'key,title,author_name,first_publish_year,cover_i,ratings_average,subject',
   });
-  return data.docs
-    .filter((d) => d.cover_i && workId(d.key) !== id)
-    .slice(0, 10)
-    .map(toResultItem);
+  const candidates = data.docs.filter(
+    (d) => d.cover_i && workId(d.key) !== id
+  );
+  // `subject:` matching is fuzzy — a search for science fiction returns The
+  // Two Towers, which carries no such subject. Asking the results themselves
+  // is the only way to hold the promise the query was supposed to make.
+  const related = candidates.filter((d) => sharesSubject(subjects, d.subject));
+  // A thin deck of loose matches beats a dead end.
+  const chosen = related.length > 0 ? related : candidates;
+  return chosen.slice(0, 10).map(toResultItem);
 }
 
 export const OL_SUBJECTS: Record<string, string> = {
