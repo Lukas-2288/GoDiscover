@@ -1,0 +1,136 @@
+{
+  "describe": "Open Library search for a seed book, with its subjects",
+  "recordedAt": "2026-07-29T14:02:09.255Z",
+  "body": {
+    "numFound": 10,
+    "start": 0,
+    "numFoundExact": true,
+    "num_found": 10,
+    "documentation_url": "https://openlibrary.org/dev/docs/api/search",
+    "q": "Kindred Octavia Butler",
+    "offset": null,
+    "docs": [
+      {
+        "author_name": [
+          "Octavia E. Butler",
+          "SparkNotes"
+        ],
+        "cover_i": 8745330,
+        "first_publish_year": 1979,
+        "key": "/works/OL35616W",
+        "title": "Kindred",
+        "subject": [
+          "Fiction",
+          "Slaves",
+          "African American women",
+          "Slaveholders",
+          "Slavery",
+          "Time travel",
+          "Literature",
+          "open_syllabus_project",
+          "Historical",
+          "Science Fiction",
+          "African American",
+          "Contemporary Women",
+          "Fiction, science fiction, general",
+          "Slaves, fiction",
+          "African americans, fiction",
+          "Los angeles (calif.), fiction",
+          "Southern states, fiction",
+          "Fiction, psychological",
+          "Fiction, african american & black, general",
+          "Fourth dimension",
+          "Popular reading",
+          "Enslaved persons, fiction",
+          "American literature",
+          "Teen fiction",
+          "Fiction subjects",
+          "Science fiction & fantasy"
+        ],
+        "ratings_average": 4.4166665
+      },
+      {
+        "author_name": [
+          "Octavia E. Butler",
+          "Damian Duffy",
+          "John Jennings",
+          "María Barbado Mujica"
+        ],
+        "cover_i": 7899091,
+        "first_publish_year": 2017,
+        "key": "/works/OL17620025W",
+        "title": "Kindred",
+        "subject": [
+          "Slaves",
+          "Time travel",
+          "Comic books, strips",
+          "Comics & graphic novels, science fiction",
+          "Slaves, fiction",
+          "Los angeles (calif.), fiction",
+          "Southern states, fiction",
+          "African americans, fiction",
+          "Fiction, african american, general",
+          "nyt:hardcover-graphic-books=2017-01-29",
+          "New York Times bestseller",
+          "Fiction, african american & black, general",
+          "African American women",
+          "Slavery",
+          "Slaveholders",
+          "Time travel in literature",
+          "Science fiction",
+          "Fiction",
+          "Graphic novels",
+          "18.06 Anglo-American literature",
+          "21.39 graphic arts: other",
+          "COMICS & GRAPHIC NOVELS",
+          "African American",
+          "Historical",
+          "Butler, octavia e",
+          "African american women--fiction",
+          "Slaves--united states--fiction",
+          "Slavery--united states--fiction",
+          "Ps3552.u827 k56 2017",
+          "741",
+          "Adaptations"
+        ],
+        "ratings_average": 4
+      },
+      {
+        "author_name": [
+          "Gerry Canavan"
+        ],
+        "cover_i": 13763136,
+        "first_publish_year": 2016,
+        "key": "/works/OL25396673W",
+        "title": "Octavia E. Butler",
+        "subject": [
+          "Science fiction, history and criticism",
+          "African American women",
+          "Fiction",
+          "Slaves",
+          "Slaveholders",
+          "Slavery",
+          "Vampires"
+        ]
+      },
+      {
+        "author_name": [
+          "Octavia Butler",
+          "Tomi Adeyemi"
+        ],
+        "first_publish_year": 2024,
+        "key": "/works/OL37620555W",
+        "title": "Kindred"
+      },
+      {
+        "author_name": [
+          "Gale Cengage Learning"
+        ],
+        "cover_i": 11235970,
+        "first_publish_year": 2017,
+        "key": "/works/OL24580320W",
+        "title": "A Study Guide for Octavia E. Butler's Kindred"
+      }
+    ]
+  }
+}
