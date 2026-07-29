@@ -42,15 +42,6 @@ jest.mock("../../lib/storage/saved", () => ({
   clearLocalSaved: jest.fn(async () => undefined),
 }));
 
-jest.mock("../../lib/storage/discoveryMap", () => ({
-  loadMapSnapshot: jest.fn(async () => ({ version: 1, nodes: [], edges: [] })),
-  recordMapTrailEvent: jest.fn(async () => undefined),
-}));
-
-jest.mock("../../lib/storage/discoveryTrailSync", () => ({
-  syncDiscoveryTrailEvents: jest.fn(async () => []),
-}));
-
 jest.mock("../../lib/storage/recents", () => ({
   listRecents: jest.fn(async () => []),
   addRecent: jest.fn(async () => []),
@@ -152,10 +143,6 @@ import {
   syncLocalToCloud,
 } from "../../lib/storage/saved";
 import { supabase } from "../../lib/supabase";
-import {
-  loadMapSnapshot,
-  recordMapTrailEvent,
-} from "../../lib/storage/discoveryMap";
 import HomeScreen from "../index";
 
 const SAVED_MUTATION_ERROR = "Couldn't update saved discoveries. Try again.";
@@ -1093,84 +1080,4 @@ it("clears the landing once a category is open, so the deck owns the screen", as
   expect(
     screen.getByRole("button", { name: "Surprise me with a movie" })
   ).toBeTruthy();
-});
-
-// ── The Saved Atlas ────────────────────────────────────────────────────────
-
-it("opens the saved atlas from the saved sheet", async () => {
-  jest.mocked(listSaved).mockResolvedValue([
-    {
-      category: "movies",
-      id: "arrival",
-      title: "Arrival",
-      subtitle: "Denis Villeneuve",
-      meta: "2016",
-      savedAt: 1,
-    },
-  ] as never);
-  jest.mocked(loadMapSnapshot).mockResolvedValue({
-    version: 1,
-    nodes: [
-      {
-        id: "movies:arrival",
-        category: "movies",
-        itemId: "arrival",
-        title: "Arrival",
-        subtitle: "Denis Villeneuve",
-        meta: "2016",
-        savedAt: 1,
-        x: 0.4,
-        y: 0.4,
-      },
-    ],
-    edges: [],
-  } as never);
-
-  render(<HomeScreen />);
-  await waitFor(() => expect(listSaved).toHaveBeenCalled());
-  fireEvent.press(
-    screen.getByRole("button", { name: "Open saved discoveries" })
-  );
-  fireEvent.press(await screen.findByRole("button", { name: "Open saved atlas" }));
-
-  expect(await screen.findByLabelText("Saved atlas")).toBeTruthy();
-  // The map and list views the website offers, both reachable.
-  expect(screen.getByRole("tab", { name: "Map" })).toBeTruthy();
-  expect(screen.getByRole("tab", { name: "List" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Fit view" })).toBeTruthy();
-});
-
-// Without this the phone's saves arrive on the map as unconnected nodes — the
-// atlas would visibly fail to respond to its own app.
-it("records the trail behind a save that followed a Similar request", async () => {
-  // Similar has to return a *different* work, or the save is a trail from a
-  // thing to itself, which the commit path deliberately declines to record.
-  jest
-    .mocked(loadDiscovery)
-    .mockResolvedValueOnce([arrival])
-    .mockResolvedValue([moonlight]);
-
-  render(<HomeScreen />);
-  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
-  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
-
-  // The deck's own control; the detail sheet's equivalent is labelled "Similar".
-  fireEvent.press(await screen.findByRole("button", { name: "Find similar" }));
-  await act(async () => undefined);
-  fireEvent.press(await screen.findByRole("button", { name: "Save" }));
-
-  await waitFor(() => expect(recordMapTrailEvent).toHaveBeenCalled());
-  const [event] = jest.mocked(recordMapTrailEvent).mock.calls[0];
-  expect(event.source).toEqual({ category: "movies", id: arrival.id });
-  expect(event.target).toEqual({ category: "movies", id: moonlight.id });
-});
-
-it("does not record a trail for a save with nothing behind it", async () => {
-  render(<HomeScreen />);
-  fireEvent.press(screen.getByRole("button", { name: "Movies" }));
-  fireEvent.press(screen.getByRole("button", { name: "Surprise me with a movie" }));
-  fireEvent.press(await screen.findByRole("button", { name: "Save" }));
-
-  await waitFor(() => expect(addSaved).toHaveBeenCalled());
-  expect(recordMapTrailEvent).not.toHaveBeenCalled();
 });

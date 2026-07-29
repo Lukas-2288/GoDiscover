@@ -1,7 +1,6 @@
 import type { ResultItem } from "../../../types/content";
 import {
   DEFAULT_SAVE_INTENT,
-  applySaveIntent,
   contextForSaveIntent,
   isSaveIntent,
   requestForSaveIntent,
@@ -62,37 +61,5 @@ describe("save intent", () => {
     expect(isSaveIntent("something-different")).toBe(true);
     expect(isSaveIntent("nonsense")).toBe(false);
     expect(isSaveIntent(null)).toBe(false);
-  });
-});
-
-describe("applying intent to orbit recommendations", () => {
-  const candidates = [
-    { category: "movies" as const, id: "clone-1", reason: { kind: "provider-similar" } },
-    { category: "movies" as const, id: "clone-2", reason: { kind: "provider-similar" } },
-    { category: "books" as const, id: "book", reason: { kind: "shared-subject" } },
-    { category: "movies" as const, id: "themed", reason: { kind: "shared-genre" } },
-  ];
-
-  it("leaves the ranking alone when the user wants more like it", () => {
-    expect(
-      applySaveIntent(candidates, "movies", "more-like-this").map((c) => c.id)
-    ).toEqual(["clone-1", "clone-2", "book", "themed"]);
-  });
-
-  // Provider-native similars score 0.9 against 0.66-0.68 for trait matches, so
-  // they take every slot — that is the near-clone problem.
-  it("drops near-clones and leads with other media when the user wants a change", () => {
-    const widened = applySaveIntent(candidates, "movies", "something-different");
-    expect(widened.map((c) => c.id)).toEqual(["book", "themed"]);
-    expect(widened[0].category).not.toBe("movies");
-  });
-
-  it("keeps near-clones rather than showing an empty orbit", () => {
-    const onlyClones = candidates.filter(
-      (c) => c.reason.kind === "provider-similar"
-    );
-    expect(
-      applySaveIntent(onlyClones, "movies", "something-different")
-    ).toHaveLength(onlyClones.length);
   });
 });

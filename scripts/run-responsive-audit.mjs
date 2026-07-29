@@ -56,7 +56,23 @@ const SECTIONS = [
     settleMs: 3_000,
     primary: ["Save to map", "Not for me", "Find similar"],
   },
-  { name: "atlas", tab: "Saved Atlas", primary: ["Search saved atlas"] },
+  {
+    // Web reaches saved items only here — there is no bookmark sheet the way
+    // there is on native — so this section being usable is not cosmetic.
+    // Audited empty, which is the state that has to degrade gracefully.
+    // The bootstrap seeds three saved items, so this audits the populated
+    // list. Vespertine is the first row rendered — albums lead CATEGORY_ORDER —
+    // which keeps the check off the bottom of a short viewport. All three row
+    // actions are named because Similar is new here and is the reason a saved
+    // item is worth keeping in reach.
+    name: "saved",
+    tab: "Saved",
+    primary: [
+      "Open Vespertine details",
+      "Find albums similar to Vespertine",
+      "Remove Vespertine from saved discoveries",
+    ],
+  },
   { name: "account", tab: "Account", primary: ["Sign in"] },
 ];
 

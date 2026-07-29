@@ -5,14 +5,11 @@ import { render } from "@testing-library/react-native";
 jest.mock("@expo/vector-icons/FontAwesome", () => "FontAwesome");
 
 import { SwipeDeck } from "../SwipeDeck";
-import { SavedAtlasNative } from "../../atlas/SavedAtlasNative";
 import { darkPalette } from "../../../lib/theme";
-import type { MapNode } from "../../../lib/storage/discoveryMap";
 
 /**
  * These pin *who owns the finger*, which is what was actually broken on device:
- * the card agreed to hand a swipe over to the ScrollView it sits in, and the
- * atlas never received a drag that began on one of its nodes.
+ * the card agreed to hand a swipe over to the ScrollView it sits in.
  *
  * No test here can say how a swipe feels. They can say that nothing is allowed
  * to take it away, which is the mechanism that made it feel broken.
@@ -117,62 +114,5 @@ describe("the discovery card's grip on a swipe", () => {
 
     // Otherwise an interrupted swipe would leave the screen unable to scroll.
     expect(onSwipeActiveChange).toHaveBeenLastCalledWith(false);
-  });
-});
-
-const mapNode = (id: string): MapNode => ({
-  id: `movies:${id}`,
-  category: "movies",
-  itemId: id,
-  title: id,
-  subtitle: "",
-  meta: "",
-  savedAt: 1,
-  x: 0.4,
-  y: 0.4,
-});
-
-describe("the atlas map's grip on a drag", () => {
-  const atlasProps = {
-    edges: [],
-    selectedId: null,
-    palette: darkPalette,
-    onSelect: jest.fn(),
-    onStart: jest.fn(),
-  };
-
-  it("claims a drag on the capture phase, so one starting on a node still pans", () => {
-    render(<SavedAtlasNative {...atlasProps} nodes={[mapNode("arrival")]} />);
-    const [config] = capturedConfigs;
-
-    // The nodes are Pressables covering most of the canvas. On the bubble phase
-    // the map never saw these drags at all.
-    expect(
-      config.onMoveShouldSetPanResponderCapture?.(null as never, {
-        dx: 20,
-        dy: 20,
-      } as never)
-    ).toBe(true);
-  });
-
-  it("keeps a drag until the finger lifts", () => {
-    render(<SavedAtlasNative {...atlasProps} nodes={[mapNode("arrival")]} />);
-    const [config] = capturedConfigs;
-
-    expect(config.onPanResponderTerminationRequest?.(null as never, still)).toBe(
-      false
-    );
-  });
-
-  it("leaves a tap alone so a node can still be opened", () => {
-    render(<SavedAtlasNative {...atlasProps} nodes={[mapNode("arrival")]} />);
-    const [config] = capturedConfigs;
-
-    expect(
-      config.onMoveShouldSetPanResponderCapture?.(null as never, {
-        dx: 2,
-        dy: 1,
-      } as never)
-    ).toBe(false);
   });
 });

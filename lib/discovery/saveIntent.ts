@@ -65,38 +65,3 @@ export function isSaveIntent(value: unknown): value is SaveIntent {
   return value === "more-like-this" || value === "something-different";
 }
 
-type IntentCandidate = {
-  category: ContentCategory;
-  reason: { kind: string };
-};
-
-/**
- * Re-shapes orbit recommendations for the chosen intent.
- *
- * `findMapRecommendations` scores provider-native similars at 0.9 against
- * 0.66–0.68 for trait matches, so they take every slot — which is exactly the
- * near-clone problem. For "something different" they are dropped and other
- * categories come first, leaving the trait-based cross-media matches the map
- * was designed around.
- *
- * If that leaves nothing, the original list is returned: showing near-clones
- * beats showing an empty orbit.
- */
-export function applySaveIntent<T extends IntentCandidate>(
-  recommendations: readonly T[],
-  seedCategory: ContentCategory,
-  intent: SaveIntent
-): T[] {
-  if (intent === "more-like-this") return [...recommendations];
-
-  const widened = recommendations.filter(
-    (candidate) => candidate.reason.kind !== "provider-similar"
-  );
-  if (widened.length === 0) return [...recommendations];
-
-  return [...widened].sort((left, right) => {
-    const leftSame = left.category === seedCategory ? 1 : 0;
-    const rightSame = right.category === seedCategory ? 1 : 0;
-    return leftSame - rightSame;
-  });
-}

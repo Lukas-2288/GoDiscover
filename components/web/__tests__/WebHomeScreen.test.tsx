@@ -106,11 +106,13 @@ describe("web digital arcade layout", () => {
     expect(onSurprise).toHaveBeenCalledTimes(1);
   });
 
-  it("consolidates map and saved navigation into one Saved Atlas destination", () => {
+  // Web reaches saved items only through this nav item — there is no bookmark
+  // sheet here the way there is on native, so losing it strands the collection.
+  it("gives saved items their own destination, counted", () => {
     const onSectionChange = jest.fn();
     const { getByText, queryByText } = render(
       <WebShell
-        section={"atlas" as any}
+        section="saved"
         onSectionChange={onSectionChange}
         savedCount={3}
       >
@@ -118,9 +120,18 @@ describe("web digital arcade layout", () => {
       </WebShell>
     );
 
-    fireEvent.press(getByText("Saved Atlas 3"));
-    expect(onSectionChange).toHaveBeenCalledWith("atlas");
-    expect(queryByText("Map")).toBeNull();
-    expect(queryByText("Saved 3")).toBeNull();
+    fireEvent.press(getByText("Saved 3"));
+    expect(onSectionChange).toHaveBeenCalledWith("saved");
+    expect(queryByText("Saved Atlas 3")).toBeNull();
+  });
+
+  it("drops the count from the label when nothing is saved", () => {
+    const { getByText } = render(
+      <WebShell section="saved" onSectionChange={jest.fn()} savedCount={0}>
+        <></>
+      </WebShell>
+    );
+
+    expect(getByText("Saved")).toBeTruthy();
   });
 });

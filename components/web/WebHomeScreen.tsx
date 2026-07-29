@@ -18,7 +18,7 @@ import type { ContentCategory, ResultItem } from "../../types/content";
 import { bodyFont, displayFont, monoFont } from "../../lib/typography";
 import { darkPalette } from "../../lib/theme";
 
-export type WebSection = "archive" | "discover" | "atlas" | "account";
+export type WebSection = "archive" | "discover" | "saved" | "account";
 export type WebLayoutMode = "mobile" | "tabletPortrait" | "tabletLandscape" | "desktop";
 
 export type WebPalette = {
@@ -93,7 +93,7 @@ export function WebShell({
   const nav = [
     ["archive", "Archive", "th-large"],
     ["discover", "Discover", "compass"],
-    ["atlas", `Saved Atlas${savedCount ? ` ${savedCount}` : ""}`, "sitemap"],
+    ["saved", `Saved${savedCount ? ` ${savedCount}` : ""}`, "bookmark-o"],
     ["account", "Account", "user-circle-o"],
   ] as const;
 
