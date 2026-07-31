@@ -15,8 +15,30 @@
  * Re-run when a provider changes shape, or to refresh a stale seed.
  */
 import { mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
+
+/**
+ * Reads .env the way Expo itself does, rather than making the shell do it.
+ *
+ * Asking for `set -a && . ./.env && set +a` first is how this used to work and
+ * it is a trap: a single malformed line aborts the source silently, the keys
+ * never arrive, and the failure looks like a missing key rather than a broken
+ * file. `test/liveApiEnv.js` already solved this for the test suite; the same
+ * loader belongs here. Anything already exported still wins.
+ */
+function loadProjectEnv() {
+  // @expo/env warns without one, and outside `expo start` nothing sets it.
+  process.env.NODE_ENV = process.env.NODE_ENV || "development";
+  try {
+    createRequire(import.meta.url)("@expo/env").loadProjectEnv(process.cwd());
+  } catch {
+    // Fall through to whatever the shell already exported.
+  }
+}
+
+loadProjectEnv();
 
 const OUT_DIR = path.join("lib", "api", "__tests__", "fixtures");
 
@@ -25,8 +47,7 @@ function requireEnv(name) {
   if (!value || !value.trim()) {
     console.error(
       `Missing ${name}.\n` +
-        "Run this with the same .env the app uses:\n" +
-        "  set -a && . ./.env && set +a && node scripts/record-fixtures.mjs"
+        "Expected it in .env at the project root, alongside the keys the app uses."
     );
     process.exit(2);
   }
