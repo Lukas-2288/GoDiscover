@@ -30,6 +30,7 @@ import {
 } from "../api/discogs";
 import { undergroundAlbums, undergroundArtists } from "../api/underground";
 import type { ContentCategory, ResultItem } from "../../types/content";
+import { diversifyDeck } from "./deckDiversity";
 import { loadNextSimilar } from "./similarTiers";
 import type { DiscoveryLoadContext, DiscoveryLoadInput } from "./types";
 
@@ -228,6 +229,18 @@ export async function loadDiscovery(
   input: DiscoveryLoadInput,
   providers: DiscoveryProviderRegistry = defaultDiscoveryProviders,
   context: DiscoveryLoadContext = {}
+): Promise<ResultItem[]> {
+  const items = await routeDiscovery(input, providers, context);
+  // Applied here rather than inside each provider so every mode gets it, and
+  // so the rule lives in one place: no provider individually knows it returned
+  // four books by two authors.
+  return diversifyDeck(items, input.category);
+}
+
+async function routeDiscovery(
+  input: DiscoveryLoadInput,
+  providers: DiscoveryProviderRegistry,
+  context: DiscoveryLoadContext
 ): Promise<ResultItem[]> {
   const provider = providers[input.category];
   // A switch rather than an if-chain so the compiler, not a confused user,

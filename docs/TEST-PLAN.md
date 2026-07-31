@@ -23,7 +23,7 @@ is to produce a visibly bad recommendation.
 | Acceptance | The built app works in a real browser | No | `scripts/run-responsive-audit.mjs` |
 | Live probe | The real providers behave | **Yes** | `liveProviders.test.ts` (`LIVE_API_PROBE=1`) |
 
-Current state: **431 passing, 12 skipped, 0 failing.**
+Current state: **448 passing, 12 skipped, 0 failing.**
 
 ### Recording fixtures
 
@@ -109,20 +109,30 @@ the music path and both invisible from the UI:
 
 Both fixes were mutation-tested: reverting either makes the new tests fail.
 
+**Decks are now capped at two items per creator** (`deckDiversity.test.ts`, 17
+tests), applied once in `loadDiscovery` so every mode gets it rather than each
+provider having to remember. A recorded science-fiction search spent four of
+ten slots on two authors — no individual result wrong, the deck worse for it.
+
+Where the cap applies is the whole design. Books and albums carry an exact
+creator in `subtitle`; films carry the release *year* there, so capping by it
+would discard everything sharing a year, and artists need nothing because each
+card is its own creator.
+
+Films were left uncapped after trying and rejecting a title-stem heuristic.
+It did work on real data — three Tremors sequels in the recorded Dune deck
+reduce correctly — but a title is prose, not a field, and the same rule reads
+"movie 2" and "movie 3" as one franchise, collapsing sixty unrelated films to
+two. Trimming one sequel is not worth a rule that can silently gut a deck.
+Revisit if TMDB gives us a collection id to group on.
+
 ### The gaps, worst first
 
-1. **Diversity within a deck is unmeasured.** Ten books by one author, or ten
-   albums from one year, would pass every test here. Standard beyond-accuracy
-   evaluation treats diversity, novelty and coverage as separate axes from
-   accuracy precisely because accuracy alone does not predict satisfaction.
-   → *Add*: a deck of ten has at least N distinct authors/artists/years. The
-   recorded science-fiction search shows the shape of it — ten results, but
-   Douglas Adams twice and Andy Weir twice.
-2. **Cross-top-up duplicates.** The reducer dedupes by id, and `presentIds`
+1. **Cross-top-up duplicates.** The reducer dedupes by id, and `presentIds`
    keeps a top-up from repeating. Neither catches the same work arriving twice
    under different provider ids — a real Discogs and Open Library failure mode.
    → *Add*: near-duplicate detection on title + creator.
-3. **Untested modules**: `lib/storage/recents.ts`, `lib/discovery/emptyState.ts`
+2. **Untested modules**: `lib/storage/recents.ts`, `lib/discovery/emptyState.ts`
    (partly covered via `browseModes.test.ts`).
 
 ---
