@@ -1,0 +1,63 @@
+{
+  "describe": "Discogs artist search returning a disambiguation suffix",
+  "recordedAt": "2026-07-29T14:02:13.760Z",
+  "body": {
+    "pagination": {
+      "page": 1,
+      "pages": 147,
+      "per_page": 3,
+      "items": 440,
+      "urls": {
+        "last": "https://api.discogs.com/database/search?q=Nirvana&type=artist&per_page=3&page=147",
+        "next": "https://api.discogs.com/database/search?q=Nirvana&type=artist&per_page=3&page=2"
+      }
+    },
+    "results": [
+      {
+        "id": 125246,
+        "type": "artist",
+        "user_data": {
+          "in_wantlist": false,
+          "in_collection": false
+        },
+        "master_id": null,
+        "master_url": null,
+        "uri": "/artist/125246-Nirvana",
+        "title": "Nirvana",
+        "thumb": "https://i.discogs.com/KydDnAWdAzeHy0dZ4YSnpkuh__uLXIk8w60uKQVW0G4/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTEyNTI0/Ni0xNTAxMjg1MjAw/LTMwNTguanBlZw.jpeg",
+        "cover_image": "https://i.discogs.com/S_HB3FZR5TTcRyjBqlnUQpF_WgF-i9iSqcMTQGdwB6M/rs:fit/g:sm/q:90/h:609/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTEyNTI0/Ni0xNTAxMjg1MjAw/LTMwNTguanBlZw.jpeg",
+        "resource_url": "https://api.discogs.com/artists/125246"
+      },
+      {
+        "id": 307513,
+        "type": "artist",
+        "user_data": {
+          "in_wantlist": false,
+          "in_collection": false
+        },
+        "master_id": null,
+        "master_url": null,
+        "uri": "/artist/307513-Nirvana-2",
+        "title": "Nirvana (2)",
+        "thumb": "https://i.discogs.com/Qsyci3jKVLuFe1pfcbCGrpfxBA3s0gNN9SlAWyfFl0Y/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTMwNzUx/My0xMjcwMjM2OTQy/LmpwZWc.jpeg",
+        "cover_image": "https://i.discogs.com/KRbQ8QizNIgoIkRniPb6aHShHaARybPFZKR__HNUTg8/rs:fit/g:sm/q:90/h:525/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTMwNzUx/My0xMjcwMjM2OTQy/LmpwZWc.jpeg",
+        "resource_url": "https://api.discogs.com/artists/307513"
+      },
+      {
+        "id": 2744248,
+        "type": "artist",
+        "user_data": {
+          "in_wantlist": false,
+          "in_collection": false
+        },
+        "master_id": null,
+        "master_url": null,
+        "uri": "/artist/2744248-Nirvana-10",
+        "title": "Nirvana (10)",
+        "thumb": "",
+        "cover_image": "https://st.discogs.com/650943caff89a621ca57453df3edfa6359a154a9/images/spacer.gif",
+        "resource_url": "https://api.discogs.com/artists/2744248"
+      }
+    ]
+  }
+}

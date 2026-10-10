@@ -1,14 +1,16 @@
 import AntDesign from "@expo/vector-icons/AntDesign";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { LinearGradient } from "expo-linear-gradient";
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
   Image,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -17,442 +19,184 @@ import {
   Text,
   View,
   TextInput,
-  useColorScheme,
 } from "react-native";
 import {
-  GENRE_FILTERS,
-  ERA_FILTERS,
-  RATING_FILTERS,
-  POPULARITY_FILTERS,
-} from "../constants/Filters";
-import {
-  searchMovies,
-  randomMovies,
-  filterMovies,
-  getMovieDetail,
-  getSimilarMovies,
-  decadeToYearRange,
-  TMDB_GENRES,
-} from "../lib/api/tmdb";
-import {
-  searchBooks,
-  randomBooks,
-  filterBooks,
-  getBookDetail,
-  getSimilarBooks,
-  OL_SUBJECTS,
-} from "../lib/api/openlibrary";
-import {
-  searchArtists,
-  searchAlbums,
-  randomArtists,
-  randomAlbums,
-  filterArtists,
-  filterAlbums,
-  getArtistDetail,
-  getAlbumDetail,
-  getSimilarAlbums,
-  getSimilarArtists,
-  SPOTIFY_GENRE_MAP,
-} from "../lib/api/discogs";
+  useSafeAreaInsets,
+  type EdgeInsets,
+} from "react-native-safe-area-context";
 import type {
   ContentCategory,
   ResultItem,
-  MovieDetail,
-  BookDetail,
-  ArtistDetail,
-  AlbumDetail,
 } from "../types/content";
 import {
   listSaved,
-  addSaved,
-  removeSaved,
   syncLocalToCloud,
   clearLocalSaved,
   type SavedItem,
 } from "../lib/storage/saved";
+import {
+  removeSavedItem,
+  runSavedMutation,
+  SAVED_MUTATION_ERROR,
+  toggleSavedItem,
+} from "../lib/storage/savedMutations";
 import { listRecents, addRecent, type RecentItem } from "../lib/storage/recents";
 import { supabase } from "../lib/supabase";
-import type { Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/auth-js";
 import { signInWithGoogle } from "../lib/auth/oauth";
+import { Palette, ThemeMode, setThemeMode } from "../lib/theme";
+import { useAppTheme } from "../components/useAppTheme";
+import { getCategoryTheme } from "../lib/discovery/categoryThemes";
+import { emptyStateAction } from "../lib/discovery/emptyState";
+import { ArchiveHero, SectionHeading } from "../components/discovery/ArchiveHero";
+import { CategoryPicker } from "../components/discovery/CategoryPicker";
+// @ts-expect-error Expo resolves the platform-specific .native/.web module.
+import DiscoveryAnnouncer from "../components/discovery/DiscoveryAnnouncer";
+import { DiscoveryControls } from "../components/discovery/DiscoveryControls";
 import {
-  Palette,
-  ThemeMode,
-  resolvePalette,
-  loadThemeMode,
-  saveThemeMode,
-} from "../lib/theme";
+  DetailSheet,
+  type DetailSelection,
+} from "../components/discovery/DetailSheet";
+import { DiscoveryStatusCard } from "../components/discovery/DiscoveryStatusCard";
+import {
+  SwipeDeck,
+  type SwipeDeckHandle,
+} from "../components/discovery/SwipeDeck";
+import { SavedList } from "../components/saved/SavedList";
+import { UndoNotice } from "../components/discovery/UndoNotice";
+import { useDiscoveryController } from "../components/discovery/useDiscoveryController";
+import { useReducedMotion } from "../components/discovery/useReducedMotion";
+import {
+  loadDetail,
+  toDetailError,
+  type ContentDetail,
+} from "../lib/discovery/loadDetail";
+import { SIMILAR_TIER_LABELS } from "../lib/discovery/similarTiers";
+import { SAVE_INTENT_LABELS } from "../lib/discovery/saveIntent";
+import { thumbnailUrl } from "../lib/api/imageSizes";
+import { displayFont, monoFont } from "../lib/typography";
 
-type ThemeStyles = ReturnType<typeof makeStyles>;
-const ThemeContext = createContext<{ palette: Palette; styles: ThemeStyles } | null>(null);
-const useTheme = () => {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error("useTheme must be used within ThemeContext.Provider");
-  return ctx;
-};
-
-// Placeholder results until APIs are connected
-const MOCK_RESULTS: Record<string, { title: string; subtitle: string; meta: string }[]> = {
-  artists: [
-    { title: "Arctic Monkeys", subtitle: "Indie Rock", meta: "21M listeners" },
-    { title: "Tame Impala", subtitle: "Psychedelic Rock", meta: "18M listeners" },
-    { title: "Khruangbin", subtitle: "Funk / Psychedelic", meta: "5M listeners" },
-    { title: "Mac DeMarco", subtitle: "Indie / Lo-fi", meta: "8M listeners" },
-    { title: "Hiatus Kaiyote", subtitle: "Neo-Soul / Jazz", meta: "2M listeners" },
-  ],
-  albums: [
-    { title: "In Rainbows", subtitle: "Radiohead", meta: "2007" },
-    { title: "Blonde", subtitle: "Frank Ocean", meta: "2016" },
-    { title: "Currents", subtitle: "Tame Impala", meta: "2015" },
-    { title: "IGOR", subtitle: "Tyler, The Creator", meta: "2019" },
-    { title: "Vespertine", subtitle: "Bjork", meta: "2001" },
-  ],
-  books: [
-    { title: "Dune", subtitle: "Frank Herbert", meta: "⭐ 4.2" },
-    { title: "Project Hail Mary", subtitle: "Andy Weir", meta: "⭐ 4.5" },
-    { title: "Piranesi", subtitle: "Susanna Clarke", meta: "⭐ 4.3" },
-    { title: "Circe", subtitle: "Madeline Miller", meta: "⭐ 4.4" },
-    { title: "The Midnight Library", subtitle: "Matt Haig", meta: "⭐ 3.9" },
-  ],
-  movies: [
-    { title: "Everything Everywhere All at Once", subtitle: "Sci-Fi / Comedy", meta: "⭐ 8.0" },
-    { title: "Parasite", subtitle: "Thriller / Drama", meta: "⭐ 8.5" },
-    { title: "Interstellar", subtitle: "Sci-Fi / Adventure", meta: "⭐ 8.7" },
-    { title: "The Grand Budapest Hotel", subtitle: "Comedy / Drama", meta: "⭐ 8.1" },
-    { title: "Whiplash", subtitle: "Drama / Music", meta: "⭐ 8.5" },
-  ],
-};
-
-// Detailed info for modal (placeholder until APIs)
-const MOCK_DETAILS: Record<string, Record<string, any>> = {
-  artists: {
-    "Arctic Monkeys": { genre: "Indie Rock", listeners: "21M monthly listeners", origin: "Sheffield, UK", active: "2002 – present", topTracks: ["Do I Wanna Know?", "R U Mine?", "505", "Why'd You Only Call Me When You're High?", "I Bet You Look Good on the Dancefloor"] },
-    "Tame Impala": { genre: "Psychedelic Rock", listeners: "18M monthly listeners", origin: "Perth, Australia", active: "2007 – present", topTracks: ["The Less I Know the Better", "Let It Happen", "Borderline", "New Person, Same Old Mistakes", "Feels Like We Only Go Backwards"] },
-    "Khruangbin": { genre: "Funk / Psychedelic", listeners: "5M monthly listeners", origin: "Houston, TX", active: "2010 – present", topTracks: ["Time (You and I)", "Evan Finds the Third Room", "Friday Morning", "People Everywhere", "Two Fish and an Elephant"] },
-    "Mac DeMarco": { genre: "Indie / Lo-fi", listeners: "8M monthly listeners", origin: "Edmonton, Canada", active: "2006 – present", topTracks: ["Chamber of Reflection", "My Old Man", "Freaking Out the Neighborhood", "Still Beating", "Let Her Go"] },
-    "Hiatus Kaiyote": { genre: "Neo-Soul / Jazz", listeners: "2M monthly listeners", origin: "Melbourne, Australia", active: "2011 – present", topTracks: ["Get Sun", "Red Room", "Breathing Underwater", "Nakamarra", "Molasses"] },
-  },
-  albums: {
-    "In Rainbows": { artist: "Radiohead", year: "2007", genre: "Alternative Rock", rating: "9.3", tracks: 10, description: "Radiohead's seventh album, celebrated for its emotional depth, innovative sound design, and the band's pioneering pay-what-you-want release model." },
-    "Blonde": { artist: "Frank Ocean", year: "2016", genre: "R&B / Art Pop", rating: "9.0", tracks: 17, description: "Frank Ocean's acclaimed sophomore album, a deeply personal and experimental exploration of love, identity, and memory." },
-    "Currents": { artist: "Tame Impala", year: "2015", genre: "Psychedelic Pop", rating: "8.8", tracks: 13, description: "A bold shift from guitar-driven psych-rock to lush, synth-heavy pop. Kevin Parker's most accessible and emotionally resonant work." },
-    "IGOR": { artist: "Tyler, The Creator", year: "2019", genre: "Neo-Soul / Synth Pop", rating: "8.5", tracks: 12, description: "A concept album about unrequited love, blending soul, funk, and hip-hop into a cohesive narrative with striking visual identity." },
-    "Vespertine": { artist: "Bjork", year: "2001", genre: "Electronic / Art Pop", rating: "8.7", tracks: 12, description: "An intimate, wintry album built on microbeats, music boxes, and choral arrangements. One of Bjork's most delicate works." },
-  },
-  books: {
-    "Dune": { author: "Frank Herbert", year: "1965", pages: 412, genre: "Sci-Fi", rating: "4.2", description: "Set in a distant future where noble houses control planetary fiefs, Dune tells the story of Paul Atreides as he navigates politics, religion, and ecology on the desert planet Arrakis." },
-    "Project Hail Mary": { author: "Andy Weir", year: "2021", pages: 476, genre: "Sci-Fi", rating: "4.5", description: "A lone astronaut must save Earth from an extinction-level threat. A gripping tale of science, friendship, and survival across the stars." },
-    "Piranesi": { author: "Susanna Clarke", year: "2020", pages: 272, genre: "Fantasy", rating: "4.3", description: "A mysterious, labyrinthine world of endless halls, ocean tides, and living statues. A haunting exploration of memory, identity, and wonder." },
-    "Circe": { author: "Madeline Miller", year: "2018", pages: 393, genre: "Fantasy / Mythology", rating: "4.4", description: "The story of Circe, the witch of Greek mythology, reimagined as a feminist tale of power, transformation, and self-discovery." },
-    "The Midnight Library": { author: "Matt Haig", year: "2020", pages: 304, genre: "Fiction", rating: "3.9", description: "Between life and death lies a library where every book offers a chance to live a different life. A moving exploration of regret, hope, and second chances." },
-  },
-  movies: {
-    "Everything Everywhere All at Once": { director: "Daniel Kwan, Daniel Scheinert", year: "2022", genre: "Sci-Fi / Comedy", rating: "8.0", runtime: "139 min", description: "A Chinese-American woman is swept up in an insane adventure where she alone can save existence by exploring other universes and connecting with the lives she could have led." },
-    "Parasite": { director: "Bong Joon-ho", year: "2019", genre: "Thriller / Drama", rating: "8.5", runtime: "132 min", description: "A poor family schemes to become employed by a wealthy family, infiltrating their household one by one. A masterful blend of dark comedy and social commentary." },
-    "Interstellar": { director: "Christopher Nolan", year: "2014", genre: "Sci-Fi / Adventure", rating: "8.7", runtime: "169 min", description: "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival as Earth becomes uninhabitable." },
-    "The Grand Budapest Hotel": { director: "Wes Anderson", year: "2014", genre: "Comedy / Drama", rating: "8.1", runtime: "99 min", description: "A writer encounters the owner of an aging luxury hotel, who tells of his early years serving as lobby boy and his friendship with a legendary concierge." },
-    "Whiplash": { director: "Damien Chazelle", year: "2014", genre: "Drama / Music", rating: "8.5", runtime: "107 min", description: "A young jazz drummer enrolled at a prestigious music conservatory finds himself under the wing of a terrifying, abusive instructor who will stop at nothing to realize a student's potential." },
-  },
-};
-
-const CATEGORY_ICONS: Record<string, { name: string; family: string }> = {
-  artists: { name: "microphone", family: "FontAwesome" },
-  albums: { name: "music", family: "FontAwesome" },
-  books: { name: "book", family: "FontAwesome" },
-  movies: { name: "film", family: "FontAwesome" },
-};
-
-const CARD_WIDTH = (Dimensions.get("window").width - 48) / 2;
-
-function ResultCard({
-  title,
-  subtitle,
-  meta,
-  isHero,
-  category,
-  imageUrl,
-  onPress,
-}: {
-  title: string;
-  subtitle: string;
-  meta: string;
-  isHero?: boolean;
-  category: string;
-  imageUrl?: string;
-  onPress?: () => void;
-}) {
-  const { styles, palette } = useTheme();
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        isHero ? styles.heroCard : styles.gridCard,
-        pressed && { opacity: 0.9, transform: [{ scale: 0.97 }] },
-      ]}
-      onPress={onPress}
-    >
-      <View style={[styles.cardImagePlaceholder, isHero && styles.heroImagePlaceholder]}>
-        {imageUrl ? (
-          <Image
-            source={{ uri: imageUrl }}
-            style={styles.cardImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <FontAwesome
-            name={CATEGORY_ICONS[category]?.name as any ?? "star"}
-            size={isHero ? 40 : 24}
-            color={palette.accentBorder}
-          />
-        )}
-      </View>
-      {/* Card info */}
-      <View style={styles.cardInfo}>
-        <Text style={[styles.cardTitle, isHero && styles.heroCardTitle]} numberOfLines={2}>
-          {title}
-        </Text>
-        <Text style={styles.cardSubtitle} numberOfLines={1}>
-          {subtitle}
-        </Text>
-        <Text style={styles.cardMeta}>{meta}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function ActionButton({
-  label,
-  value,
-  activateAction,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  activateAction: string;
-  onPress: () => void;
-}) {
-  const { styles } = useTheme();
-  const isActive = activateAction === value;
-  const [hovered, setHovered] = useState(false);
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.actionButton,
-        isActive && styles.actionButtonActive,
-        pressed && { opacity: 0.7, transform: [{ scale: 0.97 }] },
-        hovered && !isActive && styles.actionButtonHover,
-      ]}
-      onPress={onPress}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-    >
-      <Text style={[styles.actionButtonText, isActive && styles.actionButtonTextActive]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function ContentButton({
-  label,
-  value,
-  selected,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  selected: string | null;
-  onPress: () => void;
-}) {
-  const { styles } = useTheme();
-  const isSelected = selected === value;
-  const [hovered, setHovered] = useState(false);
-
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.contentButton,
-        isSelected && styles.contentButtonActive,
-        pressed && { opacity: 0.7, transform: [{ scale: 0.97 }] },
-        hovered && !isSelected && styles.contentButtonHover,
-      ]}
-      onPress={onPress}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-    >
-      <Text style={[styles.contentButtonText, isSelected && styles.contentButtonTextActive]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function FilterChip({
-  label,
-  value,
-  selectedFilters,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  selectedFilters: string[];
-  onPress: () => void;
-}) {
-  const { styles } = useTheme();
-  const isSelected = selectedFilters.includes(value);
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.filterChip,
-        isSelected && styles.filterChipActive,
-        pressed && { opacity: 0.7 },
-      ]}
-      onPress={onPress}
-    >
-      <Text
-        style={[styles.filterChipText, isSelected && styles.filterChipTextActive]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function FilterSection({
-  title,
-  sectionKey,
-  options,
-  openSection,
-  onToggle,
-  selectedFilters,
-  onChipPress,
-}: {
-  title: string;
-  sectionKey: string;
-  options: { label: string; value: string }[];
-  openSection: string | null;
-  onToggle: () => void;
-  selectedFilters: string[];
-  onChipPress: (value: string) => void;
-}) {
-  const { styles, palette } = useTheme();
-  const isOpen = openSection === sectionKey;
-  const activeCount = options.filter((o) =>
-    selectedFilters.includes(o.value)
-  ).length;
-
-  return (
-    <View style={styles.filterSection}>
-      <Pressable
-        style={({ pressed }) => [
-          styles.filterSectionHeader,
-          pressed && { opacity: 0.8 },
-        ]}
-        onPress={onToggle}
-      >
-        <Text style={styles.filterSectionTitle}>
-          {title}
-          {activeCount > 0 && (
-            <Text style={styles.filterSectionCount}> ({activeCount})</Text>
-          )}
-        </Text>
-        <AntDesign
-          name={isOpen ? "down" : "right"}
-          size={14}
-          color={palette.textMuted}
-        />
-      </Pressable>
-      {isOpen && (
-        <View style={styles.filterChipContainer}>
-          {options.map((option) => (
-            <FilterChip
-              key={option.value}
-              label={option.label}
-              value={option.value}
-              selectedFilters={selectedFilters}
-              onPress={() => onChipPress(option.value)}
-            />
-          ))}
-        </View>
-      )}
-    </View>
-  );
+/** The deck's copy reads better in the singular: "the next movie", not "movies". */
+function singularFor(category: ContentCategory): string {
+  return getCategoryTheme(category).singular;
 }
 
 export default function HomeScreen() {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [openSection, setOpenSection] = useState<string | null>(null);
-  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
-  const [results, setResults] = useState<ResultItem[] | null>(null);
-  const [detailItem, setDetailItem] = useState<ResultItem | null>(null);
-  const [movieDetail, setMovieDetail] = useState<MovieDetail | null>(null);
-  const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
-  const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null);
-  const [albumDetail, setAlbumDetail] = useState<AlbumDetail | null>(null);
-  const [similarItems, setSimilarItems] = useState<ResultItem[]>([]);
-  const [detailError, setDetailError] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
+  const [detailSavedMutationError, setDetailSavedMutationError] = useState<
+    string | null
+  >(null);
+  const [savedSheetMutationError, setSavedSheetMutationError] = useState<
+    string | null
+  >(null);
+  const [accountSavedMutationError, setAccountSavedMutationError] = useState<
+    string | null
+  >(null);
+  // Declared ahead of the controller so saves can record the owner that made
+  // them; Undo refuses to run once the account changes.
+  const [authSession, setAuthSession] = useState<Session | null>(null);
+  const discoveryController = useDiscoveryController({
+    onSavedItemsChange: setSavedItems,
+    ownerId: authSession?.user.id ?? null,
+  });
+  const {
+    state: discovery,
+    session,
+    activeItem,
+    announcement,
+  } = discoveryController;
+  const selected = discovery.selected;
+  const reducedMotion = useReducedMotion();
+  const [categoryPickerExpanded, setCategoryPickerExpanded] = useState(true);
+  const [detailSelection, setDetailSelection] = useState<DetailSelection | null>(null);
+  const [detail, setDetail] = useState<ContentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(null);
+  const [detailRetryKey, setDetailRetryKey] = useState(0);
+  const deckRef = useRef<SwipeDeckHandle>(null);
+  const detailFocusGenerationRef = useRef(0);
+  const detailRequestSequenceRef = useRef(0);
+  const detailSavedMutationSequenceRef = useRef(0);
+  const savedSheetMutationSequenceRef = useRef(0);
+  const accountSavedMutationSequenceRef = useRef(0);
+  const detailSelectionRef = useRef<DetailSelection | null>(null);
+  detailSelectionRef.current = detailSelection;
   const [howToOpen, setHowToOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
   const [savedOpen, setSavedOpen] = useState(false);
+  // Pins the page while a card is being swiped, so the deck and the scroll
+  // view stop fighting over the same finger.
+  const [swiping, setSwiping] = useState(false);
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
-  const [session, setSession] = useState<Session | null>(null);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
-  const systemScheme = useColorScheme();
-
-  const palette = useMemo(
-    () => resolvePalette(themeMode, systemScheme === "dark"),
-    [themeMode, systemScheme]
-  );
-  const styles = useMemo(() => makeStyles(palette), [palette]);
+  const { mode: themeMode, palette } = useAppTheme();
+  // Insets rather than a hardcoded 54/40: the status bar is 20pt on a phone
+  // without a notch and 59pt on one with, and the home indicator only exists on
+  // some devices. The old constants were right on exactly one handset.
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => makeStyles(palette, insets), [palette, insets]);
 
   const changeThemeMode = (mode: ThemeMode) => {
     setThemeMode(mode);
-    saveThemeMode(mode);
+  };
+
+  const openAccount = () => {
+    accountSavedMutationSequenceRef.current += 1;
+    setAccountSavedMutationError(null);
+    setAccountOpen(true);
+  };
+
+  const closeAccount = () => {
+    accountSavedMutationSequenceRef.current += 1;
+    setAccountSavedMutationError(null);
+    setAccountOpen(false);
   };
 
   useEffect(() => {
-    loadThemeMode().then(setThemeMode);
-  }, []);
-
-  useEffect(() => {
-    listSaved().then(setSavedItems).catch(() => {});
+    runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => {});
     listRecents().then(setRecentItems).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!detailItem || !selected) return;
-    addRecent(selected as ContentCategory, detailItem)
+    if (!detailSelection) return;
+    addRecent(detailSelection.category, detailSelection.item)
       .then(setRecentItems)
       .catch(() => {});
-  }, [detailItem?.id, selected]);
+  }, [detailSelection?.category, detailSelection?.item.id]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+      setAuthSession(data.session);
       if (data.session) {
-        listSaved().then(setSavedItems).catch(() => {});
+        runSavedMutation(() => listSaved()).then(setSavedItems).catch(() => {});
       }
     });
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, s) => {
-      setSession(s);
+      setAuthSession(s);
       if (event === "SIGNED_IN" && s) {
-        await syncLocalToCloud();
-        const items = await listSaved();
-        setSavedItems(items);
+        await applySavedMutation(
+          () =>
+            runSavedMutation(async () => {
+              await syncLocalToCloud();
+              return listSaved();
+            }),
+          "account"
+        );
       }
       if (event === "SIGNED_OUT") {
-        await clearLocalSaved();
-        setSavedItems([]);
+        await applySavedMutation(
+          () =>
+            runSavedMutation(async () => {
+              await clearLocalSaved();
+              return [];
+            }),
+          "account"
+        );
       }
     });
     return () => listener.subscription.unsubscribe();
@@ -487,21 +231,24 @@ export default function HomeScreen() {
         setAuthMode("signin");
         setAuthPassword("");
       }
-    } catch (e: any) {
-      Alert.alert("Auth error", e.message ?? "Something went wrong");
+    } catch {
+      Alert.alert(
+        authMode === "signin" ? "Couldn't sign in" : "Couldn't create account",
+        "Check your details and try again."
+      );
     } finally {
       setAuthLoading(false);
     }
   };
 
   const currentDisplayName = (): string => {
-    const meta = session?.user?.user_metadata ?? {};
+    const meta = authSession?.user?.user_metadata ?? {};
     return meta.display_name ?? meta.full_name ?? meta.name ?? "";
   };
 
   useEffect(() => {
     setDisplayNameDraft(currentDisplayName());
-  }, [session?.user?.id, session?.user?.user_metadata]);
+  }, [authSession?.user?.id, authSession?.user?.user_metadata]);
 
   const saveDisplayName = async () => {
     const next = displayNameDraft.trim();
@@ -510,24 +257,25 @@ export default function HomeScreen() {
     try {
       const { error } = await supabase.auth.updateUser({ data: { display_name: next } });
       if (error) throw error;
-    } catch (e: any) {
-      Alert.alert("Couldn't save name", e?.message ?? "Something went wrong");
+    } catch {
+      Alert.alert("Couldn't save name", "Try again in a moment.");
     } finally {
       setSavingName(false);
     }
   };
 
   const handleSignOut = async () => {
-    console.log("[auth] signOut tapped");
     setAccountOpen(false);
     try {
       const { error } = await supabase.auth.signOut();
-      console.log("[auth] signOut result", error ? `error: ${error.message}` : "ok");
       if (error) {
         await supabase.auth.signOut({ scope: "local" });
       }
-    } catch (e: any) {
-      console.warn("[auth] signOut threw", e?.message ?? e);
+    } catch (error: unknown) {
+      console.warn({
+        action: "signOut",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
       await supabase.auth.signOut({ scope: "local" });
     }
   };
@@ -539,261 +287,288 @@ export default function HomeScreen() {
       setAccountOpen(false);
     } catch (e: any) {
       if (e?.message !== "Sign-in cancelled") {
-        Alert.alert("Google sign-in failed", e?.message ?? "Something went wrong");
+        Alert.alert("Google sign-in failed", "Try again in a moment.");
       }
     } finally {
       setAuthLoading(false);
     }
   };
 
-  const isItemSaved = (item: ResultItem | null): boolean => {
-    if (!item || !selected) return false;
-    return savedItems.some(
-      (s) => s.category === (selected as ContentCategory) && s.id === item.id
-    );
+  const isItemSaved = (category: ContentCategory, item: ResultItem): boolean => {
+    return savedItems.some((saved) => saved.category === category && saved.id === item.id);
   };
 
-  const toggleSaveDetail = async () => {
-    if (!detailItem || !selected) return;
-    const category = selected as ContentCategory;
-    const next = isItemSaved(detailItem)
-      ? await removeSaved(category, detailItem.id)
-      : await addSaved(category, detailItem);
-    setSavedItems(next);
+  const applySavedMutation = async (
+    mutation: () => Promise<SavedItem[]>,
+    scope: "detail" | "savedSheet" | "account"
+  ): Promise<boolean> => {
+    const sequenceRef =
+      scope === "detail"
+        ? detailSavedMutationSequenceRef
+        : scope === "savedSheet"
+        ? savedSheetMutationSequenceRef
+        : accountSavedMutationSequenceRef;
+    const setError =
+      scope === "detail"
+        ? setDetailSavedMutationError
+        : scope === "savedSheet"
+        ? setSavedSheetMutationError
+        : setAccountSavedMutationError;
+    const operationId = ++sequenceRef.current;
+    setError(null);
+    try {
+      setSavedItems(await mutation());
+      if (sequenceRef.current === operationId) setError(null);
+      return true;
+    } catch {
+      if (sequenceRef.current === operationId) {
+        setError(SAVED_MUTATION_ERROR);
+        if (scope === "account") setAccountOpen(true);
+      }
+      return false;
+    }
   };
 
-  const shareDetail = async () => {
-    if (!detailItem || !selected) return;
+  const clearDetail = () => {
+    detailSavedMutationSequenceRef.current += 1;
+    setDetailSavedMutationError(null);
+    detailSelectionRef.current = null;
+    setDetailSelection(null);
+    setDetail(null);
+    setDetailLoading(false);
+    setDetailErrorMessage(null);
+  };
+
+  const invalidateDetailFocusRestoration = () => {
+    detailFocusGenerationRef.current += 1;
+  };
+
+  const focusActiveCardAfterDismissal = (generation: number) => {
+    setTimeout(() => {
+      if (
+        detailFocusGenerationRef.current !== generation ||
+        detailSelectionRef.current !== null
+      ) {
+        return;
+      }
+      deckRef.current?.focusActiveCard();
+    }, 0);
+  };
+
+  const openDetail = useCallback((selection: DetailSelection) => {
+    invalidateDetailFocusRestoration();
+    detailSavedMutationSequenceRef.current += 1;
+    setDetailSavedMutationError(null);
+    detailSelectionRef.current = selection;
+    setDetailRetryKey(0);
+    setDetailSelection(selection);
+  }, []);
+
+  const shareDetail = async (category: ContentCategory, item: ResultItem) => {
     const kind =
-      selected === "movies"
+      category === "movies"
         ? "movie"
-        : selected === "books"
+        : category === "books"
         ? "book"
-        : selected === "albums"
+        : category === "albums"
         ? "album"
         : "artist";
     let sourceUrl: string | null = null;
-    if (selected === "movies") {
-      sourceUrl = `https://www.themoviedb.org/movie/${detailItem.id}`;
-    } else if (selected === "books") {
-      sourceUrl = `https://openlibrary.org/works/${detailItem.id}`;
-    } else if (selected === "artists") {
-      sourceUrl = `https://open.spotify.com/search/${encodeURIComponent(detailItem.title)}`;
-    } else if (selected === "albums") {
-      const query = `${detailItem.title} ${detailItem.subtitle ?? ""}`.trim();
+    if (category === "movies") {
+      sourceUrl = `https://www.themoviedb.org/movie/${item.id}`;
+    } else if (category === "books") {
+      sourceUrl = `https://openlibrary.org/works/${item.id}`;
+    } else if (category === "artists") {
+      sourceUrl = `https://open.spotify.com/search/${encodeURIComponent(item.title)}`;
+    } else if (category === "albums") {
+      const query = `${item.title} ${item.subtitle ?? ""}`.trim();
       sourceUrl = `https://open.spotify.com/search/${encodeURIComponent(query)}`;
     }
     const lines = [
       `Check out this ${kind} I found on GoDiscover:`,
       "",
-      `${detailItem.title}${detailItem.subtitle ? ` — ${detailItem.subtitle}` : ""}`,
+      `${item.title}${item.subtitle ? ` — ${item.subtitle}` : ""}`,
     ];
-    if (detailItem.meta) lines.push(detailItem.meta);
+    if (item.meta) lines.push(item.meta);
     if (sourceUrl) lines.push("", sourceUrl);
     try {
       await Share.share({ message: lines.join("\n") });
     } catch {}
   };
 
-  const toResultItems = (
-    arr: { title: string; subtitle: string; meta: string }[]
-  ): ResultItem[] =>
-    arr.map((r, i) => ({ id: `${r.title}-${i}`, ...r }));
+  const closeDetail = () => {
+    const restoreDeckFocus = detailSelectionRef.current?.origin === "deck";
+    const focusGeneration = detailFocusGenerationRef.current;
+    clearDetail();
+    if (restoreDeckFocus) focusActiveCardAfterDismissal(focusGeneration);
+  };
 
-  const runAction = async (action: "search" | "filter" | "randomize") => {
-    if (!selected || loading) return;
-    if (action === "search" && !searchQuery.trim()) return;
-    setLoading(true);
-    try {
-      const decade = selectedFilters.find((f) => /^\d{2}s$/.test(f));
-      const range = decade ? decadeToYearRange(decade) : null;
-      const ratingFilter = selectedFilters.find((f) => /^\d(\.\d)?\+$/.test(f));
-      const minRating = ratingFilter ? parseFloat(ratingFilter) : undefined;
+  const handleDetailSave = async (item: ResultItem) => {
+    const selection = detailSelectionRef.current;
+    if (!selection || selection.item.id !== item.id) return;
 
-      if (selected === "movies") {
-        if (action === "search") {
-          setResults(await searchMovies(searchQuery));
-        } else if (action === "randomize") {
-          setResults(await randomMovies());
-        } else {
-          const genreIds = selectedFilters
-            .map((f) => TMDB_GENRES[f])
-            .filter((v): v is number => typeof v === "number");
-          setResults(
-            await filterMovies({
-              genreIds: genreIds.length ? genreIds : undefined,
-              yearFrom: range?.yearFrom,
-              yearTo: range?.yearTo,
-              minRating,
-            })
-          );
-        }
-      } else if (selected === "books") {
-        if (action === "search") {
-          setResults(await searchBooks(searchQuery));
-        } else if (action === "randomize") {
-          setResults(await randomBooks());
-        } else {
-          const subjects = selectedFilters
-            .map((f) => OL_SUBJECTS[f])
-            .filter((v): v is string => typeof v === "string");
-          setResults(
-            await filterBooks({
-              subjects: subjects.length ? subjects : undefined,
-              yearFrom: range?.yearFrom,
-              yearTo: range?.yearTo,
-              minRating,
-            })
-          );
-        }
-      } else if (selected === "artists" || selected === "albums") {
-        if (action === "search") {
-          setResults(
-            selected === "artists"
-              ? await searchArtists(searchQuery)
-              : await searchAlbums(searchQuery)
-          );
-        } else if (action === "randomize") {
-          setResults(
-            selected === "artists" ? await randomArtists() : await randomAlbums()
-          );
-        } else {
-          const genres = selectedFilters
-            .map((f) => SPOTIFY_GENRE_MAP[f])
-            .filter((v): v is string => typeof v === "string");
-          const params = {
-            genres: genres.length ? genres : undefined,
-            yearFrom: range?.yearFrom,
-            yearTo: range?.yearTo,
-          };
-          setResults(
-            selected === "artists"
-              ? await filterArtists(params)
-              : await filterAlbums(params)
-          );
-        }
-      } else {
-        setResults(toResultItems(MOCK_RESULTS[selected]));
-      }
-    } catch (e: any) {
-      Alert.alert("Error", e.message ?? "Something went wrong");
-      setResults(null);
-    } finally {
-      setLoading(false);
+    if (selection.origin === "stored") {
+      await applySavedMutation(
+        () => toggleSavedItem(selection.category, item),
+        "detail"
+      );
+      return;
     }
+
+    const focusGeneration = detailFocusGenerationRef.current;
+    clearDetail();
+    await discoveryController.commit(item, "save");
+    focusActiveCardAfterDismissal(focusGeneration);
+  };
+
+  const handleDetailSkip = async (item: ResultItem) => {
+    const selection = detailSelectionRef.current;
+    if (!selection || selection.origin !== "deck" || selection.item.id !== item.id) {
+      return;
+    }
+
+    const focusGeneration = detailFocusGenerationRef.current;
+    clearDetail();
+    await discoveryController.commit(item, "skip");
+    focusActiveCardAfterDismissal(focusGeneration);
+  };
+
+  const handleDetailSimilar = async (item: ResultItem) => {
+    const selection = detailSelectionRef.current;
+    if (!selection || selection.item.id !== item.id) return;
+
+    const focusGeneration = detailFocusGenerationRef.current;
+    clearDetail();
+    await discoveryController.similar(item);
+    focusActiveCardAfterDismissal(focusGeneration);
+  };
+
+  const handleCategorySelect = (category: ContentCategory) => {
+    invalidateDetailFocusRestoration();
+    if (!categoryPickerExpanded && category === selected) {
+      setCategoryPickerExpanded(true);
+      return;
+    }
+    discoveryController.selectCategory(category);
+    setCategoryPickerExpanded(false);
+    clearDetail();
+  };
+
+  const commitFromDeck = useCallback(
+    async (item: ResultItem, decision: "save" | "skip") => {
+      await discoveryController.commit(item, decision);
+    },
+    [discoveryController.commit]
+  );
+
+  // Stable across renders so SwipeDeck's internal pan responder never has to
+  // rebuild mid-gesture on account of these two changing identity.
+  const handleDeckOpenDetail = useCallback(
+    (item: ResultItem) => {
+      if (!selected) return;
+      openDetail({ category: selected, item, origin: "deck" });
+    },
+    [selected, openDetail]
+  );
+
+  const handleDeckSimilar = useCallback(
+    (item: ResultItem) => {
+      if (!selected) return;
+      void discoveryController.similar(item);
+    },
+    [selected, discoveryController.similar]
+  );
+
+  /**
+   * The landing's "Surprise me" goes straight to cards, the way the site's
+   * does. Picking a category tile deliberately still stops at the controls, so
+   * you can search or filter before committing to a deck.
+   */
+  const handleSurprise = () => {
+    handleCategorySelect("movies");
+    void discoveryController.submit("randomize");
+  };
+
+  const openStoredItem = (category: ContentCategory, item: ResultItem) => {
+    discoveryController.selectCategory(category);
+    openDetail({ category, item, origin: "stored" });
+  };
+
+  const openSavedSheet = () => {
+    savedSheetMutationSequenceRef.current += 1;
+    setSavedSheetMutationError(null);
+    setSavedOpen(true);
+  };
+
+  const closeSavedSheet = () => {
+    savedSheetMutationSequenceRef.current += 1;
+    setSavedSheetMutationError(null);
+    setSavedOpen(false);
   };
 
   useEffect(() => {
-    if (!detailItem) {
-      setMovieDetail(null);
-      setBookDetail(null);
-      setArtistDetail(null);
-      setAlbumDetail(null);
-      setSimilarItems([]);
-      setDetailError(false);
-      return;
-    }
+    const selection = detailSelection;
+    if (!selection) return;
 
-    let cancelled = false;
+    const requestSequence = ++detailRequestSequenceRef.current;
+    const { category, item } = selection;
     setDetailLoading(true);
-    setDetailError(false);
-    setMovieDetail(null);
-    setBookDetail(null);
-    setArtistDetail(null);
-    setAlbumDetail(null);
-    setSimilarItems([]);
+    setDetailErrorMessage(null);
+    setDetail(null);
 
-    let fetcher: Promise<void>;
-    let similarFetcher: Promise<ResultItem[]> | null = null;
-    if (selected === "movies") {
-      fetcher = getMovieDetail(detailItem.id).then((d) => {
-        if (!cancelled) setMovieDetail(d);
-      });
-      similarFetcher = getSimilarMovies(detailItem.id);
-    } else if (selected === "books") {
-      fetcher = getBookDetail(detailItem.id, {
-        title: detailItem.title,
-        imageUrl: detailItem.imageUrl,
-      }).then((d) => {
-        if (!cancelled) setBookDetail(d);
-      });
-      similarFetcher = getSimilarBooks(detailItem.id);
-    } else if (selected === "artists") {
-      fetcher = getArtistDetail(detailItem.id).then((d) => {
-        if (!cancelled) setArtistDetail(d);
-      });
-      similarFetcher = getSimilarArtists(detailItem.id);
-    } else if (selected === "albums") {
-      fetcher = getAlbumDetail(detailItem.id).then((d) => {
-        if (!cancelled) setAlbumDetail(d);
-      });
-      similarFetcher = getSimilarAlbums(detailItem.id);
-    } else {
-      return;
-    }
+    const isCurrentSelection = () => {
+      const current = detailSelectionRef.current;
+      return (
+        detailRequestSequenceRef.current === requestSequence &&
+        current?.category === category &&
+        current.item.id === item.id
+      );
+    };
 
-    fetcher
-      .catch(() => {
-        if (!cancelled) setDetailError(true);
+    void loadDetail(category, item)
+      .then((nextDetail) => {
+        if (isCurrentSelection()) setDetail(nextDetail);
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentSelection()) return;
+        console.warn({
+          category,
+          itemId: item.id,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+        setDetailErrorMessage(toDetailError());
       })
       .finally(() => {
-        if (!cancelled) setDetailLoading(false);
+        if (isCurrentSelection()) setDetailLoading(false);
       });
 
-    if (similarFetcher) {
-      similarFetcher
-        .then((items) => {
-          if (!cancelled) setSimilarItems(items);
-        })
-        .catch(() => {
-          if (!cancelled) setSimilarItems([]);
-        });
-    }
-
     return () => {
-      cancelled = true;
+      if (detailRequestSequenceRef.current === requestSequence) {
+        detailRequestSequenceRef.current += 1;
+      }
     };
-  }, [detailItem, selected]);
-
-  const toggleFilter = (value: string) => {
-    setSelectedFilters((prev) =>
-      prev.includes(value)
-        ? prev.filter((f) => f !== value)
-        : [...prev, value]
-    );
-  };
-
-  const genreOptions = selected
-    ? GENRE_FILTERS[selected as keyof typeof GENRE_FILTERS].map((g) => ({
-        label: g,
-        value: g,
-      }))
-    : [];
-  const eraOptions = [
-    { label: "Any", value: "Any" },
-    ...ERA_FILTERS.decades.map((e) => ({ label: e, value: e })),
-  ];
-  const ratingOptions =
-    selected && selected !== "artists" && selected in RATING_FILTERS
-      ? RATING_FILTERS[selected as keyof typeof RATING_FILTERS].map((r) => ({
-          label: r.label,
-          value: r.label,
-        }))
-      : null;
-  const popularityOptions = null;
+  }, [detailSelection?.category, detailSelection?.item.id, detailRetryKey]);
 
   return (
-    <ThemeContext.Provider value={{ palette, styles }}>
     <View style={styles.container}>
       {/* Top Bar */}
-      <View style={styles.topBar}>
+      <View style={styles.topBar} testID="top-bar">
         <View style={styles.topBarLeft}>
           <Pressable
-            style={({ pressed }) => pressed && { opacity: 0.6 }}
-            onPress={() => setAccountOpen(true)}
+            accessibilityLabel="Open account"
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.topBarAction,
+              pressed && { opacity: 0.6 },
+            ]}
+            onPress={() => {
+              invalidateDetailFocusRestoration();
+              openAccount();
+            }}
           >
             <FontAwesome
-              name={session ? "user-circle" : "user-circle-o"}
+              accessible={false}
+              name={authSession ? "user-circle" : "user-circle-o"}
               size={26}
               color={palette.accent}
             />
@@ -802,20 +577,42 @@ export default function HomeScreen() {
         <Text style={styles.logoText}>GoDiscover</Text>
         <View style={styles.topBarRight}>
           <Pressable
-            style={({ pressed }) => pressed && { opacity: 0.6 }}
-            onPress={() => setSavedOpen(true)}
+            accessibilityLabel="Open saved discoveries"
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.topBarAction,
+              pressed && { opacity: 0.6 },
+            ]}
+            onPress={() => {
+              invalidateDetailFocusRestoration();
+              openSavedSheet();
+            }}
           >
             <FontAwesome
+              accessible={false}
               name={savedItems.length > 0 ? "bookmark" : "bookmark-o"}
               size={22}
               color={savedItems.length > 0 ? palette.accent : palette.borderStrong}
             />
           </Pressable>
           <Pressable
-            style={({ pressed }) => pressed && { opacity: 0.6 }}
-            onPress={() => setHowToOpen(true)}
+            accessibilityLabel="How to use GoDiscover"
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.topBarAction,
+              pressed && { opacity: 0.6 },
+            ]}
+            onPress={() => {
+              invalidateDetailFocusRestoration();
+              setHowToOpen(true);
+            }}
           >
-            <FontAwesome name="question-circle-o" size={24} color={palette.textMuted} />
+            <FontAwesome
+              accessible={false}
+              name="question-circle-o"
+              size={24}
+              color={palette.textMuted}
+            />
           </Pressable>
         </View>
       </View>
@@ -824,796 +621,361 @@ export default function HomeScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!swiping}
+        testID="discovery-scroll"
       >
-        {/* Content Type Selector */}
-        <View style={styles.contentSelector}>
-          <ContentButton
-            label="🎤 Artists"
-            value="artists"
-            selected={selected}
-            onPress={() => { setSelected("artists"); setSelectedFilters([]); setOpenSection(null); }}
-          />
-          <ContentButton
-            label="🎵 Albums"
-            value="albums"
-            selected={selected}
-            onPress={() => { setSelected("albums"); setSelectedFilters([]); setOpenSection(null); }}
-          />
-          <ContentButton
-            label="📚 Books"
-            value="books"
-            selected={selected}
-            onPress={() => { setSelected("books"); setSelectedFilters([]); setOpenSection(null); }}
-          />
-          <ContentButton
-            label="🎬 Movies"
-            value="movies"
-            selected={selected}
-            onPress={() => { setSelected("movies"); setSelectedFilters([]); setOpenSection(null); }}
-          />
-        </View>
-
-        {/* Action Selector */}
-        <View style={styles.actionSelector}>
-          <ActionButton
-            label="Search"
-            value="search"
-            activateAction={activeAction ?? ""}
-            onPress={() => setActiveAction("search")}
-          />
-          <ActionButton
-            label="Filter"
-            value="filter"
-            activateAction={activeAction ?? ""}
-            onPress={() => setActiveAction("filter")}
-          />
-          <ActionButton
-            label="Randomize"
-            value="randomize"
-            activateAction={activeAction ?? ""}
-            onPress={() => setActiveAction("randomize")}
-          />
-        </View>
-
-        {/* Recently Viewed */}
-        {!activeAction && recentItems.length > 0 && (
-          <View style={styles.recentsSection}>
-            <View style={styles.recentsHeader}>
-              <Text style={styles.recentsTitle}>Recently viewed</Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.recentsRow}
-            >
-              {recentItems.map((item) => (
-                <Pressable
-                  key={`${item.category}:${item.id}`}
-                  style={({ pressed }) => [
-                    styles.recentCard,
-                    pressed && { opacity: 0.75 },
-                  ]}
-                  onPress={() => {
-                    setSelected(item.category);
-                    setDetailItem(item);
-                  }}
-                >
-                  {item.imageUrl ? (
-                    <Image
-                      source={{ uri: item.imageUrl }}
-                      style={styles.recentImage}
-                    />
-                  ) : (
-                    <View
-                      style={[
-                        styles.recentImage,
-                        { backgroundColor: palette.accentBgSoft },
-                      ]}
-                    />
-                  )}
-                  <Text style={styles.recentCardTitle} numberOfLines={2}>
-                    {item.title}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Empty States */}
-        {!selected && recentItems.length === 0 && (
-          <View style={styles.emptyState}>
-            <FontAwesome name="hand-pointer-o" size={32} color={palette.textFaint} />
-            <Text style={styles.emptyStateText}>
-              Select a category above to get started
-            </Text>
-          </View>
-        )}
-        {selected && !activeAction && (
-          <View style={styles.emptyState}>
-            <AntDesign name="arrow-up" size={32} color={palette.textFaint} />
-            <Text style={styles.emptyStateText}>
-              Now choose Search, Filter, or Randomize
-            </Text>
-          </View>
-        )}
-
-        {/* Search Panel */}
-        {selected && activeAction === "search" && (
-          <View style={styles.searchState}>
-            <View style={styles.searchInputContainer}>
-              <FontAwesome
-                name="search"
-                size={16}
-                color={palette.textFaint}
-                style={styles.searchIcon}
+        <View style={styles.discoveryContent}>
+          {categoryPickerExpanded ? (
+            <>
+              <ArchiveHero palette={palette} onSurprise={handleSurprise} />
+              <SectionHeading
+                kicker="01 / CHOOSE A DOOR"
+                title="Explore the archive"
+                palette={palette}
               />
-              <TextInput
-                onChangeText={setSearchQuery}
-                value={searchQuery}
-                style={styles.searchInput}
-                placeholder={`Describe the ${selected} you're looking for...`}
-                placeholderTextColor={palette.textFaint}
-                multiline={true}
+            </>
+          ) : null}
+          <CategoryPicker
+            selected={selected}
+            compact={Boolean(selected) && !categoryPickerExpanded}
+            palette={palette}
+            onSelect={handleCategorySelect}
+          />
+
+          {categoryPickerExpanded &&
+          recentItems.length > 0 &&
+          (!session ||
+            (session.deck.queue.length === 0 &&
+              session.activeRequest === null)) ? (
+            <View style={styles.recentsSection}>
+              <SectionHeading
+                kicker="02 / PICK UP THE THREAD"
+                title="Recently viewed"
+                palette={palette}
               />
-            </View>
-            {searchQuery.length > 0 && (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.searchButton,
-                  pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
-                ]}
-                onPress={() => runAction(activeAction as "search" | "randomize")}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.recentsRow}
               >
-                <Text style={styles.searchButtonText}>Find {selected}</Text>
-                <AntDesign name="arrow-right" size={16} color={palette.onAccent} />
-              </Pressable>
-            )}
-          </View>
-        )}
-
-        {/* Filter Panel */}
-        {selected && activeAction === "filter" && (
-          <View style={styles.filterState}>
-            {selectedFilters.length > 0 && (
-              <Pressable
-                onPress={() => setSelectedFilters([])}
-                style={({ pressed }) => pressed && { opacity: 0.6 }}
-              >
-                <Text style={styles.clearFiltersText}>Clear all</Text>
-              </Pressable>
-            )}
-            <FilterSection
-              title="Genre"
-              sectionKey="genre"
-              options={genreOptions}
-              openSection={openSection}
-              onToggle={() =>
-                setOpenSection(openSection === "genre" ? null : "genre")
-              }
-              selectedFilters={selectedFilters}
-              onChipPress={toggleFilter}
-            />
-            <FilterSection
-              title="Era"
-              sectionKey="era"
-              options={eraOptions}
-              openSection={openSection}
-              onToggle={() =>
-                setOpenSection(openSection === "era" ? null : "era")
-              }
-              selectedFilters={selectedFilters}
-              onChipPress={toggleFilter}
-            />
-            {ratingOptions && (
-              <FilterSection
-                title="Rating"
-                sectionKey="rating"
-                options={ratingOptions}
-                openSection={openSection}
-                onToggle={() =>
-                  setOpenSection(openSection === "rating" ? null : "rating")
-                }
-                selectedFilters={selectedFilters}
-                onChipPress={toggleFilter}
-              />
-            )}
-            {popularityOptions && (
-              <FilterSection
-                title="Popularity"
-                sectionKey="popularity"
-                options={popularityOptions}
-                openSection={openSection}
-                onToggle={() =>
-                  setOpenSection(
-                    openSection === "popularity" ? null : "popularity"
-                  )
-                }
-                selectedFilters={selectedFilters}
-                onChipPress={toggleFilter}
-              />
-            )}
-            <Pressable
-              style={({ pressed }) => [
-                styles.searchButton,
-                pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
-              ]}
-              onPress={() => runAction("filter")}
-            >
-              <Text style={styles.searchButtonText}>Find {selected}</Text>
-              <AntDesign name="arrow-right" size={16} color={palette.onAccent} />
-            </Pressable>
-          </View>
-        )}
-
-        {/* Randomize Panel */}
-        {selected && activeAction === "randomize" && (
-          <View style={styles.randomizeState}>
-            <Text style={styles.randomizeHint}>
-              Tap to discover something new
-            </Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.randomizeButton,
-                pressed && { opacity: 0.85, transform: [{ scale: 0.95 }] },
-              ]}
-              onPress={() => runAction("randomize")}
-            >
-              <FontAwesome name="random" size={22} color={palette.onAccent} />
-              <Text style={styles.randomizeButtonText}>Surprise Me!</Text>
-            </Pressable>
-          </View>
-        )}
-        {/* Loading */}
-        {loading && (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={palette.accent} size="large" />
-            <Text style={styles.emptyStateText}>Finding your {selected}...</Text>
-          </View>
-        )}
-
-        {/* No results */}
-        {!loading && results && results.length === 0 && selected && (
-          <View style={styles.emptyState}>
-            <FontAwesome name="search-minus" size={32} color={palette.textFaint} />
-            <Text style={styles.emptyStateText}>
-              No {selected} matched those filters. Try loosening them.
-            </Text>
-          </View>
-        )}
-
-        {/* Results */}
-        {!loading && results && results.length > 0 && selected && (
-          <View style={styles.resultsContainer}>
-            <View style={styles.resultsHeader}>
-              <Text style={styles.resultsTitle}>Results</Text>
-              <Pressable
-                onPress={() => setResults(null)}
-                style={({ pressed }) => pressed && { opacity: 0.6 }}
-              >
-                <Text style={styles.clearResultsText}>Clear</Text>
-              </Pressable>
-            </View>
-
-            {/* Hero Card */}
-            <ResultCard
-              title={results[0].title}
-              subtitle={results[0].subtitle}
-              meta={results[0].meta}
-              isHero
-              category={selected}
-              imageUrl={results[0].imageUrl}
-              onPress={() => setDetailItem(results[0])}
-            />
-
-            {/* Grid Cards */}
-            <View style={styles.gridContainer}>
-              {results.slice(1).map((item) => (
-                <ResultCard
-                  key={item.id}
-                  title={item.title}
-                  subtitle={item.subtitle}
-                  meta={item.meta}
-                  category={selected}
-                  imageUrl={item.imageUrl}
-                  onPress={() => setDetailItem(item)}
-                />
-              ))}
-            </View>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* Detail Modal */}
-      {selected && detailItem && (
-        <Modal
-          visible={true}
-          animationType="slide"
-          transparent={true}
-          onRequestClose={() => setDetailItem(null)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              {/* Grabber bar */}
-              <View style={styles.modalGrabber} />
-
-              {/* Close button */}
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalClose,
-                  pressed && { opacity: 0.7 },
-                ]}
-                onPress={() => setDetailItem(null)}
-                hitSlop={8}
-              >
-                <AntDesign name="close" size={18} color={palette.onAccent} />
-              </Pressable>
-
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Per-category hero */}
-                {selected === "movies" ? (
-                  <View style={styles.heroMovie}>
-                    {movieDetail?.backdropUrl || detailItem.imageUrl ? (
+                {recentItems.map((item) => (
+                  <Pressable
+                    key={`${item.category}:${item.id}`}
+                    accessibilityLabel={`Open ${item.title} details`}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                      styles.recentCard,
+                      pressed && { opacity: 0.75 },
+                    ]}
+                    onPress={() => openStoredItem(item.category, item)}
+                  >
+                    {item.imageUrl ? (
                       <Image
-                        source={{ uri: movieDetail?.backdropUrl ?? detailItem.imageUrl }}
-                        style={styles.heroMovieImage}
-                        resizeMode="cover"
+                        accessible={false}
+                        source={{ uri: thumbnailUrl(item.imageUrl) }}
+                        style={styles.recentImage}
                       />
                     ) : (
-                      <View style={styles.heroMoviePlaceholder}>
-                        <FontAwesome
-                          name={CATEGORY_ICONS[selected]?.name as any ?? "star"}
-                          size={48}
-                          color={palette.accentBorder}
-                        />
-                      </View>
+                      <View
+                        style={[
+                          styles.recentImage,
+                          { backgroundColor: palette.accentBgSoft },
+                        ]}
+                      />
                     )}
-                    <LinearGradient
-                      colors={["transparent", palette.gradientMid, palette.surface]}
-                      style={styles.heroMovieGradient}
-                      pointerEvents="none"
-                    />
-                  </View>
-                ) : (
-                  <View style={styles.heroCentered}>
-                    {(() => {
-                      const uri =
-                        selected === "books"
-                          ? bookDetail?.coverUrl ?? detailItem.imageUrl
-                          : selected === "artists"
-                          ? artistDetail?.imageUrl ?? detailItem.imageUrl
-                          : selected === "albums"
-                          ? albumDetail?.imageUrl ?? detailItem.imageUrl
-                          : detailItem.imageUrl;
-                      const wrapStyle =
-                        selected === "books"
-                          ? styles.heroBookWrap
-                          : styles.heroSquareWrap;
-                      if (!uri) {
-                        return (
-                          <View style={[wrapStyle, styles.heroEmptyWrap]}>
-                            <FontAwesome
-                              name={CATEGORY_ICONS[selected]?.name as any ?? "star"}
-                              size={48}
-                              color={palette.accentBorder}
-                            />
-                          </View>
-                        );
-                      }
-                      return (
-                        <Image
-                          source={{ uri }}
-                          style={wrapStyle}
-                          resizeMode="cover"
-                        />
-                      );
-                    })()}
-                  </View>
-                )}
-
-                {/* Title */}
-                <Text style={styles.modalTitle} numberOfLines={2}>{detailItem.title}</Text>
-
-                {/* Content-specific details */}
-                {selected === "movies" && (() => {
-                  if (detailLoading && !movieDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = movieDetail;
-                  if (!d) return null;
-                  return (
-                    <View style={styles.modalDetails}>
-                      <View style={styles.modalMetaRow}>
-                        <Text style={styles.modalMetaPill}>{d.releaseYear}</Text>
-                        {d.runtime ? (
-                          <Text style={styles.modalMetaPill}>{d.runtime} min</Text>
-                        ) : null}
-                        <Text style={styles.modalMetaPill}>⭐ {d.rating.toFixed(1)}</Text>
-                      </View>
-                      <Text style={styles.modalSubtitle}>{d.genres.join(" / ") || "—"}</Text>
-                      <Text style={styles.modalLabel}>Language</Text>
-                      <Text style={styles.modalValue}>{d.language.toUpperCase()}</Text>
-                      <Text style={styles.modalLabel}>Synopsis</Text>
-                      <Text style={styles.modalDescription}>{d.overview || "No synopsis available."}</Text>
-                    </View>
-                  );
-                })()}
-
-                {selected === "books" && (() => {
-                  if (detailLoading && !bookDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = bookDetail;
-                  if (!d) return null;
-                  const fallbackAuthor = detailItem.subtitle;
-                  const authorLine = d.authors.length ? d.authors.join(", ") : fallbackAuthor;
-                  return (
-                    <View style={styles.modalDetails}>
-                      <View style={styles.modalMetaRow}>
-                        {d.firstPublishYear ? (
-                          <Text style={styles.modalMetaPill}>{d.firstPublishYear}</Text>
-                        ) : null}
-                        {d.rating ? (
-                          <Text style={styles.modalMetaPill}>⭐ {d.rating.toFixed(1)}</Text>
-                        ) : null}
-                      </View>
-                      {d.subjects.length ? (
-                        <Text style={styles.modalSubtitle}>{d.subjects.slice(0, 3).join(" / ")}</Text>
-                      ) : null}
-                      <Text style={styles.modalLabel}>Author</Text>
-                      <Text style={styles.modalValue}>{authorLine}</Text>
-                      <Text style={styles.modalLabel}>Description</Text>
-                      <Text style={styles.modalDescription}>
-                        {d.description || "No description available."}
-                      </Text>
-                    </View>
-                  );
-                })()}
-
-                {selected === "artists" && (() => {
-                  if (detailLoading && !artistDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = artistDetail;
-                  if (!d) return null;
-                  return (
-                    <View style={styles.modalDetails}>
-                      <Text style={styles.modalLabel}>Discography</Text>
-                      {d.albums.length ? (
-                        d.albums.map((album, i) => {
-                          const year = album.releaseDate ? album.releaseDate.slice(0, 4) : "";
-                          return (
-                            <View key={album.id} style={styles.trackRow}>
-                              <Text style={styles.trackNumber}>{i + 1}</Text>
-                              <Text style={styles.trackName} numberOfLines={1}>
-                                {album.name}
-                              </Text>
-                              {year ? <Text style={styles.trackYear}>{year}</Text> : null}
-                            </View>
-                          );
-                        })
-                      ) : (
-                        <Text style={styles.modalValue}>No albums found.</Text>
-                      )}
-                    </View>
-                  );
-                })()}
-
-                {selected === "albums" && (() => {
-                  if (detailLoading && !albumDetail) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <ActivityIndicator color={palette.accent} />
-                      </View>
-                    );
-                  }
-                  if (detailError) {
-                    return (
-                      <View style={styles.modalDetails}>
-                        <Text style={styles.modalDescription}>
-                          Couldn&apos;t load details. Check your connection and try again.
-                        </Text>
-                      </View>
-                    );
-                  }
-                  const d = albumDetail;
-                  if (!d) return null;
-                  const year = d.releaseDate ? d.releaseDate.slice(0, 4) : "—";
-                  return (
-                    <View style={styles.modalDetails}>
-                      <View style={styles.modalMetaRow}>
-                        <Text style={styles.modalMetaPill}>{year}</Text>
-                        <Text style={styles.modalMetaPill}>{d.totalTracks} tracks</Text>
-                        <Text style={styles.modalMetaPill}>
-                          {d.albumType.charAt(0).toUpperCase() + d.albumType.slice(1)}
-                        </Text>
-                      </View>
-                      <Text style={styles.modalSubtitle}>{d.artists.join(", ")}</Text>
-                      <Text style={styles.modalLabel}>Tracks</Text>
-                      {d.tracks.slice(0, 8).map((track, i) => (
-                        <View key={track.id} style={styles.trackRow}>
-                          <Text style={styles.trackNumber}>{i + 1}</Text>
-                          <Text style={styles.trackName}>{track.name}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  );
-                })()}
-
-                {/* External Links */}
-                <View style={styles.externalLinks}>
-                  <Text style={styles.modalLabel}>
-                    {selected === "artists" || selected === "albums"
-                      ? "Listen"
-                      : selected === "movies"
-                      ? "Watch"
-                      : selected === "books"
-                      ? "Read"
-                      : "Links"}
-                  </Text>
-
-                  {(selected === "artists" || selected === "albums") && (() => {
-                    const searchTerm =
-                      selected === "artists"
-                        ? detailItem.title
-                        : `${detailItem.title} ${detailItem.subtitle}`;
-                    return (
-                      <View style={styles.linkRow}>
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.linkButton,
-                            styles.linkSpotify,
-                            pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                          ]}
-                          onPress={() =>
-                            Linking.openURL(
-                              `https://open.spotify.com/search/${encodeURIComponent(searchTerm)}`
-                            )
-                          }
-                        >
-                          <FontAwesome name="spotify" size={18} color={palette.onAccent} />
-                          <Text style={styles.linkButtonText}>Spotify</Text>
-                        </Pressable>
-                        <Pressable
-                          style={({ pressed }) => [
-                            styles.linkButton,
-                            styles.linkAppleMusic,
-                            pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                          ]}
-                          onPress={() =>
-                            Linking.openURL(
-                              `https://music.apple.com/us/search?term=${encodeURIComponent(searchTerm)}`
-                            )
-                          }
-                        >
-                          <FontAwesome name="apple" size={18} color={palette.onAccent} />
-                          <Text style={styles.linkButtonText}>Apple Music</Text>
-                        </Pressable>
-                      </View>
-                    );
-                  })()}
-
-                  {selected === "movies" && (
-                    <View style={styles.linkRow}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkJustWatch,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(
-                            `https://www.justwatch.com/us/search?q=${encodeURIComponent(detailItem.title)}`
-                          )
-                        }
-                      >
-                        <MaterialIcons name="live-tv" size={18} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>JustWatch</Text>
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkTMDB,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(`https://www.themoviedb.org/movie/${detailItem.id}`)
-                        }
-                      >
-                        <FontAwesome name="film" size={16} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>TMDB</Text>
-                      </Pressable>
-                    </View>
-                  )}
-
-                  {selected === "books" && (
-                    <View style={styles.linkRow}>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkAmazon,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(
-                            `https://openlibrary.org/works/${detailItem.id}`
-                          )
-                        }
-                      >
-                        <FontAwesome name="book" size={16} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>Open Library</Text>
-                      </Pressable>
-                      <Pressable
-                        style={({ pressed }) => [
-                          styles.linkButton,
-                          styles.linkGoodreads,
-                          pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] },
-                        ]}
-                        onPress={() =>
-                          Linking.openURL(
-                            `https://www.goodreads.com/search?q=${encodeURIComponent(detailItem.title)}`
-                          )
-                        }
-                      >
-                        <FontAwesome name="star" size={16} color={palette.onAccent} />
-                        <Text style={styles.linkButtonText}>Goodreads</Text>
-                      </Pressable>
-                    </View>
-                  )}
-                </View>
-
-                {/* Save + Share */}
-                <View style={styles.detailActionsRow}>
-                  {(() => {
-                    const saved = isItemSaved(detailItem);
-                    return (
-                      <Pressable
-                        onPress={toggleSaveDetail}
-                        style={({ pressed }) => [
-                          styles.saveButton,
-                          saved && styles.saveButtonActive,
-                          pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] },
-                        ]}
-                      >
-                        <FontAwesome
-                          name={saved ? "bookmark" : "bookmark-o"}
-                          size={16}
-                          color={palette.onAccent}
-                        />
-                        <Text style={styles.saveButtonText}>
-                          {saved ? "Saved" : "Save"}
-                        </Text>
-                      </Pressable>
-                    );
-                  })()}
-                  <Pressable
-                    onPress={shareDetail}
-                    style={({ pressed }) => [
-                      styles.shareButton,
-                      pressed && { opacity: 0.75, transform: [{ scale: 0.97 }] },
-                    ]}
-                  >
-                    <FontAwesome
-                      name="share-alt"
-                      size={16}
-                      color={palette.text}
-                    />
-                    <Text style={styles.shareButtonText}>Share</Text>
+                    <Text style={styles.recentCardTitle} numberOfLines={2}>
+                      {item.title}
+                    </Text>
                   </Pressable>
-                </View>
-
-                {/* Similar Items */}
-                {similarItems.length > 0 && (
-                  <View style={styles.similarSection}>
-                    <Text style={styles.similarTitle}>You might also like</Text>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.similarRow}
-                    >
-                      {similarItems.map((item) => (
-                        <Pressable
-                          key={item.id}
-                          style={({ pressed }) => [
-                            styles.similarCard,
-                            pressed && { opacity: 0.75 },
-                          ]}
-                          onPress={() => setDetailItem(item)}
-                        >
-                          {item.imageUrl ? (
-                            <Image
-                              source={{ uri: item.imageUrl }}
-                              style={styles.similarImage}
-                            />
-                          ) : (
-                            <View
-                              style={[
-                                styles.similarImage,
-                                { backgroundColor: palette.accentBgSoft },
-                              ]}
-                            />
-                          )}
-                          <Text style={styles.similarCardTitle} numberOfLines={2}>
-                            {item.title}
-                          </Text>
-                          {item.subtitle ? (
-                            <Text style={styles.similarCardSubtitle} numberOfLines={1}>
-                              {item.subtitle}
-                            </Text>
-                          ) : null}
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
+                ))}
               </ScrollView>
             </View>
-          </View>
-        </Modal>
-      )}
+          ) : null}
+
+          {selected && session ? (
+            <DiscoveryControls
+              category={selected}
+              activeAction={session.activeAction}
+              query={session.searchQuery}
+              filters={session.selectedFilters}
+              openSection={session.openSection}
+              loading={session.status === "loading"}
+              palette={palette}
+              onActionChange={discoveryController.setAction}
+              onQueryChange={discoveryController.setQuery}
+              onToggleFilter={discoveryController.toggleFilter}
+              onOpenSection={discoveryController.setOpenSection}
+              onClearFilters={discoveryController.clearFilters}
+              onSubmit={discoveryController.submit}
+            />
+          ) : null}
+
+          {session?.deck.similarContext ? (
+            <View style={styles.similarContext}>
+              <Text style={styles.similarContextText}>
+                {/* Naming the rung keeps the label honest once the ladder has
+                    widened, instead of calling a distant pick "similar". */}
+                {session.deck.similarContext.tier
+                  ? SIMILAR_TIER_LABELS[session.deck.similarContext.tier]
+                  : "Similar"}{" "}
+                to {session.deck.similarContext.sourceTitle}
+              </Text>
+              <Pressable
+                accessibilityLabel="Back to unbiased Surprise Me"
+                accessibilityRole="button"
+                onPress={() => void discoveryController.submit("randomize")}
+                style={({ pressed }) => [
+                  styles.backToUnbiasedButton,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Text style={styles.backToUnbiasedText}>
+                  Back to unbiased Surprise Me
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {selected && session?.status === "loading" ? (
+            <DiscoveryStatusCard
+              kind="loading"
+              label={`Finding your ${selected}...`}
+              palette={palette}
+              reducedMotion={reducedMotion}
+            />
+          ) : null}
+
+          {session?.status === "error" ? (
+            <DiscoveryStatusCard
+              kind="error"
+              message={
+                session.requestError ??
+                "Something went wrong while finding recommendations."
+              }
+              onRetry={() => void discoveryController.retry()}
+              palette={palette}
+            />
+          ) : null}
+
+          {/* The deck refills in the background once it drops to two cards. If
+              the last card is committed before that lands, the queue is empty
+              while the status is still "ready" — which matched none of the
+              states below and left the screen blank. */}
+          {selected &&
+          session &&
+          session.deck.queue.length === 0 &&
+          session.deck.toppingUp ? (
+            <DiscoveryStatusCard
+              kind="loading"
+              label={`Lining up the next ${singularFor(selected)}...`}
+              palette={palette}
+              reducedMotion={reducedMotion}
+            />
+          ) : null}
+
+          {/* A refill that failed rather than came back empty. Recoverable —
+              the archive is not finished, the request just did not land — so
+              this offers a retry. Previously this combination matched no branch
+              at all and the screen simply went dead with no way out. */}
+          {selected &&
+          session &&
+          session.deck.queue.length === 0 &&
+          discoveryController.deckStalled ? (
+            <DiscoveryStatusCard
+              kind="error"
+              message={`Couldn't reach for more ${selected}. Check your connection and try again.`}
+              onRetry={() => void discoveryController.retry()}
+              palette={palette}
+            />
+          ) : null}
+
+          {/* A top-up that came back with nothing new. Distinct from "empty":
+              there is no point retrying the same path, so point elsewhere. */}
+          {selected &&
+          session &&
+          session.deck.queue.length === 0 &&
+          discoveryController.deckExhausted ? (
+            <DiscoveryStatusCard
+              kind="exhausted"
+              label={`You've seen every ${singularFor(selected)} we can find down this path.`}
+              hint="Try another category, or loosen your filters."
+              actionLabel="Start something new"
+              onAction={() => void discoveryController.submit("randomize")}
+              palette={palette}
+            />
+          ) : null}
+
+          {session?.status === "empty" && !activeItem && selected ? (
+            (() => {
+              const empty = emptyStateAction(
+                session.retryInput?.mode,
+                selected
+              );
+              return (
+                <DiscoveryStatusCard
+                  kind="empty"
+                  label={empty.message}
+                  actionLabel={empty.label}
+                  onAction={() => {
+                    if (empty.kind === "openPanel") {
+                      discoveryController.setAction(empty.mode);
+                      return;
+                    }
+                    void discoveryController.submit(
+                      empty.kind === "retryMode" ? empty.mode : "randomize"
+                    );
+                  }}
+                  palette={palette}
+                />
+              );
+            })()
+          ) : null}
+
+          {selected && session && session.deck.queue.length > 0 ? (
+            <SwipeDeck
+              ref={deckRef}
+              category={selected}
+              items={session.deck.queue}
+              palette={palette}
+              reducedMotion={reducedMotion}
+              // This deck is only ever mounted with a non-empty queue (see the
+              // condition above) — there's no remaining case where an
+              // already-loaded, on-screen deck should stop responding just
+              // because a new explicit request (Similar/Retry/Search) is
+              // loading in the background. That request replaces the queue
+              // cleanly on arrival regardless of what the user did meanwhile.
+              disabled={false}
+              onCommit={commitFromDeck}
+              onSwipeActiveChange={setSwiping}
+              onOpenDetail={handleDeckOpenDetail}
+              onSimilar={handleDeckSimilar}
+            />
+          ) : null}
+
+          {/* One notice serves both outcomes. A save offers a direction to go
+              next; a skip offers the way back, which previously did not exist. */}
+          <UndoNotice
+            message={
+              discovery.actionError ??
+              (discovery.lastSave
+                ? `Saved ${discovery.lastSave.item.title}`
+                : discovery.lastSkip
+                ? `Not for me: ${discovery.lastSkip.item.title}`
+                : null)
+            }
+            canUndo={Boolean(
+              (discovery.lastSave || discovery.lastSkip) &&
+                discovery.actionError === null
+            )}
+            actions={
+              discovery.lastSave && discovery.actionError === null
+                ? (["more-like-this", "something-different"] as const).map(
+                    (intent) => ({
+                      label: SAVE_INTENT_LABELS[intent],
+                      onPress: () =>
+                        void discoveryController.followSave(
+                          discovery.lastSave!.item,
+                          intent
+                        ),
+                    })
+                  )
+                : undefined
+            }
+            palette={palette}
+            onUndo={() =>
+              void (discovery.lastSave
+                ? discoveryController.undo()
+                : discoveryController.undoSkip())
+            }
+          />
+          <DiscoveryAnnouncer
+            message={announcement}
+            actionErrorMessage={discoveryController.actionErrorAnnouncement}
+          />
+          <DiscoveryAnnouncer
+            message={null}
+            actionErrorMessage={
+              accountOpen
+                ? accountSavedMutationError
+                : detailSelection
+                ? detailSavedMutationError
+                : savedOpen
+                ? savedSheetMutationError
+                : null
+            }
+          />
+        </View>
+      </ScrollView>
+
+      <DetailSheet
+        visible={Boolean(detailSelection)}
+        selection={detailSelection}
+        detail={detail}
+        loading={detailLoading}
+        errorMessage={detailErrorMessage}
+        savedMutationErrorMessage={detailSavedMutationError}
+        saved={
+          detailSelection?.origin === "stored"
+            ? isItemSaved(detailSelection.category, detailSelection.item)
+            : false
+        }
+        palette={palette}
+        reducedMotion={reducedMotion}
+        onClose={closeDetail}
+        onRetry={() => setDetailRetryKey((key) => key + 1)}
+        onSave={(item) => void handleDetailSave(item)}
+        onSkip={(item) => void handleDetailSkip(item)}
+        onSimilar={(item) => void handleDetailSimilar(item)}
+        onShare={(item) => {
+          const selection = detailSelectionRef.current;
+          if (selection && selection.item.id === item.id) {
+            void shareDetail(selection.category, item);
+          }
+        }}
+      />
 
       {/* How To Use Modal */}
       <Modal
         visible={howToOpen}
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         transparent={true}
         onRequestClose={() => setHowToOpen(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View
+            accessibilityLabel="How to use GoDiscover"
+            accessibilityViewIsModal
+            aria-modal
+            onAccessibilityEscape={() => setHowToOpen(false)}
+            role="dialog"
+            style={styles.modalContent}
+          >
             <Pressable
+              accessibilityLabel="Close How to use"
+              accessibilityRole="button"
               style={styles.modalClose}
               onPress={() => setHowToOpen(false)}
             >
-              <AntDesign name="close" size={20} color={palette.textMuted} />
+              <AntDesign
+                accessible={false}
+                name="close"
+                size={20}
+                color={palette.textMuted}
+              />
             </Pressable>
             <ScrollView showsVerticalScrollIndicator={false}>
               <View style={styles.howToHeader}>
                 <View style={styles.howToIconCircle}>
-                  <FontAwesome name="compass" size={36} color={palette.accent} />
+                  <FontAwesome
+                    accessible={false}
+                    name="compass"
+                    size={36}
+                    color={palette.accent}
+                  />
                 </View>
                 <Text style={styles.howToTitle}>How to use GoDiscover</Text>
                 <Text style={styles.howToSubtitle}>
-                  Discover something new in three simple steps
+                  Four simple steps to find your next spark
                 </Text>
               </View>
 
@@ -1623,10 +985,9 @@ export default function HomeScreen() {
                     <Text style={styles.stepNumberText}>1</Text>
                   </View>
                   <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Pick a category</Text>
+                    <Text style={styles.stepTitle}>Choose your category</Text>
                     <Text style={styles.stepDescription}>
-                      Choose between Artists, Albums, Books, or Movies — whatever
-                      you're in the mood to discover.
+                      Movies, Books, Artists, or Albums each has its own vibe.
                     </Text>
                   </View>
                 </View>
@@ -1636,11 +997,9 @@ export default function HomeScreen() {
                     <Text style={styles.stepNumberText}>2</Text>
                   </View>
                   <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Choose how to discover</Text>
+                    <Text style={styles.stepTitle}>Let it surprise you</Text>
                     <Text style={styles.stepDescription}>
-                      <Text style={styles.stepBold}>Search</Text> with a description,{" "}
-                      <Text style={styles.stepBold}>Filter</Text> by genre and era, or hit{" "}
-                      <Text style={styles.stepBold}>Randomize</Text> for a surprise.
+                      Surprise Me stays random; Search and Filter are optional.
                     </Text>
                   </View>
                 </View>
@@ -1650,10 +1009,22 @@ export default function HomeScreen() {
                     <Text style={styles.stepNumberText}>3</Text>
                   </View>
                   <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>Explore & save</Text>
+                    <Text style={styles.stepTitle}>Make your move</Text>
                     <Text style={styles.stepDescription}>
-                      Tap any result to see details and open it on your favorite
-                      platform. Save items you love to revisit later.
+                      Swipe right to Save or left for Not for me. The labeled buttons
+                      do the same thing.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.stepRow}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>4</Text>
+                  </View>
+                  <View style={styles.stepContent}>
+                    <Text style={styles.stepTitle}>Follow a spark</Text>
+                    <Text style={styles.stepDescription}>
+                      Similar makes a temporary related deck only when you ask for it.
                     </Text>
                   </View>
                 </View>
@@ -1661,8 +1032,7 @@ export default function HomeScreen() {
 
               <View style={styles.howToFooter}>
                 <Text style={styles.howToFooterText}>
-                  Browse freely without an account — sign in only when you want to
-                  save your finds.
+                  Your saves and skips never train Surprise Me.
                 </Text>
               </View>
             </ScrollView>
@@ -1673,31 +1043,64 @@ export default function HomeScreen() {
       {/* Saved Modal */}
       <Modal
         visible={savedOpen}
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         transparent={true}
-        onRequestClose={() => setSavedOpen(false)}
+        onRequestClose={closeSavedSheet}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.savedSheet}>
+          <View
+            accessibilityLabel="Saved discoveries"
+            accessibilityViewIsModal
+            aria-modal
+            onAccessibilityEscape={closeSavedSheet}
+            role="dialog"
+            style={styles.savedSheet}
+          >
             <Pressable
+              accessibilityLabel="Close saved discoveries"
+              accessibilityRole="button"
               style={styles.modalClose}
-              onPress={() => setSavedOpen(false)}
+              onPress={closeSavedSheet}
             >
-              <AntDesign name="close" size={20} color={palette.onAccent} />
+              <AntDesign
+                accessible={false}
+                name="close"
+                size={20}
+                color={palette.onAccent}
+              />
             </Pressable>
-            <Text style={styles.savedTitle}>Saved</Text>
-            {!session && (
+            <View style={styles.savedHeader}>
+              <Text style={styles.savedTitle}>Saved</Text>
+            </View>
+            {savedSheetMutationError ? (
+              <Text
+                accessibilityLabel={savedSheetMutationError}
+                accessibilityLiveRegion="polite"
+                accessibilityRole="alert"
+                style={styles.savedMutationError}
+              >
+                {savedSheetMutationError}
+              </Text>
+            ) : null}
+            {!authSession && (
               <Pressable
+                accessibilityLabel="Sign in to sync saved discoveries"
+                accessibilityRole="button"
                 onPress={() => {
-                  setSavedOpen(false);
-                  setAccountOpen(true);
+                  closeSavedSheet();
+                  openAccount();
                 }}
                 style={({ pressed }) => [
                   styles.savedSignInBanner,
                   pressed && { opacity: 0.8 },
                 ]}
               >
-                <FontAwesome name="cloud" size={14} color={palette.accent} />
+                <FontAwesome
+                  accessible={false}
+                  name="cloud"
+                  size={14}
+                  color={palette.accent}
+                />
                 <Text style={styles.savedSignInText}>
                   Sign in to sync across devices
                 </Text>
@@ -1705,91 +1108,35 @@ export default function HomeScreen() {
             )}
             {savedItems.length === 0 ? (
               <View style={styles.savedEmpty}>
-                <FontAwesome name="bookmark-o" size={36} color={palette.textFaint} />
+                <FontAwesome
+                  accessible={false}
+                  name="bookmark-o"
+                  size={36}
+                  color={palette.textFaint}
+                />
                 <Text style={styles.savedEmptyText}>
                   Nothing saved yet. Tap the Save button on any result to keep it here.
                 </Text>
               </View>
             ) : (
-              <ScrollView
-                style={styles.savedList}
-                contentContainerStyle={{ paddingBottom: 24 }}
-                showsVerticalScrollIndicator={false}
-              >
-                {(["artists", "albums", "movies", "books"] as ContentCategory[]).map(
-                  (cat) => {
-                    const group = savedItems.filter((s) => s.category === cat);
-                    if (group.length === 0) return null;
-                    const label =
-                      cat === "artists"
-                        ? "Artists"
-                        : cat === "albums"
-                        ? "Albums"
-                        : cat === "movies"
-                        ? "Movies"
-                        : "Books";
-                    return (
-                      <View key={cat} style={styles.savedGroup}>
-                        <Text style={styles.savedGroupLabel}>{label}</Text>
-                        {group.map((item) => (
-                          <Pressable
-                            key={`${item.category}:${item.id}`}
-                            style={({ pressed }) => [
-                              styles.savedItem,
-                              pressed && { opacity: 0.7 },
-                            ]}
-                            onPress={() => {
-                              setSelected(item.category);
-                              setDetailItem(item);
-                              setSavedOpen(false);
-                            }}
-                          >
-                            {item.imageUrl ? (
-                              <Image
-                                source={{ uri: item.imageUrl }}
-                                style={styles.savedItemImage}
-                              />
-                            ) : (
-                              <View
-                                style={[
-                                  styles.savedItemImage,
-                                  { backgroundColor: palette.accentBgSoft },
-                                ]}
-                              />
-                            )}
-                            <View style={styles.savedItemText}>
-                              <Text style={styles.savedItemTitle} numberOfLines={1}>
-                                {item.title}
-                              </Text>
-                              <Text style={styles.savedItemSubtitle} numberOfLines={1}>
-                                {item.subtitle}
-                                {item.meta ? ` · ${item.meta}` : ""}
-                              </Text>
-                            </View>
-                            <Pressable
-                              hitSlop={10}
-                              onPress={async () => {
-                                const next = await removeSaved(item.category, item.id);
-                                setSavedItems(next);
-                              }}
-                              style={({ pressed }) => [
-                                styles.savedRemove,
-                                pressed && { opacity: 0.6 },
-                              ]}
-                            >
-                              <AntDesign
-                                name="close"
-                                size={16}
-                                color={palette.textMuted}
-                              />
-                            </Pressable>
-                          </Pressable>
-                        ))}
-                      </View>
-                    );
-                  }
-                )}
-              </ScrollView>
+              <SavedList
+                items={savedItems}
+                palette={palette}
+                onOpen={(item) => {
+                  openStoredItem(item.category, item);
+                  closeSavedSheet();
+                }}
+                onSimilar={(item) => {
+                  closeSavedSheet();
+                  void discoveryController.similar(item);
+                }}
+                onRemove={(item) => {
+                  void applySavedMutation(
+                    () => removeSavedItem(item.category, item.id),
+                    "savedSheet"
+                  );
+                }}
+              />
             )}
           </View>
         </View>
@@ -1798,36 +1145,67 @@ export default function HomeScreen() {
       {/* Account Modal */}
       <Modal
         visible={accountOpen}
-        animationType="slide"
+        animationType={reducedMotion ? "none" : "slide"}
         transparent={true}
-        onRequestClose={() => setAccountOpen(false)}
+        onRequestClose={closeAccount}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View
+            accessibilityLabel="Account"
+            accessibilityViewIsModal
+            aria-modal
+            onAccessibilityEscape={closeAccount}
+            role="dialog"
+            style={styles.modalContent}
+          >
             <Pressable
+              accessibilityLabel="Close account"
+              accessibilityRole="button"
               style={styles.modalClose}
-              onPress={() => setAccountOpen(false)}
+              onPress={closeAccount}
             >
-              <AntDesign name="close" size={20} color={palette.textMuted} />
+              <AntDesign
+                accessible={false}
+                name="close"
+                size={20}
+                color={palette.textMuted}
+              />
             </Pressable>
             <ScrollView showsVerticalScrollIndicator={false}>
-              {session ? (
+              {accountSavedMutationError ? (
+                <Text
+                  accessibilityLabel={accountSavedMutationError}
+                  accessibilityLiveRegion="polite"
+                  accessibilityRole="alert"
+                  style={styles.savedMutationError}
+                >
+                  {accountSavedMutationError}
+                </Text>
+              ) : null}
+              {authSession ? (
                 <>
                   <View style={styles.authHeader}>
                     <View style={styles.howToIconCircle}>
-                      <FontAwesome name="user-circle" size={36} color={palette.accent} />
+                      <FontAwesome
+                        accessible={false}
+                        name="user-circle"
+                        size={36}
+                        color={palette.accent}
+                      />
                     </View>
                     <Text style={styles.howToTitle}>
                       {currentDisplayName() || "Signed in"}
                     </Text>
                     <Text style={styles.howToSubtitle}>
-                      {session.user.email}
+                      {authSession.user.email}
                     </Text>
                   </View>
                   <View style={styles.authForm}>
                     <Text style={styles.authLabel}>Display name</Text>
                     <View style={styles.nameRow}>
                       <TextInput
+                        accessibilityLabel="Display name"
+                        accessibilityState={{ disabled: savingName }}
                         style={[styles.authInput, styles.nameInput]}
                         placeholder="Your name"
                         placeholderTextColor={palette.textFaint}
@@ -1837,6 +1215,14 @@ export default function HomeScreen() {
                         autoCapitalize="words"
                       />
                       <Pressable
+                        accessibilityLabel="Save display name"
+                        accessibilityRole="button"
+                        accessibilityState={{
+                          disabled:
+                            savingName ||
+                            !displayNameDraft.trim() ||
+                            displayNameDraft.trim() === currentDisplayName(),
+                        }}
                         disabled={
                           savingName ||
                           !displayNameDraft.trim() ||
@@ -1862,6 +1248,8 @@ export default function HomeScreen() {
                     </View>
 
                     <Pressable
+                      accessibilityLabel="Sign out"
+                      accessibilityRole="button"
                       style={({ pressed }) => [
                         styles.authPrimaryButton,
                         pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
@@ -1876,7 +1264,12 @@ export default function HomeScreen() {
                 <>
                   <View style={styles.authHeader}>
                     <View style={styles.howToIconCircle}>
-                      <FontAwesome name="user-circle-o" size={36} color={palette.accent} />
+                      <FontAwesome
+                        accessible={false}
+                        name="user-circle-o"
+                        size={36}
+                        color={palette.accent}
+                      />
                     </View>
                     <Text style={styles.howToTitle}>
                       {authMode === "signin" ? "Welcome back" : "Create account"}
@@ -1890,6 +1283,9 @@ export default function HomeScreen() {
 
                   <View style={styles.authForm}>
                     <Pressable
+                      accessibilityLabel="Continue with Google"
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: authLoading }}
                       style={({ pressed }) => [
                         styles.googleButton,
                         (pressed || authLoading) && { opacity: 0.85, transform: [{ scale: 0.98 }] },
@@ -1897,7 +1293,12 @@ export default function HomeScreen() {
                       onPress={handleGoogleSignIn}
                       disabled={authLoading}
                     >
-                      <FontAwesome name="google" size={18} color={palette.text} />
+                      <FontAwesome
+                        accessible={false}
+                        name="google"
+                        size={18}
+                        color={palette.text}
+                      />
                       <Text style={styles.googleButtonText}>Continue with Google</Text>
                     </Pressable>
 
@@ -1909,6 +1310,8 @@ export default function HomeScreen() {
 
                     <Text style={styles.authLabel}>Email</Text>
                     <TextInput
+                      accessibilityLabel="Email"
+                      accessibilityState={{ disabled: authLoading }}
                       style={styles.authInput}
                       placeholder="you@example.com"
                       placeholderTextColor={palette.textFaint}
@@ -1922,6 +1325,8 @@ export default function HomeScreen() {
 
                     <Text style={styles.authLabel}>Password</Text>
                     <TextInput
+                      accessibilityLabel="Password"
+                      accessibilityState={{ disabled: authLoading }}
                       style={styles.authInput}
                       placeholder="••••••••"
                       placeholderTextColor={palette.textFaint}
@@ -1932,6 +1337,9 @@ export default function HomeScreen() {
                     />
 
                     <Pressable
+                      accessibilityLabel={authMode === "signin" ? "Sign in" : "Sign up"}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: authLoading }}
                       style={({ pressed }) => [
                         styles.authPrimaryButton,
                         (pressed || authLoading) && {
@@ -1952,6 +1360,12 @@ export default function HomeScreen() {
                     </Pressable>
 
                     <Pressable
+                      accessibilityLabel={
+                        authMode === "signin"
+                          ? "Create an account"
+                          : "Sign in to your account"
+                      }
+                      accessibilityRole="button"
                       style={styles.authSwitch}
                       onPress={() => {
                         setAuthMode(authMode === "signin" ? "signup" : "signin");
@@ -1979,6 +1393,9 @@ export default function HomeScreen() {
                     return (
                       <Pressable
                         key={mode}
+                        accessibilityLabel={`Use ${mode} theme`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
                         style={({ pressed }) => [
                           styles.themeToggleOption,
                           active && styles.themeToggleOptionActive,
@@ -2008,230 +1425,92 @@ export default function HomeScreen() {
         </View>
       </Modal>
     </View>
-    </ThemeContext.Provider>
   );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
+const makeStyles = (c: Palette, insets: EdgeInsets) => StyleSheet.create({
   // ── Layout ──
   container: { backgroundColor: c.bg, flex: 1 },
   scrollView: { flex: 1 },
-  scrollContent: { paddingBottom: 40 },
+  scrollContent: { paddingBottom: 40 + insets.bottom },
+  savedHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
 
   // ── Top Bar ──
   topBar: {
     backgroundColor: c.topBar,
-    paddingTop: 54,
+    paddingTop: insets.top + 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: c.accentBorder,
   },
-  topBarLeft: { flexDirection: "row", alignItems: "center", minWidth: 62 },
-  topBarRight: { flexDirection: "row", alignItems: "center", gap: 16, minWidth: 62, justifyContent: "flex-end" },
-  logoText: { color: c.accent, fontSize: 20, fontWeight: "700", letterSpacing: 0.5 },
-
-  // ── Content Selector ──
-  contentSelector: {
+  topBarLeft: { flexDirection: "row", alignItems: "center", minWidth: 88 },
+  topBarRight: {
+    alignItems: "center",
     flexDirection: "row",
-    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    minWidth: 88,
+  },
+  topBarAction: {
+    alignItems: "center",
+    height: 44,
+    justifyContent: "center",
+    width: 44,
+  },
+  logoText: { color: c.accent, fontFamily: monoFont, fontSize: 16, fontWeight: "700", letterSpacing: 1.4 },
+
+  // ── Discovery ──
+  discoveryContent: {
+    alignSelf: "center",
+    gap: 20,
+    maxWidth: 992,
     paddingHorizontal: 16,
     paddingTop: 20,
-    gap: 10,
+    width: "100%",
   },
-  contentButton: {
-    width: "47%",
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 28,
-    paddingHorizontal: 16,
-    borderRadius: 16,
+  similarContext: {
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  contentButtonActive: { backgroundColor: c.accentBgMed, borderColor: c.accent },
-  contentButtonHover: { backgroundColor: c.surfaceAltStrong, borderColor: c.borderStrong },
-  contentButtonText: { color: c.textSecondary, fontSize: 16, fontWeight: "600" },
-  contentButtonTextActive: { color: c.text },
-
-  // ── Action Selector ──
-  actionSelector: {
-    flexDirection: "row",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    gap: 8,
-  },
-  actionButton: {
-    flex: 1,
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 12,
-    alignItems: "center",
-    borderRadius: 50,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  actionButtonActive: { backgroundColor: c.accentBgMed, borderColor: c.accent },
-  actionButtonHover: { backgroundColor: c.surfaceAltStrong, borderColor: c.borderStrong },
-  actionButtonText: {
-    color: c.textMuted,
-    fontSize: 14,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-  },
-  actionButtonTextActive: { color: c.text },
-
-  // ── Empty State ──
-  emptyState: { alignItems: "center", marginTop: 60, gap: 12 },
-  emptyStateText: { color: c.textFaint, fontSize: 15, fontWeight: "500" },
-
-  // ── Search ──
-  searchState: { paddingHorizontal: 20, marginTop: 20, gap: 16 },
-  searchInputContainer: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: c.surfaceAlt,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: c.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  searchIcon: { marginTop: 3, marginRight: 12 },
-  searchInput: {
-    flex: 1,
-    color: c.text,
-    fontSize: 15,
-    fontWeight: "400",
-    minHeight: 24,
-    textAlignVertical: "top",
-  },
-  searchButton: {
-    flexDirection: "row",
     alignSelf: "center",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: c.accent,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 50,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  searchButtonText: { color: c.onAccent, fontSize: 15, fontWeight: "600" },
-
-  // ── Filter ──
-  filterState: { paddingHorizontal: 16, paddingTop: 16 },
-  clearFiltersText: {
-    color: c.accent,
-    fontSize: 13,
-    fontWeight: "500",
-    textAlign: "right",
-    marginBottom: 8,
-  },
-  filterSection: { marginBottom: 6 },
-  filterSectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
+    backgroundColor: c.accentBgSoft,
+    borderColor: c.accentBorder,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: c.border,
-  },
-  filterSectionTitle: { color: c.text, fontSize: 15, fontWeight: "600" },
-  filterSectionCount: { color: c.accent, fontSize: 13, fontWeight: "400" },
-  filterChipContainer: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
-  },
-  filterChip: {
-    backgroundColor: c.surfaceAlt,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  filterChipActive: { backgroundColor: c.accentBgMed, borderColor: c.accent },
-  filterChipText: { color: c.textMuted, fontSize: 13, fontWeight: "500" },
-  filterChipTextActive: { color: c.text },
-
-  // ── Randomize ──
-  randomizeState: { alignItems: "center", marginTop: 50, gap: 16 },
-  randomizeHint: { color: c.textFaint, fontSize: 14, fontWeight: "400" },
-  randomizeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    backgroundColor: c.accent,
-    paddingVertical: 20,
-    paddingHorizontal: 48,
-    borderRadius: 50,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  randomizeButtonText: {
-    color: c.onAccent,
-    fontSize: 20,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-  },
-
-  // ── Results ──
-  resultsContainer: { paddingHorizontal: 16, paddingTop: 32 },
-  resultsHeader: {
-    flexDirection: "row",
+    gap: 10,
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
+    maxWidth: 560,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    width: "100%",
   },
-  resultsTitle: { color: c.text, fontSize: 20, fontWeight: "700" },
-  clearResultsText: { color: c.accent, fontSize: 13, fontWeight: "500" },
-  heroCard: {
-    backgroundColor: c.surfaceAlt,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: c.border,
-    overflow: "hidden",
-    marginBottom: 12,
+  similarContextText: {
+    color: c.text,
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: "700",
   },
-  gridCard: {
-    backgroundColor: c.surfaceAlt,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: c.border,
-    overflow: "hidden",
-    width: CARD_WIDTH,
-  },
-  cardImagePlaceholder: {
-    height: 100,
-    backgroundColor: c.accentBgSoft,
+  backToUnbiasedButton: {
     alignItems: "center",
     justifyContent: "center",
+    minHeight: 44,
+    minWidth: 44,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
   },
-  heroImagePlaceholder: { height: 180 },
-  cardImage: { width: "100%", height: "100%" },
-  cardInfo: { padding: 14, gap: 4 },
-  cardTitle: { color: c.text, fontSize: 15, fontWeight: "600" },
-  heroCardTitle: { fontSize: 20, fontWeight: "700" },
-  cardSubtitle: { color: c.textMuted, fontSize: 13, fontWeight: "400" },
-  cardMeta: { color: c.accent, fontSize: 12, fontWeight: "500", marginTop: 2 },
-  gridContainer: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  backToUnbiasedText: {
+    color: c.accent,
+    fontSize: 13,
+    fontWeight: "800",
+  },
 
   // ── Saved Modal ──
   savedSheet: {
@@ -2243,7 +1522,18 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     maxHeight: "85%",
     minHeight: "55%",
   },
-  savedTitle: { color: c.text, fontSize: 22, fontWeight: "700", marginBottom: 16 },
+  savedTitle: { color: c.text, fontFamily: displayFont, fontSize: 26, fontWeight: "900", marginBottom: 16 },
+  savedMutationError: {
+    backgroundColor: c.surfaceAlt,
+    borderColor: c.danger,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: c.text,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 12,
+    padding: 12,
+  },
   savedEmpty: {
     alignItems: "center",
     gap: 12,
@@ -2268,6 +1558,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     marginBottom: 14,
+    minHeight: 44,
   },
   savedSignInText: { color: c.accent, fontSize: 13, fontWeight: "600" },
   savedGroup: { marginBottom: 20 },
@@ -2279,12 +1570,30 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 8,
   },
-  savedItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
+  savedItem: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 68,
+  },
+  savedItemOpen: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 68,
+    paddingVertical: 10,
+  },
   savedItemImage: { width: 48, height: 48, borderRadius: 6 },
   savedItemText: { flex: 1 },
   savedItemTitle: { color: c.text, fontSize: 15, fontWeight: "600" },
   savedItemSubtitle: { color: c.textMuted, fontSize: 13, marginTop: 2 },
-  savedRemove: { padding: 6 },
+  savedRemove: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    minWidth: 44,
+  },
 
   // ── Recently Viewed ──
   recentsSection: { marginTop: 8, marginBottom: 16 },
@@ -2303,7 +1612,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     textTransform: "uppercase",
   },
   recentsRow: { gap: 12, paddingRight: 16 },
-  recentCard: { width: 92 },
+  recentCard: { minHeight: 44, minWidth: 44, width: 92 },
   recentImage: {
     width: 92,
     height: 92,
@@ -2317,49 +1626,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     lineHeight: 16,
   },
 
-  // ── Similar Items (in detail modal) ──
-  similarSection: {
-    marginTop: 8,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: c.border,
-  },
-  similarTitle: {
-    color: c.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 12,
-  },
-  similarRow: { gap: 12, paddingRight: 16 },
-  similarCard: { width: 100 },
-  similarImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 10,
-    marginBottom: 6,
-  },
-  similarCardTitle: {
-    color: c.text,
-    fontSize: 12,
-    fontWeight: "600",
-    lineHeight: 16,
-  },
-  similarCardSubtitle: {
-    color: c.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
 
-  // ── Detail Modal ──
+  // ── Shared Overlay Modals ──
   modalOverlay: { flex: 1, backgroundColor: c.overlay, justifyContent: "flex-end" },
   modalContent: {
     backgroundColor: c.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: "85%",
-    paddingBottom: 40,
+    paddingBottom: 24 + insets.bottom,
     borderWidth: 1,
     borderColor: c.border,
     borderBottomWidth: 0,
@@ -2369,186 +1644,14 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     top: 14,
     right: 14,
     zIndex: 10,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: c.pillDark,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  modalGrabber: {
-    alignSelf: "center",
-    width: 40,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: c.borderStrong,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  modalImagePlaceholder: {
-    height: 160,
-    backgroundColor: c.accentBgSoft,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroMovie: { width: "100%", height: 220, position: "relative", overflow: "hidden" },
-  heroMovieImage: { width: "100%", height: "100%" },
-  heroMoviePlaceholder: {
-    width: "100%",
-    height: "100%",
-    backgroundColor: c.accentBgSoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heroMovieGradient: { position: "absolute", left: 0, right: 0, bottom: 0, height: 120 },
-  heroCentered: { alignItems: "center", paddingTop: 24, paddingBottom: 8 },
-  heroSquareWrap: {
-    width: 220,
-    height: 220,
-    borderRadius: 16,
-    backgroundColor: c.accentBgSoft,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  heroBookWrap: {
-    width: 160,
-    height: 240,
-    borderRadius: 10,
-    backgroundColor: c.accentBgSoft,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.45,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  heroEmptyWrap: { alignItems: "center", justifyContent: "center" },
-  modalTitle: {
-    color: c.text,
-    fontSize: 24,
-    fontWeight: "700",
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 8,
-  },
-  modalDetails: { paddingHorizontal: 20, gap: 8 },
-  modalMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 4 },
-  modalMetaPill: {
-    color: c.textSecondary,
-    fontSize: 12,
-    fontWeight: "500",
-    backgroundColor: c.surfaceAltStrong,
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    overflow: "hidden",
-  },
-  modalSubtitle: { color: c.accent, fontSize: 14, fontWeight: "600", marginBottom: 4 },
-  modalLabel: {
-    color: c.textFaint,
-    fontSize: 12,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginTop: 8,
-  },
-  modalValue: { color: c.text, fontSize: 15, fontWeight: "500" },
-  modalDescription: {
-    color: c.textSecondary,
-    fontSize: 14,
-    fontWeight: "400",
-    lineHeight: 22,
-  },
-  trackRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 6 },
-  trackNumber: {
-    color: c.textFaint,
-    fontSize: 13,
-    fontWeight: "600",
-    width: 20,
-    textAlign: "right",
-  },
-  trackName: { color: c.textSecondary, fontSize: 14, fontWeight: "500", flex: 1 },
-  trackYear: { color: c.textMuted, fontSize: 13, fontWeight: "600", marginLeft: 8 },
-  saveButtonActive: { backgroundColor: c.accentDeep },
-  saveButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: c.accent,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 50,
-    shadowColor: c.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  saveButtonText: { color: c.onAccent, fontSize: 15, fontWeight: "600" },
-  detailActionsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 12,
-    marginTop: 28,
-    marginBottom: 20,
-  },
-  shareButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: c.surfaceAlt,
-    borderWidth: 1,
-    borderColor: c.border,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 50,
-  },
-  shareButtonText: { color: c.text, fontSize: 15, fontWeight: "600" },
-
-  // ── External Links ──
-  externalLinks: { paddingHorizontal: 20, marginTop: 16 },
-  linkRow: { flexDirection: "row", gap: 10, marginTop: 10 },
-  linkButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  linkButtonText: { color: c.text, fontSize: 13, fontWeight: "600" },
-  linkSpotify: {
-    backgroundColor: "rgba(30,215,96,0.15)",
-    borderColor: "rgba(30,215,96,0.3)",
-  },
-  linkAppleMusic: {
-    backgroundColor: "rgba(252,60,68,0.15)",
-    borderColor: "rgba(252,60,68,0.3)",
-  },
-  linkJustWatch: {
-    backgroundColor: "rgba(253,209,0,0.12)",
-    borderColor: "rgba(253,209,0,0.25)",
-  },
-  linkTMDB: {
-    backgroundColor: "rgba(1,180,228,0.15)",
-    borderColor: "rgba(1,180,228,0.3)",
-  },
-  linkAmazon: {
-    backgroundColor: "rgba(255,153,0,0.15)",
-    borderColor: "rgba(255,153,0,0.3)",
-  },
-  linkGoodreads: {
-    backgroundColor: "rgba(135,113,90,0.2)",
-    borderColor: "rgba(135,113,90,0.35)",
   },
 
   // ── How To Use / Account Modals ──
@@ -2612,7 +1715,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   stepContent: { flex: 1, gap: 4 },
   stepTitle: { color: c.text, fontSize: 16, fontWeight: "600" },
   stepDescription: { color: c.textSecondary, fontSize: 14, lineHeight: 20 },
-  stepBold: { color: c.accent, fontWeight: "600" },
   howToFooter: { paddingHorizontal: 20, paddingVertical: 20, alignItems: "center" },
   howToFooterText: {
     color: c.textFaint,
@@ -2641,6 +1743,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 14,
     color: c.text,
     fontSize: 15,
+    minHeight: 48,
   },
   authPrimaryButton: {
     backgroundColor: c.accent,
@@ -2648,6 +1751,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     marginTop: 20,
+    minHeight: 44,
     shadowColor: c.accent,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
@@ -2663,17 +1767,6 @@ const makeStyles = (c: Palette) => StyleSheet.create({
   },
   authDividerLine: { flex: 1, height: 1, backgroundColor: c.border },
   authDividerText: { color: c.textFaint, fontSize: 12, fontWeight: "500" },
-  authSocialRow: { flexDirection: "row", justifyContent: "center", gap: 12 },
-  authSocialButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: c.surfaceAlt,
-    borderWidth: 1,
-    borderColor: c.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2691,6 +1784,7 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
+    minHeight: 44,
     minWidth: 68,
   },
   nameSaveText: { color: c.onAccent, fontSize: 14, fontWeight: "600" },
@@ -2704,9 +1798,15 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     borderColor: c.border,
     paddingVertical: 14,
     borderRadius: 12,
+    minHeight: 44,
   },
   googleButtonText: { color: c.text, fontSize: 15, fontWeight: "600" },
-  authSwitch: { marginTop: 28, alignItems: "center" },
+  authSwitch: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 28,
+    minHeight: 44,
+  },
   authSwitchText: { color: c.textMuted, fontSize: 14 },
   authSwitchLink: { color: c.accent, fontWeight: "600" },
 
@@ -2737,6 +1837,8 @@ const makeStyles = (c: Palette) => StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
     alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
   },
   themeToggleOptionActive: {
     backgroundColor: c.accent,

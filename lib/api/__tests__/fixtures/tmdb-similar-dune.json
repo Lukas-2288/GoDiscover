@@ -1,0 +1,437 @@
+{
+  "describe": "TMDB similar films for Dune: Part Two (2024)",
+  "recordedAt": "2026-07-29T14:02:05.868Z",
+  "body": {
+    "page": 1,
+    "results": [
+      {
+        "adult": false,
+        "backdrop_path": "/t0zmLLLDBEw7lS5xKuHRnjra5qn.jpg",
+        "genre_ids": [
+          28,
+          16,
+          878,
+          10770
+        ],
+        "id": 268092,
+        "title": "Transformers Prime: Beast Hunters - Predacons Rising",
+        "original_language": "en",
+        "original_title": "Transformers Prime: Beast Hunters - Predacons Rising",
+        "overview": "Autobots, Decepticons, Predaking and Predacons form an unlikely alliance to battle a resurrected Unicron.",
+        "popularity": 2.0737,
+        "poster_path": "/ArjRF3ov2uZXsc3jCMBF388B4Kg.jpg",
+        "release_date": "2013-10-04",
+        "softcore": false,
+        "video": false,
+        "vote_average": 8,
+        "vote_count": 137
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/yoq6WVqA2kB8nDNG0xX16kPBvfB.jpg",
+        "genre_ids": [
+          35,
+          27,
+          878
+        ],
+        "id": 10829,
+        "title": "Tremors 3: Back to Perfection",
+        "original_language": "en",
+        "original_title": "Tremors 3: Back to Perfection",
+        "overview": "Survivalist Burt Gummer returns home to Perfection, to find that the little town has been shaken up again by morphing, man-eating Graboids.",
+        "popularity": 2.9549,
+        "poster_path": "/mnMryfLgC2fuW3nfY36QfWx0hBL.jpg",
+        "release_date": "2001-10-02",
+        "softcore": false,
+        "video": false,
+        "vote_average": 5.834,
+        "vote_count": 727
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/orCqFI2ROrtr1ajUTIolzMmQiqP.jpg",
+        "genre_ids": [
+          28,
+          35,
+          18,
+          10749,
+          878,
+          53
+        ],
+        "id": 10856,
+        "title": "Intacto",
+        "original_language": "es",
+        "original_title": "Intacto",
+        "overview": "An enigmatic tale of four people whose lives are intertwined by destiny are subject to the laws of fate. They discover that luck is something they cannot afford to be without as they gamble with the highest stakes possible in a deadly game from which only one of them will emerge intact.",
+        "popularity": 1.3744,
+        "poster_path": "/gAe6KmVojjHLmdhPZhYDMTmaiM1.jpg",
+        "release_date": "2001-11-06",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.613,
+        "vote_count": 208
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/8PLq5IKRuY866i5Um0uHngsMtCq.jpg",
+        "genre_ids": [
+          35,
+          27,
+          878,
+          37
+        ],
+        "id": 10891,
+        "title": "Tremors 4: The Legend Begins",
+        "original_language": "en",
+        "original_title": "Tremors 4: The Legend Begins",
+        "overview": "In 1889, seventeen men die under mysterious circumstances, and spooked by recent events, the miners who populate the town leave in droves until there's nothing left but a shell of a community.",
+        "popularity": 2.8946,
+        "poster_path": "/yhh1zMGoy6nYSXMgrsYoNRbclJn.jpg",
+        "release_date": "2004-01-02",
+        "softcore": false,
+        "video": false,
+        "vote_average": 5.727,
+        "vote_count": 532
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/yjnfM8QmrXQkWl8dUimsDGl73el.jpg",
+        "genre_ids": [
+          12,
+          10749
+        ],
+        "id": 10907,
+        "title": "The Adventures of Robin Hood",
+        "original_language": "en",
+        "original_title": "The Adventures of Robin Hood",
+        "overview": "Robin Hood fights nobly for justice against the evil Sir Guy of Gisbourne while striving to win the hand of the beautiful Maid Marian.",
+        "popularity": 4.5157,
+        "poster_path": "/c7LX3GMf9uXQTgVm3uxpm7E6Woc.jpg",
+        "release_date": "1938-05-13",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.472,
+        "vote_count": 858
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/mZbc7nYK7YKcyUeODDr1zozJvj0.jpg",
+        "genre_ids": [
+          16,
+          14,
+          878
+        ],
+        "id": 10927,
+        "title": "Back to Gaya",
+        "original_language": "de",
+        "original_title": "Back to Gaya",
+        "overview": "The beautiful world of Gaya is home to two similar humanoid species: Zeldons who are the furry majority residents, and Snurks, who are goblin-like outcasts. But suddenly all Gayans are facing imminent danger when a magic stone which protects their world, \"the Dalamite\", is beamed away by a mysterious force. Three Snurks immediately go after it, hoping to be the heroes for once. They are shortly followed by some standout Zeldons: Zino the trouble-prone popular guy & his sidekick, clever but somewhat cowardly inventor Boo, as well as rebel princess Alanta. Their journey ends up leading them all on a dangerous interdimensional quest to find the stone, while they must also figure out a way to get back to Gaya.",
+        "popularity": 1.6743,
+        "poster_path": "/daqf0AgiiBAzbOyEJMn3LPr8HbZ.jpg",
+        "release_date": "2004-03-18",
+        "softcore": false,
+        "video": false,
+        "vote_average": 5.34,
+        "vote_count": 103
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/31P56eY3GQOA0wTwiW0gzkJyhSG.jpg",
+        "genre_ids": [
+          12,
+          27,
+          878
+        ],
+        "id": 10973,
+        "title": "Creature from the Black Lagoon",
+        "original_language": "en",
+        "original_title": "Creature from the Black Lagoon",
+        "overview": "When scientists exploring the Amazon River stumble on a “missing link” connecting humans and fish, they plan to capture it for later study. But the Creature has plans of his own, and has set his sights on the lead scientist's beautiful fiancée, Kay.",
+        "popularity": 2.7406,
+        "poster_path": "/euCzA2Exc70MpTDCVYih8tdE7z1.jpg",
+        "release_date": "1954-03-05",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.818,
+        "vote_count": 872
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/leHpAsKAJGnNuv5EPAUZUbqrRxq.jpg",
+        "genre_ids": [
+          28,
+          12,
+          80,
+          53
+        ],
+        "id": 10975,
+        "title": "Operation Condor",
+        "original_language": "cn",
+        "original_title": "飛鷹計劃",
+        "overview": "Hired by a Spanish baron, Hong Kong treasure hunter Jackie, a.k.a. \"Asian Hawk\" and his entourage seek WWII Nazi gold buried in the Sahara Desert.",
+        "popularity": 5.2459,
+        "poster_path": "/25kyDgsGz1HzW4SqJTylhBaU5sW.jpg",
+        "release_date": "1991-02-07",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.348,
+        "vote_count": 653
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/yJXAo8N60RaVC6pEuXUQ6wFBCCA.jpg",
+        "genre_ids": [
+          28,
+          878
+        ],
+        "id": 10803,
+        "title": "Logan's Run",
+        "original_language": "en",
+        "original_title": "Logan's Run",
+        "overview": "In the 23rd century, inhabitants of a domed city freely experience all of life's pleasures — but no one is allowed to live past 30. Citizens can try for a chance at being \"renewed\" in a civic ceremony on their 30th birthday. Escape is the only other option.",
+        "popularity": 3.3927,
+        "poster_path": "/v3ILN8ROPcrNRJ8S7GH24JyihH8.jpg",
+        "release_date": "1976-06-23",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.62,
+        "vote_count": 1054
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/A21CdNF0nsnTPPreSkTsjmGmHQU.jpg",
+        "genre_ids": [
+          27,
+          9648,
+          53,
+          878
+        ],
+        "id": 11015,
+        "title": "The Relic",
+        "original_language": "en",
+        "original_title": "The Relic",
+        "overview": "A homicide detective teams up with an evolutionary biologist to hunt a giant creature that is killing people in a Chicago museum.",
+        "popularity": 3.3032,
+        "poster_path": "/fAG4nKPUWEIwGBpP38H64GGV8kl.jpg",
+        "release_date": "1997-01-10",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.149,
+        "vote_count": 640
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/dh6BVPe2v5ftSRol4dS09uMw51I.jpg",
+        "genre_ids": [
+          35,
+          27,
+          878
+        ],
+        "id": 11069,
+        "title": "Tremors 2: Aftershocks",
+        "original_language": "en",
+        "original_title": "Tremors 2: Aftershocks",
+        "overview": "Earl Bassett's celebrity after defeating the Graboid attack against the town of Perfection has proved short-lived, until he's recruited by a Mexican oil company whose workers have found more than they bargained for under the soil.",
+        "popularity": 4.6531,
+        "poster_path": "/hvBYCgG62Fk8cYIsUtrfP5iw3K8.jpg",
+        "release_date": "1996-04-09",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.352,
+        "vote_count": 1082
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/bW83NQMHtgFIkDSoZBer4eEnc9V.jpg",
+        "genre_ids": [
+          878,
+          27
+        ],
+        "id": 11071,
+        "title": "Them!",
+        "original_language": "en",
+        "original_title": "Them!",
+        "overview": "As a result of nuclear testing, gigantic, ferocious mutant ants appear in the American desert southwest, and a father-daughter team of entomologists join forces with the state police officer who first discovers their existence, an FBI agent and, eventually, the US Army to  eradicate the menace, before it spreads across the continent — and the world.",
+        "popularity": 3.3464,
+        "poster_path": "/tP352STF6BvSROi8K3CMM799TVo.jpg",
+        "release_date": "1954-06-16",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.838,
+        "vote_count": 468
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/oMaj75G2WFw66xI1TREg1hrToSg.jpg",
+        "genre_ids": [
+          28,
+          14,
+          878,
+          12
+        ],
+        "id": 268896,
+        "title": "Pacific Rim: Uprising",
+        "original_language": "en",
+        "original_title": "Pacific Rim: Uprising",
+        "overview": "It has been ten years since The Battle of the Breach and the oceans are still, but restless. Vindicated by the victory at the Breach, the Jaeger program has evolved into the most powerful global defense force in human history. The PPDC now calls upon the best and brightest to rise up and become the next generation of heroes when the Kaiju threat returns.",
+        "popularity": 10.2504,
+        "poster_path": "/nFWhttU8PM50t25NPdy7PE7rv3G.jpg",
+        "release_date": "2018-03-21",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.125,
+        "vote_count": 5409
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/5BVdyO8B7v8yJhBlKuBDyxeS9Jz.jpg",
+        "genre_ids": [
+          12,
+          878,
+          28
+        ],
+        "id": 11127,
+        "title": "Starship Troopers 3: Marauder",
+        "original_language": "en",
+        "original_title": "Starship Troopers 3: Marauder",
+        "overview": "The war against the Bugs continues! A Federation Starship crash-lands on the distant Alien planet OM-1, stranding beloved leader Sky Marshal Anoke and several others, including comely but tough pilot Lola Beck. It's up to Colonel/General Johnny Rico, reluctant hero of the original Bug Invasion on Planet P, to lead a team of Troopers on a daring rescue mission.",
+        "popularity": 3.2443,
+        "poster_path": "/vh5nospDpMOxZhyhRiXWWMmSFQe.jpg",
+        "release_date": "2008-07-19",
+        "softcore": false,
+        "video": false,
+        "vote_average": 4.822,
+        "vote_count": 605
+      },
+      {
+        "adult": false,
+        "backdrop_path": null,
+        "genre_ids": [
+          12
+        ],
+        "id": 268691,
+        "title": "Dos Caminos",
+        "original_language": "en",
+        "original_title": "Dos Caminos",
+        "overview": "2-way tells the stories of three couples of strangers who must accompany each other because the pieces are put that way. We do not know who we are until we are faced with another person.",
+        "popularity": 3.1251,
+        "poster_path": null,
+        "release_date": "2014-04-25",
+        "softcore": false,
+        "video": false,
+        "vote_average": 8.5,
+        "vote_count": 1
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/5QAc8dsyOwJBGQ71mhOLMEivOsF.jpg",
+        "genre_ids": [
+          16,
+          28,
+          878
+        ],
+        "id": 449574,
+        "title": "Godzilla: Planet of the Monsters",
+        "original_language": "ja",
+        "original_title": "GODZILLA 怪獣惑星",
+        "overview": "A desperate group of refugees attempts to recolonize Earth 20,000 years after Godzilla took over. But one young man wants revenge above all else.",
+        "popularity": 4.2115,
+        "poster_path": "/hAuZ7g6TqDLv5fOqXIPgYRguOkm.jpg",
+        "release_date": "2017-11-17",
+        "softcore": false,
+        "video": false,
+        "vote_average": 6.377,
+        "vote_count": 561
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/nC1qaINaRBY1crPCQoFVPhSrq16.jpg",
+        "genre_ids": [
+          27,
+          878,
+          53
+        ],
+        "id": 11309,
+        "title": "Hardware",
+        "original_language": "en",
+        "original_title": "Hardware",
+        "overview": "Mark 13 is a government-built killing machine programmed with artificial intelligence, able to repair and recharge itself from any energy source. Through a series of coincidences, the cyborg's head ends up in the home of a sculptress as a bizarre Christmas present from her boyfriend. Once inside its new home, the cyborg promptly reconstructs the rest of its body using a variety of household utensils and proceeds to go on a murderous rampage.",
+        "popularity": 3.0409,
+        "poster_path": "/ybauOsdo6ColZ1WsALqIYjpUg4X.jpg",
+        "release_date": "1990-09-14",
+        "softcore": false,
+        "video": false,
+        "vote_average": 5.9,
+        "vote_count": 351
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/bdDTda15ZPbNumwkKa9eH9RplIe.jpg",
+        "genre_ids": [
+          28,
+          27,
+          878
+        ],
+        "id": 8914,
+        "title": "Deep Blue Sea",
+        "original_language": "en",
+        "original_title": "Deep Blue Sea",
+        "overview": "Researchers on the undersea lab Aquatica have genetically altered the brains of captive sharks to develop a cure for Alzheimer's disease. But there's an unexpected side effect: the sharks got smarter, faster, and more dangerous. After a big storm damages their remote research facility, they must fight for their lives.",
+        "popularity": 8.1076,
+        "poster_path": "/fyn0zyCI4kIlbDoHH0Hzv09hDC5.jpg",
+        "release_date": "1999-07-28",
+        "softcore": false,
+        "video": false,
+        "vote_average": 5.999,
+        "vote_count": 2694
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/b8hPBW0NJmiIVzvQjT3CwIpAdzl.jpg",
+        "genre_ids": [
+          16,
+          12,
+          10751,
+          18,
+          37
+        ],
+        "id": 9023,
+        "title": "Spirit: Stallion of the Cimarron",
+        "original_language": "en",
+        "original_title": "Spirit: Stallion of the Cimarron",
+        "overview": "A captured mustang remains determined to return to his herd no matter what.",
+        "popularity": 9.7816,
+        "poster_path": "/jTS4o0Yj1RoA2OGzl8USZyAJqYK.jpg",
+        "release_date": "2002-05-24",
+        "softcore": false,
+        "video": false,
+        "vote_average": 7.705,
+        "vote_count": 4968
+      },
+      {
+        "adult": false,
+        "backdrop_path": "/7n6RzJfPGnSGsHidO2gUWYgs1TT.jpg",
+        "genre_ids": [
+          28,
+          12,
+          878,
+          14
+        ],
+        "id": 9070,
+        "title": "Mighty Morphin Power Rangers: The Movie",
+        "original_language": "en",
+        "original_title": "Mighty Morphin Power Rangers: The Movie",
+        "overview": "Six incredible teens out-maneuver and defeat evil everywhere as the Mighty Morphin Power Rangers, but this time the Power Rangers may have met their match when they face off with Ivan Ooze, the most sinister monster the galaxy has ever seen.",
+        "popularity": 2.9012,
+        "poster_path": "/pcLbHqs80dchv0byHivhdwHKEup.jpg",
+        "release_date": "1995-06-30",
+        "softcore": false,
+        "video": false,
+        "vote_average": 5.889,
+        "vote_count": 776
+      }
+    ],
+    "total_pages": 2746,
+    "total_results": 54905
+  }
+}

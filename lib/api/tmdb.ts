@@ -1,4 +1,6 @@
 import type { MovieDetail, ResultItem } from '../../types/content';
+import { cachedRequest } from './requestCache';
+import { pickRandomEraWindow, type EraWindow } from './discogs';
 
 const API_KEY = process.env.EXPO_PUBLIC_TMDB_API_KEY;
 const BASE_URL = 'https://api.themoviedb.org/3';
@@ -10,6 +12,7 @@ type TMDBMovie = {
   overview: string;
   release_date: string;
   vote_average: number;
+  vote_count?: number;
   poster_path: string | null;
   backdrop_path: string | null;
   genre_ids?: number[];
@@ -29,9 +32,20 @@ async function tmdb<T>(path: string, params: Record<string, string | number> = {
   const url = new URL(`${BASE_URL}${path}`);
   url.searchParams.set('api_key', requireKey());
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`TMDB ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  const cacheKey = `tmdb:${path}?${cacheableQuery(url)}`;
+  return cachedRequest(cacheKey, async () => {
+    const res = await fetch(url.toString());
+    if (!res.ok) throw new Error(`TMDB ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
+  });
+}
+
+/** Cache key without the credential, so a rotated key does not miss. */
+function cacheableQuery(url: URL): string {
+  const params = new URLSearchParams(url.searchParams);
+  params.delete('api_key');
+  params.sort();
+  return params.toString();
 }
 
 export function posterUrl(path: string | null, size: 'w342' | 'w500' | 'original' = 'w500') {
@@ -46,7 +60,24 @@ function toResultItem(m: TMDBMovie): ResultItem {
     subtitle: year,
     meta: m.vote_average ? `★ ${m.vote_average.toFixed(1)}` : '',
     imageUrl: posterUrl(m.poster_path),
+    traits: movieTraits(m),
   };
+}
+
+/**
+ * TMDB returns `genre_ids` on search/discover rows and a richer `genres` array
+ * on detail rows. Map either back to the labels the filter UI uses so a
+ * rejection can be turned into a `without_genres` query later.
+ */
+function movieTraits(m: TMDBMovie): string[] | undefined {
+  const ids = m.genres?.length
+    ? m.genres.map((genre) => genre.id)
+    : m.genre_ids ?? [];
+  if (ids.length === 0) return undefined;
+  const labels = ids
+    .map((id) => TMDB_GENRE_LABELS.get(id))
+    .filter((label): label is string => label !== undefined);
+  return labels.length > 0 ? labels : undefined;
 }
 
 export async function searchMovies(query: string, page = 1): Promise<ResultItem[]> {
@@ -59,15 +90,118 @@ export async function searchMovies(query: string, page = 1): Promise<ResultItem[
   return data.results.slice(0, 5).map(toResultItem);
 }
 
-export async function randomMovies(): Promise<ResultItem[]> {
-  const page = Math.floor(Math.random() * 20) + 1;
-  const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', {
+export type RandomMovieParams = {
+  page?: number;
+  withoutGenres?: string[];
+  /** Injectable so a test can pin the decade rather than roll for it. */
+  era?: EraWindow;
+};
+
+/**
+ * Six decades, evenly weighted, from 1970.
+ *
+ * Film's canon travels better than pop music's — a 1974 film is a far easier
+ * recommendation than a 1974 single — so this reaches back further than the
+ * music equivalent. Move `yearFrom` on the first entry to retune.
+ */
+export const MOVIE_ERA_WINDOWS: readonly EraWindow[] = [
+  { yearFrom: 1970, yearTo: 1979, weight: 1 },
+  { yearFrom: 1980, yearTo: 1989, weight: 1 },
+  { yearFrom: 1990, yearTo: 1999, weight: 1 },
+  { yearFrom: 2000, yearTo: 2009, weight: 1 },
+  { yearFrom: 2010, yearTo: 2019, weight: 1 },
+  { yearFrom: 2020, yearTo: new Date().getFullYear(), weight: 1 },
+];
+
+export async function randomMovies(
+  params: RandomMovieParams = {}
+): Promise<ResultItem[]> {
+  // The result set is scoped to one decade now, so deep pages are often empty.
+  const page = params.page ?? Math.floor(Math.random() * 5) + 1;
+  // Without a date window this was `popularity.desc` over the whole catalogue —
+  // and TMDB popularity is a *current* metric, so it returned whatever is out
+  // this week, every time. Hence nothing but 2025 and 2026.
+  const era = params.era ?? pickRandomEraWindow(Math.random, MOVIE_ERA_WINDOWS);
+  const q: Record<string, string | number> = {
     sort_by: 'popularity.desc',
     page,
     include_adult: 'false',
-  });
+    'primary_release_date.gte': `${era.yearFrom}-01-01`,
+    'primary_release_date.lte': `${era.yearTo}-12-31`,
+    // Spreading the years surfaces the long tail, so require enough votes that
+    // a pick is at least a film somebody has seen.
+    'vote_count.gte': 200,
+  };
+  // `popularity.desc` is why rejecting one superhero film used to hand back
+  // another: the blockbusters TMDB sorts to the top are heavily one genre.
+  // Excluding damped genres at the query level actually removes them from the
+  // result set rather than filtering an already-narrow page.
+  const withoutGenreIds = toGenreIds(params.withoutGenres);
+  if (withoutGenreIds) q.without_genres = withoutGenreIds;
+  const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', q);
   const shuffled = [...data.results].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, 5).map(toResultItem);
+}
+
+/** How far back "new" reaches. A season, not a week — see `freshMovies`. */
+export const FRESH_MOVIE_WINDOW_DAYS = 120;
+/**
+ * Far below the 200 randomise uses. A film out for three weeks has not had
+ * time to collect votes, so the usual floor would exclude everything actually
+ * new; this only has to exclude entries with no audience at all.
+ */
+export const FRESH_MOVIE_MIN_VOTES = 20;
+
+function isoDate(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+export type FreshMovieParams = {
+  page?: number;
+  withoutGenres?: string[];
+  /** Injectable so a test can pin the window without mocking the clock. */
+  now?: Date;
+};
+
+/**
+ * Recent cinema and streaming releases, newest first.
+ *
+ * `/movie/now_playing` looks like the obvious endpoint and is the wrong one:
+ * it is scoped to a region, runs only a couple of pages deep, carries no vote
+ * floor, and takes no `without_genres` — so "Not for me" could not steer it.
+ * A date-windowed discover query keeps all of that.
+ */
+export async function freshMovies(
+  params: FreshMovieParams = {}
+): Promise<ResultItem[]> {
+  const now = params.now ?? new Date();
+  const from = new Date(now.getTime() - FRESH_MOVIE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const q: Record<string, string | number> = {
+    sort_by: 'primary_release_date.desc',
+    page: params.page ?? 1,
+    include_adult: 'false',
+    'primary_release_date.gte': isoDate(from),
+    // Without an upper bound, sorting by date descending returns films that
+    // have not come out yet — announced dates run years ahead.
+    'primary_release_date.lte': isoDate(now),
+    'vote_count.gte': FRESH_MOVIE_MIN_VOTES,
+    // Theatrical and digital. Excludes festival-only and physical-media
+    // entries, which are dated by a release nobody could have watched.
+    with_release_type: '2|3',
+  };
+  const withoutGenreIds = toGenreIds(params.withoutGenres);
+  if (withoutGenreIds) q.without_genres = withoutGenreIds;
+  const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', q);
+  return data.results.slice(0, 5).map(toResultItem);
+}
+
+/** Maps filter labels to a TMDB `with_genres`/`without_genres` value. */
+function toGenreIds(labels?: readonly string[]): string | undefined {
+  if (!labels?.length) return undefined;
+  const ids = labels
+    .map((label) => TMDB_GENRES[label])
+    .filter((id): id is number => typeof id === 'number');
+  return ids.length > 0 ? ids.join(',') : undefined;
 }
 
 export type MovieFilterParams = {
@@ -76,6 +210,8 @@ export type MovieFilterParams = {
   yearTo?: number;
   minRating?: number;
   language?: string;
+  page?: number;
+  withoutGenres?: string[];
 };
 
 export async function filterMovies(params: MovieFilterParams): Promise<ResultItem[]> {
@@ -83,13 +219,20 @@ export async function filterMovies(params: MovieFilterParams): Promise<ResultIte
     sort_by: 'popularity.desc',
     include_adult: 'false',
     'vote_count.gte': 50,
-    page: Math.floor(Math.random() * 5) + 1,
+    page: params.page ?? Math.floor(Math.random() * 5) + 1,
   };
   if (params.genreIds?.length) q.with_genres = params.genreIds.join('|');
   if (params.yearFrom) q['primary_release_date.gte'] = `${params.yearFrom}-01-01`;
   if (params.yearTo) q['primary_release_date.lte'] = `${params.yearTo}-12-31`;
   if (params.minRating) q['vote_average.gte'] = params.minRating;
   if (params.language) q.with_original_language = params.language;
+  // An explicitly chosen genre wins over a damped one — the user asking for
+  // Action right now outranks having skipped Action before.
+  const requested = new Set(params.genreIds ?? []);
+  const withoutGenreIds = toGenreIds(
+    params.withoutGenres?.filter((label) => !requested.has(TMDB_GENRES[label]))
+  );
+  if (withoutGenreIds) q.without_genres = withoutGenreIds;
   const data = await tmdb<TMDBPaged<TMDBMovie>>('/discover/movie', q);
   return data.results.slice(0, 5).map(toResultItem);
 }
@@ -155,6 +298,14 @@ export const TMDB_GENRES: Record<string, number> = {
   Thriller: 53,
   Western: 37,
 };
+
+/**
+ * Reverse of TMDB_GENRES. Ids TMDB returns but the filter UI has no label for
+ * (Family, Music, War, …) are simply absent, so they never become traits.
+ */
+const TMDB_GENRE_LABELS: ReadonlyMap<number, string> = new Map(
+  Object.entries(TMDB_GENRES).map(([label, id]) => [id, label])
+);
 
 export const TMDB_LANGUAGES: Record<string, string> = {
   English: 'en',

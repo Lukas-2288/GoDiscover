@@ -1,0 +1,115 @@
+{
+  "describe": "Discogs master search for the Chappell Roan regression seed",
+  "recordedAt": "2026-07-29T14:02:12.463Z",
+  "body": {
+    "pagination": {
+      "page": 1,
+      "pages": 1,
+      "per_page": 5,
+      "items": 2,
+      "urls": {}
+    },
+    "results": [
+      {
+        "country": "Worldwide",
+        "year": "2025",
+        "format": [
+          "File",
+          "FLAC",
+          "Single"
+        ],
+        "label": [
+          "Island Records",
+          "KRA International Inc.",
+          "KRA International Inc."
+        ],
+        "type": "master",
+        "genre": [
+          "Folk, World, & Country"
+        ],
+        "style": [
+          "Country"
+        ],
+        "id": 3787853,
+        "barcode": [],
+        "user_data": {
+          "in_wantlist": false,
+          "in_collection": false
+        },
+        "master_id": 3787853,
+        "master_url": "https://api.discogs.com/masters/3787853",
+        "uri": "/master/3787853-Chappell-Roan-The-Giver",
+        "catno": "none",
+        "title": "Chappell Roan - The Giver",
+        "thumb": "https://i.discogs.com/ZmDZ4079EjeoDeky5PvxvvaCE11ETWqwz5cBrkJp2uw/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTMzNDEx/MTczLTE3NDE5ODk4/MzMtNjc5My5qcGVn.jpeg",
+        "cover_image": "https://i.discogs.com/fHwFcLKgDUsuDdFEwDrokMZ4ZJ531MJhNUL1Mk-K19w/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTMzNDEx/MTczLTE3NDE5ODk4/MzMtNjc5My5qcGVn.jpeg",
+        "resource_url": "https://api.discogs.com/masters/3787853",
+        "community": {
+          "want": 2337,
+          "have": 19583
+        }
+      },
+      {
+        "country": "US",
+        "year": "2025",
+        "format": [
+          "Vinyl",
+          "7\"",
+          "45 RPM",
+          "Record Store Day",
+          "Single",
+          "Stereo"
+        ],
+        "label": [
+          "Island Records",
+          "Amusement Records",
+          "KRA International Inc.",
+          "KRA International Inc.",
+          "Island Records",
+          "UMG Recordings, Inc.",
+          "UMG Commercial Services",
+          "Sterling Sound Nashville",
+          "Conectiv, Guadalajara, Mexico",
+          "Conectiv, Guadalajara, Mexico"
+        ],
+        "type": "master",
+        "genre": [
+          "Pop",
+          "Folk, World, & Country"
+        ],
+        "style": [
+          "Country",
+          "Alt-Pop"
+        ],
+        "id": 4051780,
+        "barcode": [
+          "6 02478 63857 2",
+          "602478638572",
+          "BFRSD2024",
+          "602478638572-A",
+          "602478638572-B",
+          "602478638572-A (1) JN-H STERLING (1304243) 01010205",
+          "602478638572-B (1) JN-H STERLING (1304244) 01010207",
+          "602478638572-A (1) (1304243) 01010112 JN-H STERLING ",
+          "(1304244) 01010205 602478638572-B (1) JN-H STERLING"
+        ],
+        "user_data": {
+          "in_wantlist": false,
+          "in_collection": false
+        },
+        "master_id": 4051780,
+        "master_url": "https://api.discogs.com/masters/4051780",
+        "uri": "/master/4051780-Chappell-Roan-The-Subway-The-Giver",
+        "catno": "602478638572",
+        "title": "Chappell Roan - The Subway / The Giver",
+        "thumb": "https://i.discogs.com/aO2joZyzhE6zEKz-c2AwbkgZh0_qap_7nTAIFk9HmOI/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM1NzIz/ODQ1LTE3NjQ0MzY3/NzMtMzg0MS5qcGVn.jpeg",
+        "cover_image": "https://i.discogs.com/EqE-gzzdYwXYSd4bhretsyaBpcx80az2PwTqlunVYbI/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTM1NzIz/ODQ1LTE3NjQ0MzY3/NzMtMzg0MS5qcGVn.jpeg",
+        "resource_url": "https://api.discogs.com/masters/4051780",
+        "community": {
+          "want": 867,
+          "have": 8085
+        }
+      }
+    ]
+  }
+}
